@@ -6,12 +6,20 @@ use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::thread;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::time::Duration;
 use tauri::Manager;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
 mod updater;
+
+const TRAY_MENU_SHOW_MAIN: &str = "tray_show_main";
+const TRAY_MENU_QUIT_APP: &str = "tray_quit_app";
+static APP_EXIT_REQUESTED: AtomicBool = AtomicBool::new(false);
+static CLOSE_TO_TRAY_ON_CLOSE: AtomicBool = AtomicBool::new(false);
 
 #[tauri::command]
 async fn service_initialize(addr: Option<String>) -> Result<serde_json::Value, String> {
@@ -459,6 +467,17 @@ async fn open_in_browser(url: String) -> Result<(), String> {
   .map_err(|err| format!("open_in_browser task failed: {err}"))?
 }
 
+#[tauri::command]
+fn app_close_to_tray_on_close_get() -> bool {
+  CLOSE_TO_TRAY_ON_CLOSE.load(Ordering::Relaxed)
+}
+
+#[tauri::command]
+fn app_close_to_tray_on_close_set(enabled: bool) -> bool {
+  CLOSE_TO_TRAY_ON_CLOSE.store(enabled, Ordering::Relaxed);
+  enabled
+}
+
 fn open_in_browser_blocking(url: &str) -> Result<(), String> {
   if cfg!(target_os = "windows") {
     let status = std::process::Command::new("rundll32.exe")
@@ -477,7 +496,7 @@ fn open_in_browser_blocking(url: &str) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  tauri::Builder::default()
+  let app = tauri::Builder::default()
     .setup(|app| {
       load_env_from_exe_dir();
       apply_runtime_storage_env(app.handle());
@@ -492,12 +511,25 @@ pub fn run() {
       if let Ok(log_dir) = app.path().app_log_dir() {
         log::info!("log dir: {}", log_dir.display());
       }
+      setup_tray(app.handle())?;
 
       Ok(())
     })
-    .on_window_event(|_window, event| {
-      if let tauri::WindowEvent::CloseRequested { .. } = event {
-        stop_service();
+    .on_window_event(|window, event| {
+      if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        if APP_EXIT_REQUESTED.load(Ordering::Relaxed) {
+          return;
+        }
+        if !CLOSE_TO_TRAY_ON_CLOSE.load(Ordering::Relaxed) {
+          return;
+        }
+        api.prevent_close();
+        if let Err(err) = window.hide() {
+          log::warn!("hide window to tray failed: {}", err);
+        } else {
+          log::info!("window close intercepted; app hidden to tray");
+        }
+        return;
       }
       if let tauri::WindowEvent::Destroyed = event {
         stop_service();
@@ -544,14 +576,75 @@ pub fn run() {
       service_apikey_disable,
       service_apikey_enable,
       open_in_browser,
+      app_close_to_tray_on_close_get,
+      app_close_to_tray_on_close_set,
       updater::app_update_check,
       updater::app_update_prepare,
       updater::app_update_apply_portable,
       updater::app_update_launch_installer,
       updater::app_update_status
     ])
-    .run(tauri::generate_context!())
-    .expect("error while running tauri application");
+    .build(tauri::generate_context!())
+    .expect("error while building tauri application");
+
+  app.run(|app_handle, event| match event {
+    tauri::RunEvent::ExitRequested { .. } => {
+      APP_EXIT_REQUESTED.store(true, Ordering::Relaxed);
+      stop_service();
+    }
+    #[cfg(target_os = "macos")]
+    tauri::RunEvent::Reopen { .. } => {
+      show_main_window(app_handle);
+    }
+    _ => {}
+  });
+}
+
+fn setup_tray(app: &tauri::AppHandle) -> Result<(), tauri::Error> {
+  let show_main = MenuItem::with_id(app, TRAY_MENU_SHOW_MAIN, "显示主窗口", true, None::<&str>)?;
+  let quit = MenuItem::with_id(app, TRAY_MENU_QUIT_APP, "退出", true, None::<&str>)?;
+  let menu = Menu::with_items(app, &[&show_main, &quit])?;
+  let mut tray = TrayIconBuilder::with_id("main-tray")
+    .menu(&menu)
+    .show_menu_on_left_click(false)
+    .on_menu_event(|app, event| match event.id().as_ref() {
+      TRAY_MENU_SHOW_MAIN => {
+        show_main_window(app);
+      }
+      TRAY_MENU_QUIT_APP => {
+        APP_EXIT_REQUESTED.store(true, Ordering::Relaxed);
+        stop_service();
+        app.exit(0);
+      }
+      _ => {}
+    })
+    .on_tray_icon_event(|tray, event| {
+      if let TrayIconEvent::Click {
+        button: MouseButton::Left,
+        button_state: MouseButtonState::Up,
+        ..
+      } = event
+      {
+        show_main_window(&tray.app_handle());
+      }
+    });
+  if let Some(icon) = app.default_window_icon() {
+    tray = tray.icon(icon.clone());
+  }
+  tray.build(app)?;
+  Ok(())
+}
+
+fn show_main_window(app: &tauri::AppHandle) {
+  let Some(window) = app.get_webview_window("main") else {
+    return;
+  };
+  if let Err(err) = window.show() {
+    log::warn!("show main window failed: {}", err);
+    return;
+  }
+  let _ = window.unminimize();
+  let _ = window.set_focus();
 }
 
 fn load_env_from_exe_dir() {

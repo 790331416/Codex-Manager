@@ -12,6 +12,7 @@ export const dom = {
   serviceToggleText: byId("serviceToggleText"),
   autoCheckUpdate: byId("autoCheckUpdate"),
   checkUpdate: byId("checkUpdate"),
+  closeToTrayOnClose: byId("closeToTrayOnClose"),
   updateCurrentVersion: byId("updateCurrentVersion"),
   updateStatusText: byId("updateStatusText"),
   routeStrategySelect: byId("routeStrategySelect"),

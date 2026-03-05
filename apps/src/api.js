@@ -591,6 +591,22 @@ export async function openInBrowser(url) {
   return invoke("open_in_browser", { url });
 }
 
+export async function appCloseToTrayOnCloseGet() {
+  if (!isTauriRuntime()) {
+    return false;
+  }
+  const value = await invoke("app_close_to_tray_on_close_get", {});
+  return value === true;
+}
+
+export async function appCloseToTrayOnCloseSet(enabled) {
+  if (!isTauriRuntime()) {
+    return false;
+  }
+  const value = await invoke("app_close_to_tray_on_close_set", { enabled: Boolean(enabled) });
+  return value === true;
+}
+
 // 应用更新
 export async function updateCheck() {
   if (!isTauriRuntime()) {
