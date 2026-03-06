@@ -14,9 +14,15 @@ A local desktop + service toolkit for managing a Codex-compatible ChatGPT accoun
 
 ## Recent Changes
 ### 2026-03-06 (v0.1.5, latest)
+- Further aligned the gateway protocol adapter with Codex CLI: both `/v1/chat/completions` and `/v1/responses` now converge on Codex `responses` semantics, with upstream streaming/non-streaming behavior closer to the official implementation and better compatibility for OpenAI-style clients such as Cherry Studio.
+- Fixed `tool_calls` / `tools` regressions: preserved tool calls in the chat aggregation path and completed the tool-name shortening + response restoration chain, preventing dropped or mismatched tool calls in OpenAI-compatible JSON, streaming deltas, and adapter conversions.
+- Improved OpenClaw / Anthropic-compatible response adaptation so tool calls, SSE deltas, and non-stream JSON payloads are restored correctly in compatible formats.
 - Added "Import by Folder": the desktop app can now pick a directory, recursively scan `.json` files inside it, and bulk-import accounts.
-- Reworked the top area of the Settings page into a consistent three-column row layout, with the upstream proxy row aligned to the same pattern.
-- OpenAI upstream proxy settings remain directly editable in Settings and still apply immediately after saving.
+- Added direct OpenAI upstream proxy configuration and the header-compaction toggle in Settings; both apply immediately after saving and help reduce some Cloudflare / WAF challenge hits.
+- Reworked the top area of the Settings page into a consistent three-column row layout, aligned the upstream proxy row to the same pattern, and added support for minimizing to the system tray on window close.
+- Expanded request-log tracing with original path, adapted path, and more context so `/v1/chat/completions -> /v1/responses` forwarding and protocol-adapter issues are easier to diagnose.
+- Consolidated release automation into a single one-click multi-platform workflow with the order `Windows -> macOS -> Linux`; asset outputs were also simplified, with portable exe on Windows and DMG-based distribution on macOS.
+- Added and fixed the chat-tools probe script so tool-call hit behavior can be verified locally.
 
 ### 2026-03-03 (v0.1.4)
 - Consolidated account action buttons into a single "Account Actions" dropdown to reduce toolbar clutter.
