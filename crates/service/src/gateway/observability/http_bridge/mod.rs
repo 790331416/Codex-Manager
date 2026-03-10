@@ -1,8 +1,6 @@
 use tiny_http::{Header, Request};
 
-#[path = "http_bridge/aggregate/mod.rs"]
 mod aggregate;
-#[path = "http_bridge/openai/mod.rs"]
 mod openai;
 use aggregate::{
     append_output_text, collect_non_stream_json_from_sse_bytes,
@@ -42,9 +40,7 @@ fn push_trace_id_header(headers: &mut Vec<Header>, trace_id: &str) {
     }
 }
 
-#[path = "http_bridge/delivery.rs"]
 mod delivery;
-#[path = "http_bridge/stream_readers.rs"]
 mod stream_readers;
 pub(super) fn respond_with_upstream(
     request: Request,
@@ -71,5 +67,5 @@ pub(super) use stream_readers::{
 };
 
 #[cfg(test)]
-#[path = "tests/http_bridge_tests.rs"]
+#[path = "../tests/http_bridge_tests.rs"]
 mod tests;

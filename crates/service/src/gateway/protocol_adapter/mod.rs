@@ -162,5 +162,5 @@ pub(super) fn reload_env_dependent_state() {
 }
 
 #[cfg(test)]
-#[path = "protocol_adapter/tests/protocol_adapter_tests.rs"]
+#[path = "tests/protocol_adapter_tests.rs"]
 mod tests;
