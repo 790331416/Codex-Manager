@@ -1,6 +1,6 @@
 use super::sticky_ids::random_session_id;
 
-pub(super) const CODEX_CLIENT_VERSION: &str = "0.101.0";
+pub(crate) const CODEX_CLIENT_VERSION: &str = "0.101.0";
 pub(super) const CODEX_USER_AGENT: &str =
     "codex_cli_rs/0.101.0 (Mac OS 26.0.1; arm64) Apple_Terminal/464";
 const CODEX_OPENAI_BETA: &str = "responses=experimental";

@@ -513,6 +513,100 @@ fn gateway_models_returns_cached_without_upstream() {
 }
 
 #[test]
+fn apikey_models_refresh_includes_client_version_query() {
+    let _lock = lock_env();
+    let dir = new_test_dir("codexmanager-apikey-models-client-version");
+    let db_path: PathBuf = dir.join("codexmanager.db");
+
+    let _db_guard = EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
+
+    let upstream_body = serde_json::json!({
+        "models": [
+            { "slug": "gpt-5.3-codex", "display_name": "GPT-5.3 Codex" }
+        ]
+    })
+    .to_string();
+    let (upstream_addr, upstream_rx, upstream_join) =
+        start_mock_upstream_once_with_content_type(&upstream_body, "application/json");
+    let upstream_base = format!("http://{upstream_addr}/backend-api/codex");
+    let _upstream_guard = EnvGuard::set("CODEXMANAGER_UPSTREAM_BASE_URL", &upstream_base);
+
+    let storage = Storage::open(&db_path).expect("open db");
+    storage.init().expect("init db");
+    let now = now_ts();
+
+    storage
+        .insert_account(&Account {
+            id: "acc_models_client_version".to_string(),
+            label: "models-client-version".to_string(),
+            issuer: "https://auth.openai.com".to_string(),
+            chatgpt_account_id: Some("chatgpt_models_client_version".to_string()),
+            workspace_id: None,
+            group_name: None,
+            sort: 0,
+            status: "active".to_string(),
+            created_at: now,
+            updated_at: now,
+        })
+        .expect("insert account");
+    storage
+        .insert_token(&Token {
+            account_id: "acc_models_client_version".to_string(),
+            id_token: String::new(),
+            access_token: "access_token_models_client_version".to_string(),
+            refresh_token: String::new(),
+            api_key_access_token: Some("api_access_token_models_client_version".to_string()),
+            last_refresh: now,
+        })
+        .expect("insert token");
+
+    let server = codexmanager_service::start_one_shot_server().expect("start server");
+    let request_body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "apikey/models",
+        "params": { "refreshRemote": true }
+    })
+    .to_string();
+    let (status, response_body) = post_http_raw(
+        &server.addr,
+        "/rpc",
+        &request_body,
+        &[
+            ("Content-Type", "application/json"),
+            (
+                "X-CodexManager-Rpc-Token",
+                codexmanager_service::rpc_auth_token(),
+            ),
+        ],
+    );
+    server.join();
+    assert_eq!(status, 200, "rpc response: {response_body}");
+
+    let value: serde_json::Value =
+        serde_json::from_str(&response_body).expect("parse rpc response body");
+    assert!(
+        value.get("error").is_none(),
+        "rpc returned error: {response_body}"
+    );
+    let items = value
+        .get("result")
+        .and_then(|v| v.get("items"))
+        .and_then(|v| v.as_array())
+        .expect("models items array");
+    assert_eq!(items.len(), 1, "unexpected rpc result: {response_body}");
+
+    let captured = upstream_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("receive upstream request");
+    upstream_join.join().expect("join upstream");
+    assert_eq!(
+        captured.path,
+        "/backend-api/codex/models?client_version=0.101.0"
+    );
+}
+
+#[test]
 fn gateway_chatgpt_primary_preserves_turn_state_headers_without_openai_fallback() {
     let _lock = lock_env();
     let dir = new_test_dir("codexmanager-gateway-chatgpt-primary-turn-state");
