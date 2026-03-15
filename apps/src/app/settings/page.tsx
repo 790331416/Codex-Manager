@@ -505,7 +505,8 @@ export default function SettingsPage() {
                   </SelectContent>
                 </Select>
                 <p className="text-[10px] text-muted-foreground">
-                  顺序优先：始终尝试第一个可用账号；均衡轮询：在可用账号间平均分配。
+                  顺序优先：按账号候选顺序优先尝试，默认只会在头部小窗口内按健康度做轻微换头；
+                  均衡轮询：按“平台密钥 + 模型”维度严格轮询可用账号，默认不做健康度换头。
                 </p>
               </div>
 

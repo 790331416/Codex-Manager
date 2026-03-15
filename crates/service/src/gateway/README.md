@@ -84,6 +84,12 @@
 - request gate
 - route quality / hint
 
+关键文件：
+
+- `routing/selection.rs`
+- `routing/route_hint.rs`
+- `routing/route_quality.rs`
+
 ### `upstream/`
 
 负责：
@@ -103,6 +109,75 @@
 3. `auth/` / `upstream/` 组装并发送上游请求
 4. `protocol_adapter/` 转换输入输出
 5. `observability/` 写入 trace、日志和指标
+
+## 账号选路策略
+
+设置入口：
+
+- 前端 `appSettings.routeStrategy`
+- 持久化键 `gateway.route_strategy`
+- 环境变量 `CODEXMANAGER_ROUTE_STRATEGY`
+
+后端接受的规范值只有两个：
+
+- `ordered`
+- `balanced`
+
+兼容别名：
+
+- `round_robin`
+- `round-robin`
+- `rr`
+
+注意：
+
+- 后端会把以上轮询别名统一归一化为 `balanced`
+- 如果未配置 `CODEXMANAGER_ROUTE_STRATEGY`，默认策略是 `balanced`
+
+候选池基础顺序：
+
+- 候选账号先由 `Storage::list_gateway_candidates()` 选出
+- 初始顺序按 `account.sort ASC, account.updated_at DESC` 排列
+- 也就是说，`ordered` 的“顺序”首先来自账号排序值，而不是随机顺序
+
+额外覆盖规则：
+
+- 如果设置了手动指定账号（manual preferred account），会先把该账号旋转到队首
+- 只要该账号仍在可用候选池内，就会覆盖普通 `ordered / balanced` 轮转逻辑
+- 如果该账号已不可用或不在候选池，会自动回退到常规策略
+
+### `ordered`
+
+行为：
+
+- 不做 round-robin 轮转，直接沿用候选池当前顺序
+- 默认启用健康度 P2C 小窗口换头，窗口默认值为 `3`
+- 也就是说，头部候选仍可能被“更健康”的前几个候选之一替换到第一位
+
+适用理解：
+
+- 更接近“按账号优先级优先尝试”
+- 不是“永远固定命中第一个账号”
+
+### `balanced`
+
+行为：
+
+- 以 `key_id + model` 作为维度维护独立轮询状态
+- 每次请求会推进该维度的起始索引，实现严格 round-robin
+- 默认健康度窗口为 `1`，因此默认不会发生健康度换头
+- 只有显式调大 `CODEXMANAGER_ROUTE_HEALTH_P2C_BALANCED_WINDOW` 时，才会在轮询头部附近引入健康度挑战者
+
+适用理解：
+
+- 更接近“同一平台密钥、同一模型下的均衡轮询”
+- 不同 key、不同模型之间的轮询状态互相隔离
+
+### 可观测性
+
+- 候选池最终顺序会在错误 trace 中以 `CANDIDATE_POOL` 事件记录
+- 记录字段包含 `strategy` 与 `ordered_candidates`
+- 关键入口见 `upstream/proxy_pipeline/request_setup.rs` 和 `observability/trace_log.rs`
 
 ## 修改建议
 
