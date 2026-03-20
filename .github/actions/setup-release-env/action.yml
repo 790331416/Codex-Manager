@@ -32,6 +32,10 @@ inputs:
     description: Shared rust-cache key.
     required: false
     default: release-all-platforms-rust-stable-v1
+  enable-rust-cache:
+    description: Enable rust-cache for Cargo registry and related caches.
+    required: false
+    default: "true"
 
 runs:
   using: composite
@@ -70,6 +74,7 @@ runs:
         targets: ${{ inputs.rust-target }}
 
     - name: Cache Rust dependencies
+      if: ${{ inputs.enable-rust-cache == 'true' }}
       uses: Swatinem/rust-cache@v2
       with:
         shared-key: ${{ inputs.rust-cache-shared-key }}

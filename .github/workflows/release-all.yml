@@ -56,10 +56,6 @@ jobs:
         working-directory: apps
         run: pnpm install --frozen-lockfile
 
-      - name: Warm Tauri CLI cache
-        working-directory: apps
-        run: pnpm store add @tauri-apps/cli@${{ env.TAURI_CLI_VERSION }}
-
       - name: Rust tests
         run: cargo test --workspace
 
@@ -100,6 +96,9 @@ jobs:
 
       - name: Setup release environment
         uses: ./.github/actions/setup-release-env
+        with:
+          enable-pnpm-cache: "false"
+          enable-rust-cache: "false"
 
       - name: Prepare frontend dist
         uses: ./.github/actions/prepare-frontend-dist
@@ -211,6 +210,8 @@ jobs:
         uses: ./.github/actions/setup-release-env
         with:
           rust-target: ${{ matrix.rust_target }}
+          enable-pnpm-cache: "false"
+          enable-rust-cache: "false"
 
       - name: Prepare frontend dist
         uses: ./.github/actions/prepare-frontend-dist
@@ -353,6 +354,9 @@ jobs:
 
       - name: Setup release environment
         uses: ./.github/actions/setup-release-env
+        with:
+          enable-pnpm-cache: "false"
+          enable-rust-cache: "false"
 
       - name: Install Linux dependencies
         run: |
