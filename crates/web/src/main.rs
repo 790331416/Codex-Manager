@@ -303,6 +303,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::to_bytes;
 
     #[test]
     fn web_auth_cookie_is_scoped_by_process_session_key() {
@@ -358,5 +359,26 @@ mod tests {
             browser_open_addr("192.168.1.8:48761").as_deref(),
             Some("192.168.1.8:48761")
         );
+    }
+
+    #[tokio::test]
+    async fn runtime_info_reports_web_gateway_capabilities() {
+        let response = runtime_info().await.into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("read runtime response body");
+        let payload: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("parse runtime response json");
+
+        assert_eq!(payload["mode"], "web-gateway");
+        assert_eq!(payload["rpcBaseUrl"], "/api/rpc");
+        assert_eq!(payload["canManageService"], false);
+        assert_eq!(payload["canSelfUpdate"], false);
+        assert_eq!(payload["canCloseToTray"], false);
+        assert_eq!(payload["canOpenLocalDir"], false);
+        assert_eq!(payload["canUseBrowserFileImport"], true);
+        assert_eq!(payload["canUseBrowserDownloadExport"], true);
     }
 }
