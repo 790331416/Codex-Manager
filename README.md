@@ -155,6 +155,13 @@
 
 ## 赞助支持
 
+感谢每一位支持 CodexManager 的朋友。因为有你们的赞助与捐赠，项目才能持续迭代、稳定维护。
+
+特别感谢方木木、[Wonderdch](https://github.com/Wonderdch)、Catch_Bat 对项目的支持。
+
+- 方木木：感谢提供 token 支持。他的 GPT 卡网支持自助购买、自助兑换激活，稳定不到车，质保 30 天，支持 Codex 5.4。官网：[https://www.aixiamo.com/](https://www.aixiamo.com/)
+- 捐赠鸣谢：[Wonderdch](https://github.com/Wonderdch)、Catch_Bat
+
 如果这个项目对你有帮助，欢迎请作者喝杯咖啡，支持后续维护与更新。
 
 <p align="left">

@@ -145,6 +145,13 @@ A local desktop + service toolkit for managing Codex-compatible accounts, usage,
 
 ## Sponsor
 
+Thanks to everyone supporting CodexManager. Your sponsorship and donations help keep the project actively maintained and steadily improved.
+
+Special thanks to Fang Mumu, [Wonderdch](https://github.com/Wonderdch), and Catch_Bat for their support.
+
+- Fang Mumu: thanks for providing token support for the project. His GPT card service supports self-service purchase and activation, offers stable access, a 30-day guarantee, and support for Codex 5.4. Website: [https://www.aixiamo.com/](https://www.aixiamo.com/)
+- Donation acknowledgements: [Wonderdch](https://github.com/Wonderdch), Catch_Bat
+
 If this project helps you, you are welcome to support its ongoing maintenance and updates.
 
 <p align="left">
