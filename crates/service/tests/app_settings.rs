@@ -866,6 +866,10 @@ fn loopback_service_addr_env_keeps_saved_bind_mode_effective() {
             codexmanager_service::listener_bind_addr("localhost:49760"),
             "0.0.0.0:49760"
         );
+        assert_eq!(
+            std::env::var("CODEXMANAGER_SERVICE_ADDR").ok().as_deref(),
+            Some("0.0.0.0:49760")
+        );
     });
 }
 
@@ -900,6 +904,33 @@ fn app_settings_set_service_listen_mode_overrides_loopback_env_snapshot() {
         assert_eq!(
             codexmanager_service::listener_bind_addr("localhost:49760"),
             "0.0.0.0:49760"
+        );
+    });
+}
+
+#[test]
+fn app_settings_set_service_listen_mode_can_switch_back_from_all_interfaces_snapshot() {
+    with_temp_db(|_| {
+        let _env = override_env_vars(&[("CODEXMANAGER_SERVICE_ADDR", Some("0.0.0.0:49760"))]);
+
+        let snapshot = codexmanager_service::app_settings_set(Some(&json!({
+            "serviceListenMode": "loopback"
+        })))
+        .expect("save service listen mode");
+
+        assert_eq!(
+            snapshot.get("serviceAddr").and_then(|value| value.as_str()),
+            Some("localhost:49760")
+        );
+        assert_eq!(
+            snapshot
+                .get("serviceListenMode")
+                .and_then(|value| value.as_str()),
+            Some(codexmanager_service::SERVICE_BIND_MODE_LOOPBACK)
+        );
+        assert_eq!(
+            std::env::var("CODEXMANAGER_SERVICE_ADDR").ok().as_deref(),
+            Some("localhost:49760")
         );
     });
 }

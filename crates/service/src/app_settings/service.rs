@@ -61,7 +61,7 @@ fn current_env_service_bind_mode() -> Option<String> {
         .unwrap_or(normalized.as_str());
     let mode = match host {
         "0.0.0.0" | "::" | "[::]" => SERVICE_BIND_MODE_ALL_INTERFACES,
-        "localhost" | "127.0.0.1" | "::1" | "[::1]" => return None,
+        "localhost" | "127.0.0.1" | "::1" | "[::1]" => SERVICE_BIND_MODE_LOOPBACK,
         _ => return None,
     };
     Some(mode.to_string())
@@ -79,11 +79,19 @@ pub fn current_service_bind_mode() -> String {
 pub fn set_service_bind_mode(mode: &str) -> Result<String, String> {
     let normalized = normalize_service_bind_mode(Some(mode)).to_string();
     save_persisted_app_setting(SERVICE_BIND_MODE_SETTING_KEY, Some(&normalized))?;
+    let current_addr = current_saved_service_addr();
+    let synced_addr = listener_bind_addr_for_mode(&current_addr, &normalized);
+    save_persisted_app_setting(APP_SETTING_SERVICE_ADDR_KEY, Some(&synced_addr))?;
+    std::env::set_var("CODEXMANAGER_SERVICE_ADDR", &synced_addr);
     Ok(normalized)
 }
 
 pub fn bind_all_interfaces_enabled() -> bool {
     current_service_bind_mode() == SERVICE_BIND_MODE_ALL_INTERFACES
+}
+
+pub fn bind_all_interfaces_enabled_for_mode(mode: &str) -> bool {
+    normalize_service_bind_mode(Some(mode)) == SERVICE_BIND_MODE_ALL_INTERFACES
 }
 
 pub fn default_listener_bind_addr() -> String {
@@ -126,15 +134,23 @@ pub fn default_web_listener_addr() -> String {
 }
 
 pub fn listener_bind_addr(addr: &str) -> String {
+    listener_bind_addr_for_mode(addr, &current_service_bind_mode())
+}
+
+pub fn listener_bind_addr_for_mode(addr: &str, bind_mode: &str) -> String {
     let trimmed = addr.trim();
     if trimmed.is_empty() {
-        return default_listener_bind_addr();
+        return if bind_all_interfaces_enabled_for_mode(bind_mode) {
+            DEFAULT_BIND_ADDR.to_string()
+        } else {
+            DEFAULT_ADDR.to_string()
+        };
     }
 
     let addr = trimmed.strip_prefix("http://").unwrap_or(trimmed);
     let addr = addr.strip_prefix("https://").unwrap_or(addr);
     let addr = addr.split('/').next().unwrap_or(addr);
-    let bind_all = bind_all_interfaces_enabled();
+    let bind_all = bind_all_interfaces_enabled_for_mode(bind_mode);
 
     if !addr.contains(':') {
         return if bind_all {

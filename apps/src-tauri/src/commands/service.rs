@@ -24,14 +24,14 @@ pub async fn service_initialize(
 pub async fn service_start(app: tauri::AppHandle, addr: String) -> Result<(), String> {
     let connect_addr = normalize_addr(&addr)?;
     apply_runtime_storage_env(&app);
-    let bind_addr = codexmanager_service::listener_bind_addr(&connect_addr);
+    let bind_mode = codexmanager_service::current_service_bind_mode();
+    let bind_addr = codexmanager_service::listener_bind_addr_for_mode(&connect_addr, &bind_mode);
     tauri::async_runtime::spawn_blocking(move || {
         log::info!(
             "service_start requested connect_addr={} bind_addr={}",
             connect_addr,
             bind_addr
         );
-        std::env::set_var("CODEXMANAGER_SERVICE_ADDR", &bind_addr);
         stop_service();
         spawn_service_with_addr(&app, &bind_addr, &connect_addr)?;
         wait_for_service_ready(&connect_addr, SERVICE_READY_RETRIES, SERVICE_READY_RETRY_DELAY).map_err(

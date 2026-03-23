@@ -25,11 +25,12 @@ pub use gateway::{
 };
 pub use runtime_sync::sync_runtime_settings_from_storage;
 pub use service::{
-    bind_all_interfaces_enabled, current_saved_service_addr, current_service_bind_mode,
-    default_listener_bind_addr, default_web_listener_addr, listener_bind_addr,
-    set_saved_service_addr, set_service_bind_mode, DEFAULT_ADDR, DEFAULT_BIND_ADDR,
-    DEFAULT_WEB_ADDR, DEFAULT_WEB_BIND_ADDR, SERVICE_BIND_MODE_ALL_INTERFACES,
-    SERVICE_BIND_MODE_LOOPBACK, SERVICE_BIND_MODE_SETTING_KEY,
+    bind_all_interfaces_enabled, bind_all_interfaces_enabled_for_mode, current_saved_service_addr,
+    current_service_bind_mode, default_listener_bind_addr, default_web_listener_addr,
+    listener_bind_addr, listener_bind_addr_for_mode, set_saved_service_addr,
+    set_service_bind_mode, DEFAULT_ADDR, DEFAULT_BIND_ADDR, DEFAULT_WEB_ADDR,
+    DEFAULT_WEB_BIND_ADDR, SERVICE_BIND_MODE_ALL_INTERFACES, SERVICE_BIND_MODE_LOOPBACK,
+    SERVICE_BIND_MODE_SETTING_KEY,
 };
 pub(crate) use shared::{normalize_optional_text, parse_bool_with_default};
 pub use shared::{

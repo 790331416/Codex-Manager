@@ -24,7 +24,7 @@ pub(super) struct AppSettingsPatch {
     theme: Option<String>,
     appearance_preset: Option<String>,
     service_addr: Option<String>,
-    service_listen_mode: Option<String>,
+    pub(super) service_listen_mode: Option<String>,
     route_strategy: Option<String>,
     free_account_max_model: Option<String>,
     request_compression_enabled: Option<bool>,

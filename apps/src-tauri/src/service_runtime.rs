@@ -6,6 +6,8 @@ use std::time::Duration;
 use crate::app_storage::apply_runtime_storage_env;
 use crate::rpc_client::rpc_call;
 
+const ENV_SERVICE_ADDR: &str = "CODEXMANAGER_SERVICE_ADDR";
+
 pub(super) fn validate_initialize_response(v: &serde_json::Value) -> Result<(), String> {
     // 连接探测必须确认对端确实是 codexmanager-service，避免端口被其他服务占用时误判“已连接”。
     let server_name = v
@@ -38,7 +40,7 @@ pub(super) fn spawn_service_with_addr(
 
     apply_runtime_storage_env(app);
 
-    std::env::set_var("CODEXMANAGER_SERVICE_ADDR", bind_addr);
+    std::env::set_var(ENV_SERVICE_ADDR, bind_addr);
     codexmanager_service::clear_shutdown_flag();
 
     let bind_addr = bind_addr.to_string();

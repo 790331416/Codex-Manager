@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
-    "dev:desktop": "next dev --webpack -p 3005",
+    "dev:desktop": "next dev --webpack -H 127.0.0.1 -p 3005",
     "build": "next build",
     "build:desktop": "next build",
     "test:runtime": "node --test tests/runtime-capabilities.test.mjs",

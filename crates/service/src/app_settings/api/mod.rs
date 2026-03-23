@@ -47,19 +47,20 @@ pub(super) use super::{
 };
 
 pub fn app_settings_get() -> Result<Value, String> {
-    current::current_app_settings_value(None, None)
+    current::current_app_settings_value(None, None, None)
 }
 
 pub fn app_settings_get_with_overrides(
     close_to_tray_on_close: Option<bool>,
     close_to_tray_supported: Option<bool>,
 ) -> Result<Value, String> {
-    current::current_app_settings_value(close_to_tray_on_close, close_to_tray_supported)
+    current::current_app_settings_value(close_to_tray_on_close, close_to_tray_supported, None)
 }
 
 pub fn app_settings_set(params: Option<&Value>) -> Result<Value, String> {
     initialize_storage_if_needed()?;
     let patch = patch::parse_app_settings_patch(params)?;
+    let service_listen_mode = patch.service_listen_mode.clone();
     patch::apply_app_settings_patch(patch)?;
-    app_settings_get()
+    current::current_app_settings_value(None, None, service_listen_mode.as_deref())
 }

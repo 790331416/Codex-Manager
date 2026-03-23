@@ -42,9 +42,23 @@ const DEFAULT_FREE_ACCOUNT_MAX_MODEL_OPTIONS: &[&str] = &[
     "gpt-5.4",
 ];
 
+fn normalize_service_bind_mode_value(raw: Option<&str>) -> &'static str {
+    let Some(value) = raw else {
+        return SERVICE_BIND_MODE_LOOPBACK;
+    };
+    let normalized = value.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "all_interfaces" | "all-interfaces" | "all" | "0.0.0.0" => {
+            SERVICE_BIND_MODE_ALL_INTERFACES
+        }
+        _ => SERVICE_BIND_MODE_LOOPBACK,
+    }
+}
+
 pub(super) fn current_app_settings_value(
     close_to_tray_on_close: Option<bool>,
     close_to_tray_supported: Option<bool>,
+    service_listen_mode_override: Option<&str>,
 ) -> Result<Value, String> {
     initialize_storage_if_needed()?;
     sync_runtime_settings_from_storage();
@@ -57,7 +71,11 @@ pub(super) fn current_app_settings_value(
     let theme = current_ui_theme();
     let appearance_preset = current_ui_appearance_preset();
     let service_addr = current_saved_service_addr();
-    let service_listen_mode = current_service_bind_mode();
+    let service_listen_mode = if let Some(mode) = service_listen_mode_override {
+        normalize_service_bind_mode_value(Some(mode)).to_string()
+    } else {
+        current_service_bind_mode()
+    };
     let route_strategy = crate::gateway::current_route_strategy().to_string();
     let free_account_max_model = current_gateway_free_account_max_model();
     let request_compression_enabled = current_gateway_request_compression_enabled();

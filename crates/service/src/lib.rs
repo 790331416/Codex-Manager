@@ -62,7 +62,8 @@ pub(crate) use usage::token_refresh as usage_token_refresh;
 
 pub use app_settings::{
     app_settings_get, app_settings_get_with_overrides, app_settings_set,
-    bind_all_interfaces_enabled, current_close_to_tray_on_close_setting,
+    bind_all_interfaces_enabled, bind_all_interfaces_enabled_for_mode,
+    current_close_to_tray_on_close_setting,
     current_gateway_free_account_max_model, current_gateway_originator,
     current_gateway_request_compression_enabled, current_gateway_residency_requirement,
     current_gateway_sse_keepalive_interval_ms, current_gateway_upstream_stream_timeout_ms,
@@ -70,6 +71,7 @@ pub use app_settings::{
     current_saved_service_addr, current_service_bind_mode, current_ui_appearance_preset,
     current_ui_low_transparency_enabled, current_ui_theme, current_update_auto_check_enabled,
     default_listener_bind_addr, default_web_listener_addr, listener_bind_addr,
+    listener_bind_addr_for_mode,
     residency_requirement_options, set_close_to_tray_on_close_setting,
     set_gateway_background_tasks, set_gateway_free_account_max_model, set_gateway_originator,
     set_gateway_request_compression_enabled, set_gateway_residency_requirement,
