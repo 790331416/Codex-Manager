@@ -498,49 +498,6 @@ jobs:
           docker push "ghcr.io/${owner}/codexmanager-service:${tag}"
           docker push "ghcr.io/${owner}/codexmanager-web:${tag}"
 
-      - name: Render docker compose release file
-        shell: bash
-        run: |
-          set -euo pipefail
-          owner="${{ github.repository_owner }}"
-          tag="${{ github.event.inputs.tag }}"
-
-          cat > release-assets/docker-compose.release.yml <<EOF
-services:
-  codexmanager-service:
-    image: ghcr.io/${owner}/codexmanager-service:${tag}
-    restart: unless-stopped
-    environment:
-      CODEXMANAGER_SERVICE_ADDR: 0.0.0.0:48760
-      CODEXMANAGER_DB_PATH: /data/codexmanager.db
-      CODEXMANAGER_RPC_TOKEN_FILE: /data/codexmanager.rpc-token
-    volumes:
-      - codexmanager-data:/data
-    ports:
-      - "48760:48760"
-
-  codexmanager-web:
-    image: ghcr.io/${owner}/codexmanager-web:${tag}
-    restart: unless-stopped
-    depends_on:
-      codexmanager-service:
-        condition: service_healthy
-    environment:
-      CODEXMANAGER_WEB_ADDR: 0.0.0.0:48761
-      CODEXMANAGER_WEB_NO_SPAWN_SERVICE: "1"
-      CODEXMANAGER_SERVICE_ADDR: codexmanager-service:48760
-      CODEXMANAGER_DB_PATH: /data/codexmanager.db
-      CODEXMANAGER_RPC_TOKEN_FILE: /data/codexmanager.rpc-token
-      CODEXMANAGER_WEB_NO_OPEN: "1"
-    volumes:
-      - codexmanager-data:/data
-    ports:
-      - "48761:48761"
-
-volumes:
-  codexmanager-data:
-EOF
-
       - name: List release assets
         run: find release-assets -type f | sort
 

@@ -1,5 +1,4 @@
 # Docs 目录说明
-
 `docs/` 是 CodexManager 的正式治理文档目录，不再视为临时文件仓。
 
 目标：
