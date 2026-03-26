@@ -1,6 +1,6 @@
 services:
   codexmanager-service:
-    image: codexmanager-service:release
+    image: ghcr.io/qxcnm/codexmanager-service:${CODEXMANAGER_RELEASE_TAG:?set CODEXMANAGER_RELEASE_TAG}
     restart: unless-stopped
     environment:
       CODEXMANAGER_SERVICE_ADDR: 0.0.0.0:48760
@@ -12,7 +12,7 @@ services:
       - "48760:48760"
 
   codexmanager-web:
-    image: codexmanager-web:release
+    image: ghcr.io/qxcnm/codexmanager-web:${CODEXMANAGER_RELEASE_TAG:?set CODEXMANAGER_RELEASE_TAG}
     restart: unless-stopped
     depends_on:
       codexmanager-service:
