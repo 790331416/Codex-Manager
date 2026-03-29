@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  DollarSign,
   Copy,
   Eye,
   EyeOff,
@@ -10,6 +11,7 @@ import {
   Plus,
   RefreshCw,
   Settings2,
+  Zap,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -17,7 +19,7 @@ import { ApiKeyModal } from "@/components/modals/api-key-modal";
 import { ConfirmDialog } from "@/components/modals/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,6 +41,8 @@ import { useDesktopPageActive } from "@/hooks/useDesktopPageActive";
 import { useDeferredDesktopActivation } from "@/hooks/useDeferredDesktopActivation";
 import { usePageTransitionReady } from "@/hooks/usePageTransitionReady";
 import { accountClient } from "@/lib/api/account-client";
+import { serviceClient } from "@/lib/api/service-client";
+import { useAppStore } from "@/lib/store/useAppStore";
 import { copyTextToClipboard } from "@/lib/utils/clipboard";
 import { formatCompactNumber } from "@/lib/utils/usage";
 
@@ -47,7 +51,48 @@ const ROTATION_STRATEGY_LABELS: Record<string, string> = {
   aggregate_api_rotation: "聚合API轮转",
 };
 
+function formatUsd(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Math.max(0, value));
+}
+
+function sumRequestLogCost(items: Array<{ estimatedCostUsd: number | null }>): number {
+  return items.reduce((sum, item) => sum + Math.max(0, item.estimatedCostUsd || 0), 0);
+}
+
+function ApiKeyStatCard({
+  title,
+  value,
+  icon: Icon,
+  color,
+  sub,
+}: {
+  title: string;
+  value: string;
+  icon: typeof Zap;
+  color: string;
+  sub: string;
+}) {
+  return (
+    <Card className="glass-card overflow-hidden border-none shadow-md backdrop-blur-md transition-all hover:scale-[1.02]">
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+        <Icon className={color} />
+      </CardHeader>
+      <CardContent>
+        <div className="text-2xl font-bold">{value}</div>
+        <p className="mt-1 text-[10px] text-muted-foreground">{sub}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function ApiKeysPage() {
+  const serviceAddr = useAppStore((state) => state.serviceStatus.addr);
   const {
     apiKeys,
     isLoading,
@@ -85,21 +130,41 @@ export default function ApiKeysPage() {
     () => apiKeys.find((item) => item.id === editingKeyId) || null,
     [apiKeys, editingKeyId]
   );
-  const { data: usageByKey = {} } = useQuery({
-    queryKey: ["apikey-usage-stats"],
+  const { data: usageOverview, isPending: isUsageOverviewLoading } = useQuery({
+    queryKey: ["apikey-usage-overview", serviceAddr || null],
     queryFn: async () => {
-      const stats = await accountClient.listApiKeyUsageStats();
-      return stats.reduce<Record<string, number>>((result, item) => {
+      const [stats, firstPage] = await Promise.all([
+        accountClient.listApiKeyUsageStats(),
+        serviceClient.listRequestLogs({ page: 1, pageSize: 500 }),
+      ]);
+
+      const usageByKey = stats.reduce<Record<string, number>>((result, item) => {
         const keyId = String(item.keyId || "").trim();
         if (!keyId) return result;
         result[keyId] = Math.max(0, item.totalTokens || 0);
         return result;
       }, {});
+
+      let totalCostUsd = sumRequestLogCost(firstPage.items);
+      const pageSize = Math.max(1, firstPage.pageSize || 500);
+      const totalPages = Math.max(1, Math.ceil(firstPage.total / pageSize));
+      for (let page = 2; page <= totalPages; page += 1) {
+        const pageResult = await serviceClient.listRequestLogs({ page, pageSize });
+        totalCostUsd += sumRequestLogCost(pageResult.items);
+      }
+
+      const totalTokens = Object.values(usageByKey).reduce((sum, value) => sum + value, 0);
+      return {
+        usageByKey,
+        totalTokens,
+        totalCostUsd,
+      };
     },
     enabled: isUsageQueryEnabled && isPageActive,
-    refetchInterval: 5000,
     retry: 1,
   });
+  const usageByKey = usageOverview?.usageByKey || {};
+  const showOverviewLoading = isServiceReady && isPageActive && isUsageOverviewLoading;
 
   const openCreateModal = () => {
     setEditingKeyId(null);
@@ -193,6 +258,32 @@ export default function ApiKeysPage() {
             <Plus className="h-4 w-4" /> 创建密钥
           </Button>
         </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        {isLoading || showOverviewLoading ? (
+          <>
+            <Skeleton className="h-32 w-full rounded-2xl" />
+            <Skeleton className="h-32 w-full rounded-2xl" />
+          </>
+        ) : (
+          <>
+            <ApiKeyStatCard
+              title="总使用 Token"
+              value={formatCompactNumber(usageOverview?.totalTokens || 0, "0")}
+              icon={Zap}
+              color="h-4 w-4 text-amber-500"
+              sub="按全部平台密钥累计"
+            />
+            <ApiKeyStatCard
+              title="总费用"
+              value={formatUsd(usageOverview?.totalCostUsd || 0)}
+              icon={DollarSign}
+              color="h-4 w-4 text-emerald-500"
+              sub="按请求日志累计估算"
+            />
+          </>
+        )}
       </div>
 
       <Card className="glass-card overflow-hidden border-none py-0 shadow-xl backdrop-blur-md">

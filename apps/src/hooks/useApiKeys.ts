@@ -63,6 +63,7 @@ export function useApiKeys() {
       queryClient.invalidateQueries({ queryKey: ["apikeys"] }),
       queryClient.invalidateQueries({ queryKey: ["apikey-models"] }),
       queryClient.invalidateQueries({ queryKey: ["apikey-usage-stats"] }),
+      queryClient.invalidateQueries({ queryKey: ["apikey-usage-overview"] }),
       queryClient.invalidateQueries({ queryKey: ["startup-snapshot"] }),
     ]);
   };
