@@ -116,6 +116,9 @@ fn parse_usage_from_object(usage: Option<&Map<String, Value>>) -> UpstreamRespon
         .and_then(|details| details.get("cached_tokens"))
         .and_then(Value::as_i64)
         .or_else(|| {
+            usage.and_then(|map| map.get("cache_read_input_tokens").and_then(Value::as_i64))
+        })
+        .or_else(|| {
             usage
                 .and_then(|map| map.get("prompt_tokens_details"))
                 .and_then(Value::as_object)
@@ -127,6 +130,9 @@ fn parse_usage_from_object(usage: Option<&Map<String, Value>>) -> UpstreamRespon
         .and_then(Value::as_object)
         .and_then(|details| details.get("reasoning_tokens"))
         .and_then(Value::as_i64)
+        .or_else(|| {
+            usage.and_then(|map| map.get("reasoning_output_tokens").and_then(Value::as_i64))
+        })
         .or_else(|| {
             usage
                 .and_then(|map| map.get("completion_tokens_details"))

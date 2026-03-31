@@ -77,11 +77,45 @@ fn allow_openai_responses_path_rewrite(protocol_type: &str, normalized_path: &st
             || normalized_path.starts_with("/v1/completions"))
 }
 
+fn should_derive_compat_conversation_anchor(protocol_type: &str, normalized_path: &str) -> bool {
+    (protocol_type == PROTOCOL_ANTHROPIC_NATIVE && normalized_path.starts_with("/v1/messages"))
+        || allow_openai_responses_path_rewrite(protocol_type, normalized_path)
+}
+
+fn resolve_local_conversation_id(
+    protocol_type: &str,
+    normalized_path: &str,
+    incoming_headers: &super::super::IncomingHeaderSnapshot,
+    client_has_prompt_cache_key: bool,
+) -> Option<String> {
+    incoming_headers
+        .conversation_id()
+        .map(str::to_string)
+        .or_else(|| {
+            if client_has_prompt_cache_key
+                || !should_derive_compat_conversation_anchor(protocol_type, normalized_path)
+            {
+                return None;
+            }
+            // 中文注释：Claude / chat.completions 兼容请求通常不会自带稳定线程锚点；
+            // 这里退化到平台密钥派生出的 sticky conversation，确保 prompt cache key 跨轮次稳定。
+            super::super::upstream::header_profile::derive_sticky_conversation_id_from_headers(
+                incoming_headers,
+            )
+        })
+}
+
 fn apply_passthrough_request_overrides(
     path: &str,
     body: Vec<u8>,
     api_key: &ApiKey,
-) -> (Vec<u8>, Option<String>, Option<String>, bool, Option<String>) {
+) -> (
+    Vec<u8>,
+    Option<String>,
+    Option<String>,
+    bool,
+    Option<String>,
+) {
     let (effective_model, effective_reasoning, effective_service_tier) =
         resolve_effective_request_overrides(api_key);
     let rewritten_body =
@@ -98,7 +132,9 @@ fn apply_passthrough_request_overrides(
     (
         rewritten_body,
         request_meta.model.or(api_key.model_slug.clone()),
-        request_meta.reasoning_effort.or(api_key.reasoning_effort.clone()),
+        request_meta
+            .reasoning_effort
+            .or(api_key.reasoning_effort.clone()),
         request_meta.has_prompt_cache_key,
         request_meta.request_shape,
     )
@@ -118,13 +154,18 @@ pub(super) fn build_local_validation_result(
     let method = Method::from_bytes(request_method.as_bytes())
         .map_err(|_| LocalValidationError::new(405, "unsupported method"))?;
     let initial_request_meta = super::super::parse_request_metadata(&body);
-    let initial_local_conversation_id = incoming_headers.conversation_id().map(str::to_string);
+    let initial_local_conversation_id = resolve_local_conversation_id(
+        api_key.protocol_type.as_str(),
+        normalized_path.as_str(),
+        &incoming_headers,
+        initial_request_meta.has_prompt_cache_key,
+    );
 
     if api_key.rotation_strategy == ROTATION_AGGREGATE_API {
         let (rewritten_body, model_for_log, reasoning_for_log, has_prompt_cache_key, request_shape) =
             apply_passthrough_request_overrides(&normalized_path, body, &api_key);
-        let incoming_headers =
-            incoming_headers.with_conversation_id_override(initial_local_conversation_id.as_deref());
+        let incoming_headers = incoming_headers
+            .with_conversation_id_override(initial_local_conversation_id.as_deref());
         return Ok(LocalValidationResult {
             trace_id,
             incoming_headers,
@@ -187,7 +228,7 @@ pub(super) fn build_local_validation_result(
     let client_request_meta = super::super::parse_request_metadata(&body);
     let (effective_model, effective_reasoning, effective_service_tier) =
         resolve_effective_request_overrides(&api_key);
-    let local_conversation_id = incoming_headers.conversation_id().map(str::to_string);
+    let local_conversation_id = initial_local_conversation_id.clone();
     let conversation_binding = super::super::conversation_binding::load_conversation_binding(
         &storage,
         api_key.key_hash.as_str(),

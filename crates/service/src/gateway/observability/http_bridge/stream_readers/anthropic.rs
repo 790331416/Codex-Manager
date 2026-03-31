@@ -254,10 +254,15 @@ impl AnthropicSseReader {
                     .or_else(|| usage.get("prompt_tokens").and_then(Value::as_i64))
                     .unwrap_or(self.state.input_tokens);
                 self.state.cached_input_tokens = usage
-                    .get("input_tokens_details")
-                    .and_then(Value::as_object)
-                    .and_then(|details| details.get("cached_tokens"))
+                    .get("cache_read_input_tokens")
                     .and_then(Value::as_i64)
+                    .or_else(|| {
+                        usage
+                            .get("input_tokens_details")
+                            .and_then(Value::as_object)
+                            .and_then(|details| details.get("cached_tokens"))
+                            .and_then(Value::as_i64)
+                    })
                     .or_else(|| {
                         usage
                             .get("prompt_tokens_details")
@@ -276,10 +281,15 @@ impl AnthropicSseReader {
                     .and_then(Value::as_i64)
                     .or(self.state.total_tokens);
                 self.state.reasoning_output_tokens = usage
-                    .get("output_tokens_details")
-                    .and_then(Value::as_object)
-                    .and_then(|details| details.get("reasoning_tokens"))
+                    .get("reasoning_output_tokens")
                     .and_then(Value::as_i64)
+                    .or_else(|| {
+                        usage
+                            .get("output_tokens_details")
+                            .and_then(Value::as_object)
+                            .and_then(|details| details.get("reasoning_tokens"))
+                            .and_then(Value::as_i64)
+                    })
                     .or_else(|| {
                         usage
                             .get("completion_tokens_details")

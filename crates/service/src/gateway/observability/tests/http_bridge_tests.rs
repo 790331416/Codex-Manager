@@ -137,6 +137,25 @@ fn parse_usage_from_json_reads_response_usage_compat_fields() {
 }
 
 #[test]
+fn parse_usage_from_json_reads_anthropic_compat_fields() {
+    let payload = json!({
+        "usage": {
+            "input_tokens": 42,
+            "cache_read_input_tokens": 17,
+            "output_tokens": 9,
+            "total_tokens": 51,
+            "reasoning_output_tokens": 4
+        }
+    });
+    let usage = parse_usage_from_json(&payload);
+    assert_eq!(usage.input_tokens, Some(42));
+    assert_eq!(usage.cached_input_tokens, Some(17));
+    assert_eq!(usage.output_tokens, Some(9));
+    assert_eq!(usage.total_tokens, Some(51));
+    assert_eq!(usage.reasoning_output_tokens, Some(4));
+}
+
+#[test]
 fn parse_usage_from_json_merges_response_usage_over_top_level_usage() {
     let payload = json!({
         "usage": {
