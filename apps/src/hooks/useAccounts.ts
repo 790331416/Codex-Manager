@@ -20,6 +20,7 @@ type ImportByDirectoryResult = Awaited<ReturnType<typeof accountClient.importByD
 type ImportByFileResult = Awaited<ReturnType<typeof accountClient.importByFile>>;
 type ExportResult = Awaited<ReturnType<typeof accountClient.export>>;
 type DeleteUnavailableFreeResult = { deleted?: number };
+type AccountSortUpdate = { accountId: string; sort: number };
 
 function isAccountRefreshBlocked(status: string | null | undefined): boolean {
   return String(status || "").trim().toLowerCase() === "disabled";
@@ -237,6 +238,23 @@ export function useAccounts() {
     },
   });
 
+  const reorderAccountsMutation = useMutation({
+    mutationFn: async (updates: AccountSortUpdate[]) => {
+      for (const update of updates) {
+        await accountClient.updateSort(update.accountId, update.sort);
+      }
+      return updates.length;
+    },
+    onSuccess: async (count) => {
+      await invalidateAll();
+      toast.success(count > 1 ? `账号顺序已调整（${count} 项）` : "账号顺序已更新");
+    },
+    onError: async (error: unknown) => {
+      await invalidateAll();
+      toast.error(`调整账号顺序失败: ${getAppErrorMessage(error)}`);
+    },
+  });
+
   const updateAccountProfileMutation = useMutation({
     mutationFn: ({
       accountId,
@@ -444,6 +462,11 @@ export function useAccounts() {
       if (!ensureServiceReady("更新账号顺序")) return;
       await updateAccountSortMutation.mutateAsync({ accountId, sort });
     },
+    reorderAccounts: async (updates: AccountSortUpdate[]) => {
+      if (!ensureServiceReady("调整账号顺序")) return;
+      if (!updates.length) return;
+      await reorderAccountsMutation.mutateAsync(updates);
+    },
     updateAccountProfile: async (
       accountId: string,
       params: {
@@ -482,6 +505,7 @@ export function useAccounts() {
             (updateAccountSortMutation.variables as { accountId?: unknown }).accountId || ""
           )
         : "",
+    isReorderingAccounts: reorderAccountsMutation.isPending,
     isUpdatingProfileAccountId:
       updateAccountProfileMutation.isPending &&
       updateAccountProfileMutation.variables &&
