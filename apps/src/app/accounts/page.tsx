@@ -4,6 +4,9 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
 import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   BarChart3,
   Download,
   Clock3,
@@ -93,6 +96,7 @@ type StatusFilter = "all" | "available" | "low_quota" | "banned";
 const UNAVAILABLE_FREE_CLEANUP_PLUGIN_ID = "cleanup-unavailable-free-accounts";
 const UNAVAILABLE_FREE_CLEANUP_TASK_ID = `${UNAVAILABLE_FREE_CLEANUP_PLUGIN_ID}::run`;
 const UNAVAILABLE_FREE_CLEANUP_DEFAULT_INTERVAL_SECONDS = 60;
+const ACCOUNT_SORT_STEP = 5;
 
 const UNAVAILABLE_FREE_CLEANUP_PLUGIN: PluginCatalogEntry = {
   id: UNAVAILABLE_FREE_CLEANUP_PLUGIN_ID,
@@ -296,6 +300,58 @@ function normalizeTagsDraft(tagsDraft: string): string[] {
     .filter(Boolean);
 }
 
+function buildAccountOrderUpdates(orderedAccounts: Account[]) {
+  return orderedAccounts.reduce<Array<{ accountId: string; sort: number }>>(
+    (updates, account, index) => {
+      const nextSort = index * ACCOUNT_SORT_STEP;
+      const currentSort = Number.isFinite(account.priority)
+        ? account.priority
+        : Number(account.sort) || 0;
+      if (currentSort !== nextSort) {
+        updates.push({ accountId: account.id, sort: nextSort });
+      }
+      return updates;
+    },
+    [],
+  );
+}
+
+type AccountSizeSortMode = "large-first" | "small-first";
+
+function getAccountSizeGroup(account: Account): "large" | "standard" | "small" {
+  switch (normalizeAccountPlanKey(account)) {
+    case "plus":
+    case "pro":
+    case "team":
+    case "business":
+    case "enterprise":
+      return "large";
+    case "free":
+      return "small";
+    default:
+      return "standard";
+  }
+}
+
+function buildAccountsBySizeOrder(
+  orderedAccounts: Account[],
+  mode: AccountSizeSortMode,
+) {
+  const buckets = {
+    large: [] as Account[],
+    standard: [] as Account[],
+    small: [] as Account[],
+  };
+
+  for (const account of orderedAccounts) {
+    buckets[getAccountSizeGroup(account)].push(account);
+  }
+
+  return mode === "large-first"
+    ? [...buckets.large, ...buckets.standard, ...buckets.small]
+    : [...buckets.small, ...buckets.standard, ...buckets.large];
+}
+
 function AccountInfoCell({
   account,
   isPreferred,
@@ -397,6 +453,8 @@ export default function AccountsPage() {
     setPreferredAccount,
     clearPreferredAccount,
     isUpdatingPreferred,
+    reorderAccounts,
+    isReorderingAccounts,
     updateAccountProfile,
     isUpdatingProfileAccountId,
     toggleAccountStatus,
@@ -524,6 +582,10 @@ export default function AccountsPage() {
     const offset = (safePage - 1) * pageSizeNumber;
     return filteredAccounts.slice(offset, offset + pageSizeNumber);
   }, [filteredAccounts, pageSizeNumber, safePage]);
+  const filteredAccountIndexMap = useMemo(
+    () => new Map(filteredAccounts.map((account, index) => [account.id, index])),
+    [filteredAccounts],
+  );
 
   const selectedAccount = useMemo(
     () => accounts.find((account) => account.id === selectedAccountId) ?? null,
@@ -636,6 +698,75 @@ export default function AccountsPage() {
     setTagsDraft(account.tags.join(", "));
     setNoteDraft(account.note || "");
     setSortDraft(String(account.priority));
+  };
+
+  const handleMoveAccount = async (
+    account: Account,
+    direction: "up" | "down",
+  ) => {
+    const filteredIndex = filteredAccountIndexMap.get(account.id);
+    if (filteredIndex == null) {
+      toast.error("未找到当前账号，请刷新后重试");
+      return;
+    }
+
+    const targetFilteredIndex =
+      direction === "up" ? filteredIndex - 1 : filteredIndex + 1;
+    if (targetFilteredIndex < 0) {
+      toast.info("当前账号已经在最前面");
+      return;
+    }
+    if (targetFilteredIndex >= filteredAccounts.length) {
+      toast.info("当前账号已经在最后面");
+      return;
+    }
+
+    const targetAccount = filteredAccounts[targetFilteredIndex];
+    const reorderedAccounts = accounts.filter((item) => item.id !== account.id);
+    const anchorIndex = reorderedAccounts.findIndex(
+      (item) => item.id === targetAccount.id,
+    );
+    if (anchorIndex === -1) {
+      toast.error("未找到目标账号，请刷新后重试");
+      return;
+    }
+
+    reorderedAccounts.splice(direction === "up" ? anchorIndex : anchorIndex + 1, 0, account);
+    const updates = buildAccountOrderUpdates(reorderedAccounts);
+    if (!updates.length) {
+      toast.info("账号顺序未变化");
+      return;
+    }
+
+    try {
+      await reorderAccounts(updates);
+    } catch {
+      // hook 内统一处理 toast，这里保持静默即可
+    }
+  };
+
+  const handleApplyAccountSizeSort = async (mode: AccountSizeSortMode) => {
+    if (accounts.length < 2) {
+      toast.info("账号数量不足，无需重新排序");
+      return;
+    }
+
+    const reorderedAccounts = buildAccountsBySizeOrder(accounts, mode);
+    const updates = buildAccountOrderUpdates(reorderedAccounts);
+    if (!updates.length) {
+      toast.info(
+        mode === "large-first"
+          ? "当前已经是大号优先顺序"
+          : "当前已经是小号优先顺序",
+      );
+      return;
+    }
+
+    try {
+      await reorderAccounts(updates);
+    } catch {
+      // hook 已统一处理 toast，这里保持静默即可
+    }
   };
 
   const handleConfirmAccountEditor = async () => {
@@ -852,6 +983,38 @@ export default function AccountsPage() {
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
                   <DropdownMenuLabel className="px-2 py-1 text-[11px] uppercase tracking-[0.16em] text-muted-foreground/80">
+                    排序
+                  </DropdownMenuLabel>
+                  <DropdownMenuItem
+                    className="h-9 rounded-lg px-2"
+                    disabled={
+                      !isServiceReady ||
+                      isReorderingAccounts ||
+                      accounts.length < 2
+                    }
+                    onClick={() => void handleApplyAccountSizeSort("large-first")}
+                  >
+                    <ArrowUpDown className="mr-2 h-4 w-4" />
+                    大号优先排序
+                    <DropdownMenuShortcut>BIZ</DropdownMenuShortcut>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="h-9 rounded-lg px-2"
+                    disabled={
+                      !isServiceReady ||
+                      isReorderingAccounts ||
+                      accounts.length < 2
+                    }
+                    onClick={() => void handleApplyAccountSizeSort("small-first")}
+                  >
+                    <ArrowDown className="mr-2 h-4 w-4" />
+                    小号优先排序
+                    <DropdownMenuShortcut>FREE</DropdownMenuShortcut>
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel className="px-2 py-1 text-[11px] uppercase tracking-[0.16em] text-muted-foreground/80">
                     清理
                   </DropdownMenuLabel>
                   <DropdownMenuItem
@@ -951,7 +1114,7 @@ export default function AccountsPage() {
                 <TableHead className="max-w-[220px]">账号信息</TableHead>
                 <TableHead>5h 额度</TableHead>
                 <TableHead>7d 额度</TableHead>
-                <TableHead className="w-20">顺序</TableHead>
+                <TableHead className="w-[156px]">顺序</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead className="text-center">操作</TableHead>
               </TableRow>
@@ -1003,6 +1166,12 @@ export default function AccountsPage() {
                     const usageBuckets = getUsageDisplayBuckets(account.usage);
                     const statusAction = getAccountStatusAction(account);
                     const StatusActionIcon = statusAction.icon;
+                    const filteredIndex =
+                      filteredAccountIndexMap.get(account.id) ?? -1;
+                    const canMoveUp = filteredIndex > 0;
+                    const canMoveDown =
+                      filteredIndex !== -1 &&
+                      filteredIndex < filteredAccounts.length - 1;
                     return (
                       <TableRow key={account.id} className="group">
                         <TableCell className="text-center">
@@ -1050,7 +1219,41 @@ export default function AccountsPage() {
                             variant="ghost"
                             size="icon"
                             className="h-7 w-7 text-muted-foreground transition-colors hover:text-primary"
-                            disabled={!isServiceReady || isUpdatingProfileAccountId === account.id}
+                            disabled={
+                              !isServiceReady ||
+                              !canMoveUp ||
+                              isReorderingAccounts ||
+                              isUpdatingProfileAccountId === account.id
+                            }
+                            onClick={() => void handleMoveAccount(account, "up")}
+                            title="上移一位"
+                          >
+                            <ArrowUp className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground transition-colors hover:text-primary"
+                            disabled={
+                              !isServiceReady ||
+                              !canMoveDown ||
+                              isReorderingAccounts ||
+                              isUpdatingProfileAccountId === account.id
+                            }
+                            onClick={() => void handleMoveAccount(account, "down")}
+                            title="下移一位"
+                          >
+                            <ArrowDown className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground transition-colors hover:text-primary"
+                            disabled={
+                              !isServiceReady ||
+                              isReorderingAccounts ||
+                              isUpdatingProfileAccountId === account.id
+                            }
                             onClick={() => openAccountEditor(account)}
                             title="编辑账号信息"
                           >
