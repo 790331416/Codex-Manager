@@ -98,9 +98,56 @@ pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
         }
         "account/export" => {
             let output_dir = super::str_param(req, "outputDir").unwrap_or("");
-            super::value_or_error(account_export::export_accounts_to_directory(output_dir))
+            let selected_account_ids = req
+                .params
+                .as_ref()
+                .and_then(|params| {
+                    params
+                        .get("selectedAccountIds")
+                        .or_else(|| params.get("selected_account_ids"))
+                })
+                .and_then(|value| value.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str())
+                        .map(|item| item.to_string())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let export_mode =
+                first_string_param(req, &["exportMode", "export_mode"]);
+            super::value_or_error(account_export::export_accounts_to_directory(
+                output_dir,
+                &selected_account_ids,
+                export_mode.as_deref(),
+            ))
         }
-        "account/exportData" => super::value_or_error(account_export::export_accounts_data()),
+        "account/exportData" => {
+            let selected_account_ids = req
+                .params
+                .as_ref()
+                .and_then(|params| {
+                    params
+                        .get("selectedAccountIds")
+                        .or_else(|| params.get("selected_account_ids"))
+                })
+                .and_then(|value| value.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str())
+                        .map(|item| item.to_string())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let export_mode =
+                first_string_param(req, &["exportMode", "export_mode"]);
+            super::value_or_error(account_export::export_accounts_data(
+                &selected_account_ids,
+                export_mode.as_deref(),
+            ))
+        }
         "account/login/start" => {
             let login_type = super::str_param(req, "type").unwrap_or("chatgpt");
             if login_type.eq_ignore_ascii_case("chatgptAuthTokens") {

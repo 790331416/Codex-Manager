@@ -51,7 +51,7 @@ const WEB_COMMAND_MAP: Record<string, WebCommandDescriptor> = {
     direct: () => pickImportFilesFromBrowser(true),
   },
   service_account_export_by_account_files: {
-    direct: (_params, options) => exportAccountsViaBrowser(options),
+    direct: (params, options) => exportAccountsViaBrowser(asRecord(params), options),
   },
   service_usage_read: { rpcMethod: "account/usage/read" },
   service_usage_list: { rpcMethod: "account/usage/list" },
@@ -962,14 +962,33 @@ async function pickImportFilesFromBrowser(directory: boolean): Promise<unknown> 
  * 返回函数执行结果
  */
 async function exportAccountsViaBrowser(
+  params: Record<string, unknown> | null = null,
   options: RequestOptions = {}
 ): Promise<unknown> {
   if (typeof document === "undefined") {
     throw new Error("当前环境不支持浏览器导出");
   }
 
+  const selectedAccountIds = Array.isArray(params?.selectedAccountIds)
+    ? params.selectedAccountIds
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+    : [];
+  const exportMode =
+    typeof params?.exportMode === "string" && params.exportMode.trim()
+      ? params.exportMode.trim()
+      : "multiple";
   const payload =
-    asRecord(await postWebRpc<unknown>("account/exportData", {}, options)) ?? {};
+    asRecord(
+      await postWebRpc<unknown>(
+        "account/exportData",
+        {
+          selectedAccountIds,
+          exportMode,
+        },
+        options
+      )
+    ) ?? {};
   const files = Array.isArray(payload.files)
     ? payload.files
         .map((item) => asRecord(item))

@@ -18,6 +18,7 @@ import { AccountListResult, StartupSnapshot } from "@/types";
 
 type ImportByDirectoryResult = Awaited<ReturnType<typeof accountClient.importByDirectory>>;
 type ImportByFileResult = Awaited<ReturnType<typeof accountClient.importByFile>>;
+type AccountExportPayload = Parameters<typeof accountClient.export>[0];
 type ExportResult = Awaited<ReturnType<typeof accountClient.export>>;
 type DeleteUnavailableFreeResult = { deleted?: number };
 type AccountSortUpdate = { accountId: string; sort: number };
@@ -459,7 +460,7 @@ export function useAccounts() {
   });
 
   const exportMutation = useMutation({
-    mutationFn: () => accountClient.export(),
+    mutationFn: (params?: AccountExportPayload) => accountClient.export(params),
     onSuccess: (result: ExportResult) => {
       if (result?.canceled) {
         toast.info("已取消导出");
@@ -550,9 +551,9 @@ export function useAccounts() {
       if (!ensureServiceReady("导入账号")) return;
       importByDirectoryMutation.mutate();
     },
-    exportAccounts: () => {
+    exportAccounts: async (params?: AccountExportPayload) => {
       if (!ensureServiceReady("导出账号")) return;
-      exportMutation.mutate();
+      await exportMutation.mutateAsync(params);
     },
     setPreferredAccount: (accountId: string) => {
       if (!ensureServiceReady("设置优先账号")) return;

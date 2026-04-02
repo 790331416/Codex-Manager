@@ -157,6 +157,20 @@ pub(crate) fn deactivation_reason_from_message(message: &str) -> Option<&'static
     None
 }
 
+pub(crate) fn usage_limit_reason_from_message(message: &str) -> Option<&'static str> {
+    let normalized = message.trim().to_ascii_lowercase();
+    if normalized.contains("you've hit your usage limit")
+        || normalized.contains("you have hit your usage limit")
+        || normalized.contains("insufficient_quota")
+        || normalized.contains("quota exceeded")
+        || normalized.contains("usage exhausted")
+        || (normalized.contains("usage limit") && normalized.contains("try again"))
+    {
+        return Some("usage_limit_exhausted");
+    }
+    None
+}
+
 /// 函数 `is_banned_status_reason`
 ///
 /// 作者: gaohongshun
@@ -186,8 +200,14 @@ pub(crate) fn is_banned_status_reason(reason: &str) -> bool {
 ///
 /// # 返回
 /// 返回函数执行结果
-pub(crate) fn should_failover_for_deactivation_error(err: &str, has_more_candidates: bool) -> bool {
-    has_more_candidates && deactivation_reason_from_message(err).is_some()
+pub(crate) fn should_failover_for_gateway_error(err: &str, has_more_candidates: bool) -> bool {
+    has_more_candidates
+        && (deactivation_reason_from_message(err).is_some()
+            || usage_limit_reason_from_message(err).is_some())
+}
+
+pub(crate) fn is_usage_limit_gateway_error(err: &str) -> bool {
+    usage_limit_reason_from_message(err).is_some()
 }
 
 /// 函数 `set_account_unavailable_with_reason`
@@ -345,8 +365,8 @@ pub(crate) fn mark_account_unavailable_for_refresh_token_error(
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_account_availability_signal, should_failover_for_deactivation_error,
-        AccountAvailabilitySignal,
+        classify_account_availability_signal, is_usage_limit_gateway_error,
+        should_failover_for_gateway_error, AccountAvailabilitySignal,
     };
 
     /// 函数 `classify_account_availability_signal_separates_usage_refresh_and_deactivation`
@@ -391,13 +411,24 @@ mod tests {
             ))
         ));
 
-        assert!(should_failover_for_deactivation_error(
+        assert!(should_failover_for_gateway_error(
             "Your OpenAI account has been deactivated",
             true
         ));
-        assert!(!should_failover_for_deactivation_error(
+        assert!(!should_failover_for_gateway_error(
             "Your OpenAI account has been deactivated",
             false
+        ));
+        assert!(should_failover_for_gateway_error(
+            "You've hit your usage limit. To get more access now, try again at 8:02 PM.",
+            true
+        ));
+        assert!(!should_failover_for_gateway_error(
+            "You've hit your usage limit. To get more access now, try again at 8:02 PM.",
+            false
+        ));
+        assert!(is_usage_limit_gateway_error(
+            "You've hit your usage limit. To get more access now, try again at 8:02 PM."
         ));
     }
 }

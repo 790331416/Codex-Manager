@@ -208,9 +208,12 @@ pub(super) fn finalize_upstream_response(
                 .unwrap_or_else(|| "upstream response incomplete".to_string()),
         );
     }
-    let deactivation_failover = final_error.as_deref().is_some_and(|error| {
-        crate::account_status::should_failover_for_deactivation_error(error, has_more_candidates)
+    let gateway_failover = final_error.as_deref().is_some_and(|error| {
+        crate::account_status::should_failover_for_gateway_error(error, has_more_candidates)
     });
+    let usage_limit_failover = final_error
+        .as_deref()
+        .is_some_and(crate::account_status::is_usage_limit_gateway_error);
 
     let upstream_stream_failed = client_is_stream
         && (!bridge.stream_terminal_seen || bridge.stream_terminal_error.is_some());
@@ -226,7 +229,7 @@ pub(super) fn finalize_upstream_response(
         status_code
     } else if upstream_stream_failed {
         502
-    } else if deactivation_failover {
+    } else if gateway_failover {
         502
     } else if bridge_ok {
         status_code
@@ -240,6 +243,13 @@ pub(super) fn finalize_upstream_response(
             super::super::super::CooldownReason::Network,
         );
         super::super::super::record_route_quality(account_id, 502);
+    }
+
+    if usage_limit_failover {
+        super::super::super::mark_account_cooldown(
+            account_id,
+            super::super::super::CooldownReason::Default,
+        );
     }
 
     if let Some(error) = final_error.as_deref() {
@@ -263,7 +273,7 @@ pub(super) fn finalize_upstream_response(
         started_at.elapsed().as_millis(),
         attempted_account_ids,
     );
-    if deactivation_failover {
+    if gateway_failover {
         return Ok(FinalizeUpstreamResponseOutcome::Failover);
     }
     Ok(FinalizeUpstreamResponseOutcome::Handled)

@@ -93,6 +93,7 @@ import {
 import { Account, PluginCatalogEntry } from "@/types";
 
 type StatusFilter = "all" | "available" | "low_quota" | "banned";
+type AccountExportMode = "single" | "multiple";
 const UNAVAILABLE_FREE_CLEANUP_PLUGIN_ID = "cleanup-unavailable-free-accounts";
 const UNAVAILABLE_FREE_CLEANUP_TASK_ID = `${UNAVAILABLE_FREE_CLEANUP_PLUGIN_ID}::run`;
 const UNAVAILABLE_FREE_CLEANUP_DEFAULT_INTERVAL_SECONDS = 60;
@@ -522,6 +523,10 @@ function buildAccountsBySizeOrder(
     : [...buckets.small, ...buckets.standard, ...buckets.large];
 }
 
+function formatAccountExportModeLabel(value: string) {
+  return value === "single" ? "单 JSON" : "多 JSON";
+}
+
 /**
  * 函数 `AccountInfoCell`
  *
@@ -655,6 +660,9 @@ export default function AccountsPage() {
   const [addAccountModalOpen, setAddAccountModalOpen] = useState(false);
   const [usageModalOpen, setUsageModalOpen] = useState(false);
   const [cleanupScheduleOpen, setCleanupScheduleOpen] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportModeDraft, setExportModeDraft] =
+    useState<AccountExportMode>("multiple");
   const [cleanupScheduleDraft, setCleanupScheduleDraft] = useState(
     String(UNAVAILABLE_FREE_CLEANUP_DEFAULT_INTERVAL_SECONDS),
   );
@@ -760,6 +768,13 @@ export default function AccountsPage() {
     () => selectedIds.filter((id) => accountIdSet.has(id)),
     [accountIdSet, selectedIds],
   );
+  const exportSelectionCount = effectiveSelectedIds.length;
+  const exportTargetCount =
+    exportSelectionCount > 0 ? exportSelectionCount : accounts.length;
+  const exportScopeText =
+    exportSelectionCount > 0
+      ? `当前已选择 ${exportSelectionCount} 个账号，本次将只导出选中的账号。`
+      : `当前未选择账号，本次将导出全部 ${accounts.length} 个账号。`;
 
   const visibleAccounts = useMemo(() => {
     /**
@@ -983,6 +998,62 @@ export default function AccountsPage() {
       ids: bannedIds,
       count: bannedIds.length,
     });
+  };
+
+  /**
+   * 函数 `openExportDialog`
+   *
+   * 作者: gaohongshun
+   *
+   * 时间: 2026-04-02
+   *
+   * # 参数
+   * 无
+   *
+   * # 返回
+   * 返回函数执行结果
+   */
+  const openExportDialog = () => {
+    if (!isServiceReady) {
+      toast.info("服务未连接，暂时无法导出账号");
+      return;
+    }
+    if (!accounts.length) {
+      toast.info("当前没有可导出的账号");
+      return;
+    }
+    setExportModeDraft("multiple");
+    setExportDialogOpen(true);
+  };
+
+  /**
+   * 函数 `handleConfirmExport`
+   *
+   * 作者: gaohongshun
+   *
+   * 时间: 2026-04-02
+   *
+   * # 参数
+   * 无
+   *
+   * # 返回
+   * 返回函数执行结果
+   */
+  const handleConfirmExport = async () => {
+    if (exportTargetCount <= 0) {
+      toast.info("当前没有可导出的账号");
+      return;
+    }
+    try {
+      await exportAccounts({
+        selectedAccountIds:
+          exportSelectionCount > 0 ? effectiveSelectedIds : [],
+        exportMode: exportModeDraft,
+      });
+      setExportDialogOpen(false);
+    } catch {
+      // 中文注释：错误提示已在 hook 内统一处理，这里只阻止弹窗误关闭。
+    }
   };
 
   /**
@@ -1375,8 +1446,8 @@ export default function AccountsPage() {
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className="h-9 rounded-lg px-2"
-                    disabled={!isServiceReady || isExporting}
-                    onClick={() => exportAccounts()}
+                    disabled={!isServiceReady || isExporting || accounts.length === 0}
+                    onClick={openExportDialog}
                   >
                     <Download className="mr-2 h-4 w-4" />
                     {exportActionLabel}
@@ -1495,6 +1566,66 @@ export default function AccountsPage() {
               disabled={scheduleCleanupMutation.isPending}
             >
               {scheduleCleanupMutation.isPending ? "保存中..." : "安装并启用"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
+        <DialogContent className="glass-card border-border/70 sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>导出账号</DialogTitle>
+            <DialogDescription>
+              导出范围会自动按当前选择决定；如果没有选中账号，就导出全部。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="rounded-xl bg-muted/20 px-3 py-3 text-sm text-foreground/80">
+              {exportScopeText}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="account-export-mode">导出格式</Label>
+              <Select
+                value={exportModeDraft}
+                onValueChange={(value) =>
+                  setExportModeDraft(
+                    value === "single" ? "single" : "multiple",
+                  )
+                }
+              >
+                <SelectTrigger
+                  id="account-export-mode"
+                  className="glass-card h-10 rounded-xl"
+                >
+                  <SelectValue>
+                    {(value) => formatAccountExportModeLabel(String(value || ""))}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="multiple">多 JSON</SelectItem>
+                  <SelectItem value="single">单 JSON</SelectItem>
+                </SelectContent>
+              </Select>
+              <div className="text-xs text-muted-foreground">
+                {exportModeDraft === "single"
+                  ? "导出为一个 `accounts.json` 数组文件，适合整体备份和再次导入。"
+                  : "每个账号导出为一个独立 JSON 文件，适合逐个分发或单独管理。"}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose
+              className={cn(buttonVariants({ variant: "outline" }), "rounded-xl")}
+              disabled={isExporting}
+            >
+              取消
+            </DialogClose>
+            <Button
+              className="rounded-xl"
+              onClick={() => void handleConfirmExport()}
+              disabled={isExporting || exportTargetCount <= 0}
+            >
+              {isExporting ? "导出中..." : "开始导出"}
             </Button>
           </DialogFooter>
         </DialogContent>
