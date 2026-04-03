@@ -392,6 +392,42 @@ data: [DONE]
     );
 }
 
+/// 助手先流式输出正文时，也必须合并 `response.completed` 里的 tool_calls，否则 arguments 会一直是 `"{}"`。
+#[test]
+fn openai_chat_stream_merges_completed_tool_calls_when_assistant_text_nonempty() {
+    let upstream = br#"data: {"type":"response.output_text.delta","response_id":"resp_tc","created":1,"model":"gpt-5.3-codex","delta":"ok\n"}
+
+data: {"type":"response.completed","response":{"id":"resp_tc","created":1,"model":"gpt-5.3-codex","output":[{"type":"function_call","call_id":"call_tc","name":"edit","arguments":"{\"path\":\"MERGE_PATH_TOOL_CALL\",\"edits\":[{\"oldText\":\"a\",\"newText\":\"b\"}]}"}],"usage":{"input_tokens":1,"output_tokens":1}}}
+
+data: [DONE]
+
+"#;
+    let (body, content_type) = adapt_upstream_response(
+        ResponseAdapter::OpenAIChatCompletionsSse,
+        Some("text/event-stream"),
+        upstream,
+    )
+    .expect("convert response");
+    assert_eq!(content_type, "application/json");
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("parse converted body");
+    let args = value
+        .get("choices")
+        .and_then(|choices| choices.get(0))
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("tool_calls"))
+        .and_then(|tc| tc.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|t| t.get("function"))
+        .and_then(|f| f.get("arguments"))
+        .and_then(serde_json::Value::as_str)
+        .expect("tool arguments");
+    assert!(
+        args.contains("MERGE_PATH_TOOL_CALL"),
+        "expected completed tool args, got {}",
+        args
+    );
+}
+
 /// 函数 `openai_chat_stream_collapse_avoids_done_and_item_text_duplication`
 ///
 /// 作者: gaohongshun

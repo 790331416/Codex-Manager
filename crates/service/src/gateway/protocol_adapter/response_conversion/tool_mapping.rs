@@ -346,6 +346,7 @@ pub(super) fn collect_chat_tool_calls_from_delta(
 ///
 /// # 返回
 /// 无
+#[allow(dead_code)]
 pub(super) fn collect_chat_tool_calls_from_message(
     message: &Map<String, Value>,
     tool_calls: &mut BTreeMap<usize, AggregatedChatToolCall>,
@@ -358,6 +359,63 @@ pub(super) fn collect_chat_tool_calls_from_message(
             continue;
         };
         merge_chat_tool_call_object(tool_obj, index, tool_calls);
+    }
+}
+
+/// `convert_openai_sse_to_chat_completions_json` 在流式阶段用 `merge_tool_call_arguments` 聚合；
+/// `response.completed` 里的 `message.tool_calls` 可能更完整。若仅当 `content.is_empty()` 才合并，
+/// 则助手先输出任意文字时永远不会合并，最终 `arguments` 为空、`build_openai_chat_tool_calls` 退化为 `"{}"`。
+/// 此处按索引合并：**优先更长**的 `function.arguments` 字符串，并忽略占位 `"{}"`。
+pub(super) fn merge_tool_calls_from_completed_message_prefer_longer(
+    aggregated: &mut BTreeMap<usize, AggregatedChatToolCall>,
+    message: &Map<String, Value>,
+) {
+    let Some(items) = message.get("tool_calls").and_then(Value::as_array) else {
+        return;
+    };
+    for (fallback_index, item) in items.iter().enumerate() {
+        let Some(tool_obj) = item.as_object() else {
+            continue;
+        };
+        let index = tool_obj
+            .get("index")
+            .and_then(Value::as_u64)
+            .map(|value| value as usize)
+            .unwrap_or(fallback_index);
+        let entry = aggregated.entry(index).or_default();
+        if let Some(id) = tool_obj
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            if entry.id.is_none() {
+                entry.id = Some(id.to_string());
+            }
+        }
+        let Some(function_obj) = tool_obj.get("function").and_then(Value::as_object) else {
+            continue;
+        };
+        if let Some(name) = function_obj
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            if entry.name.is_none() {
+                entry.name = Some(name.to_string());
+            }
+        }
+        let Some(completed_args) = function_obj.get("arguments").and_then(Value::as_str) else {
+            continue;
+        };
+        let trimmed = completed_args.trim();
+        if trimmed.is_empty() || matches!(trimmed, "{}" | "[]" | "null") {
+            continue;
+        }
+        if entry.arguments.is_empty() || completed_args.len() > entry.arguments.len() {
+            entry.arguments = completed_args.to_string();
+        }
     }
 }
 
