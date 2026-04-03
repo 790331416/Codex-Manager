@@ -25,6 +25,11 @@ fn fallback_status_trigger_is_limited_to_responses_path() {
     ));
     assert!(!should_try_openai_fallback_by_status(
         "https://chatgpt.com/backend-api/codex",
+        "/v1/responses/compact",
+        429
+    ));
+    assert!(!should_try_openai_fallback_by_status(
+        "https://chatgpt.com/backend-api/codex",
         "/v1/chat/completions",
         429
     ));
@@ -47,6 +52,11 @@ fn fallback_content_type_trigger_is_limited_to_responses_path() {
     assert!(should_try_openai_fallback(
         "https://chatgpt.com/backend-api/codex",
         "/v1/responses",
+        Some(&html)
+    ));
+    assert!(!should_try_openai_fallback(
+        "https://chatgpt.com/backend-api/codex",
+        "/v1/responses/compact",
         Some(&html)
     ));
     assert!(should_try_openai_fallback(

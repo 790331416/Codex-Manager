@@ -525,7 +525,9 @@ fn classify_usage_status_from_snapshot_value(value: &serde_json::Value) -> Usage
         return UsageAvailabilityStatus::PrimaryWindowAvailableOnly;
     }
     if !secondary_complete {
-        return UsageAvailabilityStatus::Unknown;
+        // 中文注释：secondary 半缺失时不再视为未知或不可用，
+        // 只要主窗口有额度，就先保留可继续尝试的状态。
+        return UsageAvailabilityStatus::PrimaryWindowAvailableOnly;
     }
     if secondary_used.map(|v| v >= 100.0).unwrap_or(false) {
         return UsageAvailabilityStatus::Unavailable;

@@ -64,7 +64,9 @@ fn classify_availability_status(snap: &UsageSnapshotRecord) -> &'static str {
         return "primary_window_available_only";
     }
     if !secondary_complete {
-        return "unknown";
+        // 中文注释：secondary 只要不是完整可用数据，就按主窗口可用处理，
+        // 避免半截快照把还有额度的账号展示成未知状态。
+        return "primary_window_available_only";
     }
     if snap
         .secondary_used_percent

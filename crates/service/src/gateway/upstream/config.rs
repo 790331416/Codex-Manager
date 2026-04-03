@@ -163,6 +163,11 @@ pub(in super::super) fn should_try_openai_fallback(
         // 其余路径保持原有行为，避免扩大 fallback 面。
         return false;
     }
+    if request_path.starts_with("/v1/responses/compact") {
+        // 中文注释：compact 已经有独立的请求形状和错误归一化链路，
+        // 继续切到 OpenAI fallback 反而更容易撞上权限范围不一致的问题。
+        return false;
+    }
     let Some(content_type) = content_type else {
         return false;
     };
@@ -195,6 +200,9 @@ pub(in super::super) fn should_try_openai_fallback_by_status(
     }
     let is_responses_path = request_path.starts_with("/v1/responses");
     if !is_responses_path {
+        return false;
+    }
+    if request_path.starts_with("/v1/responses/compact") {
         return false;
     }
     if status_code == 429 {

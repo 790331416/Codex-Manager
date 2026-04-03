@@ -74,7 +74,7 @@ fn availability_marks_missing_secondary_available_when_both_secondary_fields_abs
     ));
 }
 
-/// 函数 `availability_marks_partial_secondary_missing_unavailable`
+/// 函数 `availability_marks_partial_secondary_missing_available`
 ///
 /// 作者: gaohongshun
 ///
@@ -86,12 +86,9 @@ fn availability_marks_missing_secondary_available_when_both_secondary_fields_abs
 /// # 返回
 /// 无
 #[test]
-fn availability_marks_partial_secondary_missing_unavailable() {
+fn availability_marks_partial_secondary_missing_available() {
     let record = snap(Some(10.0), Some(300), None, Some(10080));
-    assert!(matches!(
-        evaluate_snapshot(&record),
-        Availability::Unavailable(_)
-    ));
+    assert!(matches!(evaluate_snapshot(&record), Availability::Available));
 }
 
 /// 函数 `availability_marks_exhausted_secondary_unavailable`
