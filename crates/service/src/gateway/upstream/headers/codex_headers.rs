@@ -58,10 +58,7 @@ pub(crate) fn build_codex_upstream_headers(
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        headers.push((
-            "ChatGPT-Account-ID".to_string(),
-            account_id.to_string(),
-        ));
+        headers.push(("ChatGPT-Account-ID".to_string(), account_id.to_string()));
     }
     if input.has_body {
         headers.push(("Content-Type".to_string(), "application/json".to_string()));
@@ -175,10 +172,7 @@ pub(crate) fn build_codex_compact_upstream_headers(
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        headers.push((
-            "ChatGPT-Account-ID".to_string(),
-            account_id.to_string(),
-        ));
+        headers.push(("ChatGPT-Account-ID".to_string(), account_id.to_string()));
     }
     if input.has_body {
         headers.push(("Content-Type".to_string(), "application/json".to_string()));

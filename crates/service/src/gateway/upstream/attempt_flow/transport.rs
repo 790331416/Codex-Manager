@@ -144,10 +144,7 @@ fn has_header(headers: &[(String, String)], name: &str) -> bool {
 ///
 /// # 返回
 /// 返回函数执行结果
-fn resolve_chatgpt_account_header<'a>(
-    account: &'a Account,
-    target_url: &str,
-) -> Option<&'a str> {
+fn resolve_chatgpt_account_header<'a>(account: &'a Account, target_url: &str) -> Option<&'a str> {
     if !super::super::config::should_send_chatgpt_account_header(target_url) {
         return None;
     }

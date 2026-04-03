@@ -1,8 +1,8 @@
 use super::{
     classify_upstream_stream_read_error, inspect_sse_frame, merge_usage, sse_keepalive_interval,
     stream_reader_disconnected_message, upstream_hint_or_stream_incomplete_message, Arc, Cursor,
-    Mutex, PassthroughSseCollector, Read, SseKeepAliveFrame, SseTerminal,
-    UpstreamSseFramePump, UpstreamSseFramePumpItem,
+    Mutex, PassthroughSseCollector, Read, SseKeepAliveFrame, SseTerminal, UpstreamSseFramePump,
+    UpstreamSseFramePumpItem,
 };
 use crate::gateway::http_bridge::extract_error_hint_from_body;
 

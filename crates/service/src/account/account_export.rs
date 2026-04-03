@@ -438,9 +438,7 @@ fn sanitize_file_stem(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        build_single_export_bundle_json, sanitize_file_stem, select_accounts_for_export,
-    };
+    use super::{build_single_export_bundle_json, sanitize_file_stem, select_accounts_for_export};
     use codexmanager_core::storage::{Account, Storage, Token};
     use std::collections::HashMap;
 

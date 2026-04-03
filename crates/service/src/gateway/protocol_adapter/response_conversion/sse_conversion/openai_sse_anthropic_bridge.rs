@@ -200,10 +200,7 @@ pub(super) fn convert_openai_sse_to_anthropic(
             .is_some_and(|kind| kind == "chat.completion.chunk")
         {
             if response_id.is_none() {
-                response_id = value
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .map(str::to_string);
+                response_id = value.get("id").and_then(Value::as_str).map(str::to_string);
             }
             if model.is_none() {
                 model = value
@@ -226,7 +223,9 @@ pub(super) fn convert_openai_sse_to_anthropic(
                                 }
                             }
                         }
-                        if let Some(delta_tool_calls) = delta.get("tool_calls").and_then(Value::as_array) {
+                        if let Some(delta_tool_calls) =
+                            delta.get("tool_calls").and_then(Value::as_array)
+                        {
                             for item in delta_tool_calls {
                                 let Some(tool_obj) = item.as_object() else {
                                     continue;
@@ -240,11 +239,16 @@ pub(super) fn convert_openai_sse_to_anthropic(
                                 if let Some(id) = tool_obj.get("id").and_then(Value::as_str) {
                                     entry.id = Some(id.to_string());
                                 }
-                                if let Some(function) = tool_obj.get("function").and_then(Value::as_object) {
-                                    if let Some(name) = function.get("name").and_then(Value::as_str) {
+                                if let Some(function) =
+                                    tool_obj.get("function").and_then(Value::as_object)
+                                {
+                                    if let Some(name) = function.get("name").and_then(Value::as_str)
+                                    {
                                         entry.name = Some(name.to_string());
                                     }
-                                    if let Some(arguments) = function.get("arguments").and_then(Value::as_str) {
+                                    if let Some(arguments) =
+                                        function.get("arguments").and_then(Value::as_str)
+                                    {
                                         entry.arguments.push_str(arguments);
                                     }
                                 }
@@ -426,7 +430,10 @@ pub(super) fn convert_openai_sse_to_anthropic(
                             entry.name = Some(name.to_string());
                         }
                         if let Some(arguments_raw) = extract_function_call_arguments_raw(item_obj) {
-                            merge_tool_arguments_from_output_item(&mut entry.arguments, arguments_raw);
+                            merge_tool_arguments_from_output_item(
+                                &mut entry.arguments,
+                                arguments_raw,
+                            );
                         }
                     }
                     continue;

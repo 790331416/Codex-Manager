@@ -115,8 +115,7 @@ pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            let export_mode =
-                first_string_param(req, &["exportMode", "export_mode"]);
+            let export_mode = first_string_param(req, &["exportMode", "export_mode"]);
             super::value_or_error(account_export::export_accounts_to_directory(
                 output_dir,
                 &selected_account_ids,
@@ -141,8 +140,7 @@ pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            let export_mode =
-                first_string_param(req, &["exportMode", "export_mode"]);
+            let export_mode = first_string_param(req, &["exportMode", "export_mode"]);
             super::value_or_error(account_export::export_accounts_data(
                 &selected_account_ids,
                 export_mode.as_deref(),

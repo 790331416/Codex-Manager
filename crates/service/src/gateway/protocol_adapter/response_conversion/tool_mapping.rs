@@ -475,7 +475,10 @@ pub(super) fn merge_tool_calls_from_completed_message_prefer_longer(
             continue;
         }
         if completed_args.len() > entry.arguments.len() {
-            if streamed_tool_arguments_should_be_kept_over_completed(&entry.arguments, completed_args) {
+            if streamed_tool_arguments_should_be_kept_over_completed(
+                &entry.arguments,
+                completed_args,
+            ) {
                 continue;
             }
             entry.arguments = completed_args.to_string();

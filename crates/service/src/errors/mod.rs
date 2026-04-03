@@ -81,8 +81,7 @@ pub(crate) fn classify_message(message: &str) -> ErrorCode {
     if normalized.starts_with("build response failed:") {
         return ErrorCode::BuildResponseFailed;
     }
-    if normalized == "upstream total timeout exceeded"
-        || normalized == "upstream request timed out"
+    if normalized == "upstream total timeout exceeded" || normalized == "upstream request timed out"
     {
         return ErrorCode::UpstreamTimeout;
     }

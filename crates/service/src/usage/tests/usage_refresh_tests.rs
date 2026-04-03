@@ -201,12 +201,8 @@ fn run_token_refresh_task_skips_empty_refresh_token() {
         last_refresh: now,
     };
 
-    let refreshed = run_token_refresh_task(
-        &storage,
-        &mut token,
-        "https://auth.openai.com",
-        "codex-cli",
-    );
+    let refreshed =
+        run_token_refresh_task(&storage, &mut token, "https://auth.openai.com", "codex-cli");
     assert!(!refreshed);
 }
 

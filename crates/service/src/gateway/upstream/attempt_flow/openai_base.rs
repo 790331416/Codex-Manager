@@ -65,7 +65,7 @@ where
         ) {
             UpstreamOutcomeDecision::Failover => OpenAiAttemptResult::Failover,
             UpstreamOutcomeDecision::RespondUpstream => OpenAiAttemptResult::Upstream(resp),
-        }
+        },
         Ok(None) => {
             super::super::super::mark_account_cooldown(
                 &account.id,

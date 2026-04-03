@@ -1048,9 +1048,6 @@ mod tests {
             stream_terminal_seen: false,
             ..UpstreamResponseBridgeResult::default()
         };
-        assert_eq!(
-            bridge.error_message(true).as_deref(),
-            Some("网络抖动")
-        );
+        assert_eq!(bridge.error_message(true).as_deref(), Some("网络抖动"));
     }
 }

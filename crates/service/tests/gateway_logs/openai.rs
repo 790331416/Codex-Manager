@@ -2624,7 +2624,9 @@ fn gateway_invalid_refresh_token_marks_first_account_unavailable_and_fails_over(
     );
     assert_eq!(second.path, "/oauth/token");
     assert!(
-        upstream_rx.recv_timeout(Duration::from_millis(500)).is_err(),
+        upstream_rx
+            .recv_timeout(Duration::from_millis(500))
+            .is_err(),
         "unexpected second-account failover request observed"
     );
 
