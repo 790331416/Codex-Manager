@@ -1,5 +1,7 @@
 use codexmanager_core::storage::{now_ts, Event, Storage};
 
+use crate::account_availability::{evaluate_snapshot, Availability};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AccountAvailabilitySignal {
     RefreshToken(crate::usage_http::RefreshTokenAuthErrorReason),
@@ -221,10 +223,30 @@ pub(crate) fn mark_account_unavailable_for_gateway_error(
     if let Some(reason) = deactivation_reason_from_message(err) {
         return set_account_banned_with_reason(storage, account_id, reason);
     }
-    if let Some(reason) = usage_limit_reason_from_message(err) {
-        return set_account_unavailable_with_reason(storage, account_id, reason);
+    if usage_limit_reason_from_message(err).is_some() {
+        return mark_account_unavailable_for_confirmed_usage_exhausted(storage, account_id);
     }
     false
+}
+
+fn mark_account_unavailable_for_confirmed_usage_exhausted(
+    storage: &Storage,
+    account_id: &str,
+) -> bool {
+    let snapshot = storage
+        .latest_usage_snapshot_for_account(account_id)
+        .ok()
+        .flatten();
+    let exhausted = matches!(
+        snapshot.as_ref().map(evaluate_snapshot),
+        Some(Availability::Unavailable(
+            "usage_exhausted_primary" | "usage_exhausted_secondary"
+        ))
+    );
+    if !exhausted {
+        return false;
+    }
+    set_account_unavailable_with_reason(storage, account_id, "usage_limit_exhausted")
 }
 
 /// 函数 `set_account_unavailable_with_reason`
@@ -386,7 +408,7 @@ mod tests {
         mark_account_unavailable_for_gateway_error, should_failover_for_gateway_error,
         AccountAvailabilitySignal,
     };
-    use codexmanager_core::storage::{now_ts, Account, Storage};
+    use codexmanager_core::storage::{now_ts, Account, Storage, UsageSnapshotRecord};
 
     /// 函数 `classify_account_availability_signal_separates_usage_refresh_and_deactivation`
     ///
@@ -451,7 +473,7 @@ mod tests {
         ));
     }
 
-    /// 函数 `gateway_usage_limit_error_marks_account_unavailable`
+    /// 函数 `gateway_usage_limit_error_does_not_persist_unavailable_status`
     ///
     /// 作者: gaohongshun
     ///
@@ -463,7 +485,7 @@ mod tests {
     /// # 返回
     /// 无
     #[test]
-    fn gateway_usage_limit_error_marks_account_unavailable() {
+    fn gateway_usage_limit_error_does_not_persist_unavailable_status() {
         let _guard = crate::test_env_guard();
         let storage = Storage::open_in_memory().expect("open storage");
         storage.init().expect("init storage");
@@ -483,7 +505,7 @@ mod tests {
             })
             .expect("insert account");
 
-        assert!(mark_account_unavailable_for_gateway_error(
+        assert!(!mark_account_unavailable_for_gateway_error(
             &storage,
             "acc-usage-limit",
             "You've hit your usage limit. To get more access now, try again at 8:02 PM."
@@ -491,6 +513,64 @@ mod tests {
 
         let account = storage
             .find_account_by_id("acc-usage-limit")
+            .expect("find account")
+            .expect("account exists");
+        assert_eq!(account.status, "active");
+    }
+
+    /// 函数 `gateway_usage_limit_error_marks_account_unavailable_when_snapshot_exhausted`
+    ///
+    /// 作者: gaohongshun
+    ///
+    /// 时间: 2026-04-03
+    ///
+    /// # 参数
+    /// 无
+    ///
+    /// # 返回
+    /// 无
+    #[test]
+    fn gateway_usage_limit_error_marks_account_unavailable_when_snapshot_exhausted() {
+        let _guard = crate::test_env_guard();
+        let storage = Storage::open_in_memory().expect("open storage");
+        storage.init().expect("init storage");
+        let now = now_ts();
+        storage
+            .insert_account(&Account {
+                id: "acc-usage-exhausted".to_string(),
+                label: "usage-exhausted".to_string(),
+                issuer: "issuer".to_string(),
+                chatgpt_account_id: None,
+                workspace_id: None,
+                group_name: None,
+                sort: 0,
+                status: "active".to_string(),
+                created_at: now,
+                updated_at: now,
+            })
+            .expect("insert account");
+        storage
+            .insert_usage_snapshot(&UsageSnapshotRecord {
+                account_id: "acc-usage-exhausted".to_string(),
+                used_percent: Some(100.0),
+                window_minutes: Some(300),
+                resets_at: None,
+                secondary_used_percent: Some(100.0),
+                secondary_window_minutes: Some(10080),
+                secondary_resets_at: None,
+                credits_json: None,
+                captured_at: now,
+            })
+            .expect("insert usage snapshot");
+
+        assert!(mark_account_unavailable_for_gateway_error(
+            &storage,
+            "acc-usage-exhausted",
+            "You've hit your usage limit. To get more access now, try again at 8:02 PM."
+        ));
+
+        let account = storage
+            .find_account_by_id("acc-usage-exhausted")
             .expect("find account")
             .expect("account exists");
         assert_eq!(account.status, "unavailable");
