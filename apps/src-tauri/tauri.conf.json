@@ -4,8 +4,8 @@
   "version": "0.1.15",
   "identifier": "com.codexmanager.desktop",
   "build": {
-    "beforeDevCommand": "if exist package.json (pnpm --dir . run dev:desktop) else if exist apps\\package.json (pnpm --dir apps run dev:desktop) else if exist ..\\package.json (pnpm --dir .. run dev:desktop) else (echo apps/package.json not found from cwd: %cd% & exit /b 1)",
-    "beforeBuildCommand": "if exist package.json (pnpm --dir . run build:desktop) else if exist apps\\package.json (pnpm --dir apps run build:desktop) else if exist ..\\package.json (pnpm --dir .. run build:desktop) else (echo apps/package.json not found from cwd: %cd% & exit /b 1)",
+    "beforeDevCommand": "node scripts/before-build.mjs dev:desktop",
+    "beforeBuildCommand": "node scripts/before-build.mjs build:desktop",
     "devUrl": "http://127.0.0.1:3005",
     "frontendDist": "../out"
   },
