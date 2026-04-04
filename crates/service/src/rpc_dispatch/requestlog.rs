@@ -38,6 +38,9 @@ pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
             ))
         }
         "requestlog/clear" => super::ok_or_error(requestlog_clear::clear_request_logs()),
+        "requestlog/error_clear" => {
+            super::ok_or_error(requestlog_clear::clear_gateway_error_logs())
+        }
         "requestlog/error_list" => {
             let limit = req
                 .params

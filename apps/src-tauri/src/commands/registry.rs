@@ -25,6 +25,8 @@ macro_rules! invoke_handler {
             crate::commands::usage::service_usage_refresh,
             // request log
             crate::commands::requestlog::service_requestlog_list,
+            crate::commands::requestlog::service_requestlog_error_list,
+            crate::commands::requestlog::service_requestlog_error_clear,
             crate::commands::requestlog::service_requestlog_summary,
             crate::commands::requestlog::service_requestlog_clear,
             crate::commands::requestlog::service_requestlog_today_summary,

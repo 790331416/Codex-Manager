@@ -140,6 +140,8 @@ export const serviceClient = {
     );
     return normalizeGatewayErrorLogs(result);
   },
+  clearGatewayErrorLogs: () =>
+    invoke("service_requestlog_error_clear", withAddr()),
   clearRequestLogs: () => invoke("service_requestlog_clear", withAddr()),
   async getTodaySummary(): Promise<RequestLogTodaySummary> {
     const result = await invoke<unknown>(

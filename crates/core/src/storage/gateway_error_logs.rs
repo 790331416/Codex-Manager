@@ -123,6 +123,22 @@ impl Storage {
         }
         Ok(items)
     }
+
+    /// 函数 `clear_gateway_error_logs`
+    ///
+    /// 作者: gaohongshun
+    ///
+    /// 时间: 2026-04-04
+    ///
+    /// # 参数
+    /// - self: 参数 self
+    ///
+    /// # 返回
+    /// 返回函数执行结果
+    pub fn clear_gateway_error_logs(&self) -> Result<()> {
+        self.conn.execute("DELETE FROM gateway_error_logs", [])?;
+        Ok(())
+    }
 }
 
 fn map_gateway_error_log_row(row: &Row<'_>) -> Result<GatewayErrorLog> {

@@ -255,6 +255,8 @@ impl Storage {
     /// # 返回
     /// 返回函数执行结果
     pub fn list_gateway_candidates(&self) -> Result<Vec<(Account, Token)>> {
+        let availability_clause =
+            account_usage_filter_clause(AccountUsageQueryMode::ActiveAvailable, "a", "lu");
         let sql = format!(
             "{latest_usage_cte}
              SELECT
@@ -266,13 +268,12 @@ impl Storage {
              LEFT JOIN latest_usage lu
                ON lu.account_id = a.id
               AND lu.rn = 1
-             WHERE LOWER(TRIM(COALESCE(a.status, ''))) = 'active'
-               AND ({gateway_available_clause})
+             WHERE {availability_clause}
              ORDER BY a.sort ASC, a.updated_at DESC",
             latest_usage_cte = latest_usage_cte_sql(),
             account_select = account_select_columns("a"),
             token_select = token_select_columns("t"),
-            gateway_available_clause = gateway_available_usage_clause("lu"),
+            availability_clause = availability_clause,
         );
 
         let mut stmt = self.conn.prepare(&sql)?;
@@ -786,13 +787,6 @@ fn available_usage_clause(usage_alias: &str) -> String {
 ///
 /// # 返回
 /// 返回函数执行结果
-fn gateway_available_usage_clause(usage_alias: &str) -> String {
-    format!(
-        "{usage_alias}.account_id IS NULL OR ({})",
-        available_usage_clause(usage_alias)
-    )
-}
-
 /// 函数 `account_usage_filter_clause`
 ///
 /// 作者: gaohongshun
@@ -960,4 +954,91 @@ fn map_gateway_candidate_row(row: &Row<'_>) -> Result<(Account, Token)> {
     let account = map_account_row_from_offset(row, 0)?;
     let token = map_token_row_from_offset(row, 9)?;
     Ok((account, token))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::UsageSnapshotRecord;
+
+    fn sample_account(id: &str, status: &str, now: i64) -> Account {
+        Account {
+            id: id.to_string(),
+            label: id.to_string(),
+            issuer: "issuer".to_string(),
+            chatgpt_account_id: None,
+            workspace_id: None,
+            group_name: None,
+            sort: 0,
+            status: status.to_string(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn sample_token(account_id: &str, now: i64) -> Token {
+        Token {
+            account_id: account_id.to_string(),
+            id_token: "id".to_string(),
+            access_token: "access".to_string(),
+            refresh_token: "refresh".to_string(),
+            api_key_access_token: None,
+            last_refresh: now,
+        }
+    }
+
+    #[test]
+    fn list_gateway_candidates_only_returns_active_available_accounts() {
+        let storage = Storage::open_in_memory().expect("open");
+        storage.init().expect("init");
+        let now = now_ts();
+
+        let active_available = sample_account("acc-active-ok", "active", now);
+        let active_missing_usage = sample_account("acc-active-missing", "active", now);
+        let unavailable = sample_account("acc-unavailable", "unavailable", now);
+
+        for account in [&active_available, &active_missing_usage, &unavailable] {
+            storage.insert_account(account).expect("insert account");
+            storage
+                .insert_token(&sample_token(account.id.as_str(), now))
+                .expect("insert token");
+        }
+
+        storage
+            .insert_usage_snapshot(&UsageSnapshotRecord {
+                account_id: active_available.id.clone(),
+                used_percent: Some(12.0),
+                window_minutes: Some(180),
+                resets_at: None,
+                secondary_used_percent: None,
+                secondary_window_minutes: None,
+                secondary_resets_at: None,
+                credits_json: None,
+                captured_at: now,
+            })
+            .expect("insert usage");
+        storage
+            .insert_usage_snapshot(&UsageSnapshotRecord {
+                account_id: unavailable.id.clone(),
+                used_percent: Some(10.0),
+                window_minutes: Some(180),
+                resets_at: None,
+                secondary_used_percent: None,
+                secondary_window_minutes: None,
+                secondary_resets_at: None,
+                credits_json: None,
+                captured_at: now,
+            })
+            .expect("insert usage");
+
+        let candidates = storage
+            .list_gateway_candidates()
+            .expect("list gateway candidates");
+        let ids = candidates
+            .into_iter()
+            .map(|(account, _)| account.id)
+            .collect::<Vec<_>>();
+
+        assert_eq!(ids, vec!["acc-active-ok".to_string()]);
+    }
 }

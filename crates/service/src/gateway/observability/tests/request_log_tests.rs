@@ -1,4 +1,4 @@
-use super::estimate_cost_usd;
+use super::{estimate_cost_usd, should_write_gateway_error_fallback};
 
 /// 函数 `assert_close`
 ///
@@ -213,6 +213,22 @@ fn estimate_cost_falls_back_gpt_5_3_codex_to_gpt_5_2_codex_price() {
         Some(1_000_000),
     );
     assert_close(actual, 15.75);
+}
+
+#[test]
+fn gateway_error_fallback_matches_cloudflare_and_rate_limit_errors() {
+    assert!(should_write_gateway_error_fallback(
+        Some(403),
+        Some("Cloudflare 安全验证页（title=Just a moment...）"),
+    ));
+    assert!(should_write_gateway_error_fallback(
+        Some(429),
+        Some("type=usage_limit_reached The usage limit"),
+    ));
+    assert!(!should_write_gateway_error_fallback(
+        Some(500),
+        Some("internal server error"),
+    ));
 }
 
 /// 函数 `estimate_cost_matches_openai_gpt4o_and_o3_prices`

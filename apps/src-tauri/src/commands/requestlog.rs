@@ -32,6 +32,29 @@ pub async fn service_requestlog_list(
     rpc_call_in_background("requestlog/list", addr, Some(params)).await
 }
 
+/// 函数 `service_requestlog_error_list`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-04
+///
+/// # 参数
+/// - addr: 参数 addr
+/// - limit: 参数 limit
+///
+/// # 返回
+/// 返回函数执行结果
+#[tauri::command]
+pub async fn service_requestlog_error_list(
+    addr: Option<String>,
+    limit: Option<i64>,
+) -> Result<serde_json::Value, String> {
+    let params = serde_json::json!({
+        "limit": limit
+    });
+    rpc_call_in_background("requestlog/error_list", addr, Some(params)).await
+}
+
 /// 函数 `service_requestlog_clear`
 ///
 /// 作者: gaohongshun
@@ -46,6 +69,24 @@ pub async fn service_requestlog_list(
 #[tauri::command]
 pub async fn service_requestlog_clear(addr: Option<String>) -> Result<serde_json::Value, String> {
     rpc_call_in_background("requestlog/clear", addr, None).await
+}
+
+/// 函数 `service_requestlog_error_clear`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-04
+///
+/// # 参数
+/// - addr: 参数 addr
+///
+/// # 返回
+/// 返回函数执行结果
+#[tauri::command]
+pub async fn service_requestlog_error_clear(
+    addr: Option<String>,
+) -> Result<serde_json::Value, String> {
+    rpc_call_in_background("requestlog/error_clear", addr, None).await
 }
 
 /// 函数 `service_requestlog_summary`
