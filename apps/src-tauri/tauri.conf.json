@@ -4,8 +4,8 @@
   "version": "0.1.15",
   "identifier": "com.codexmanager.desktop",
   "build": {
-    "beforeDevCommand": "pnpm --dir .. run dev:desktop",
-    "beforeBuildCommand": "pnpm --dir .. run build:desktop",
+    "beforeDevCommand": "pnpm run dev:desktop",
+    "beforeBuildCommand": "pnpm run build:desktop",
     "devUrl": "http://127.0.0.1:3005",
     "frontendDist": "../out"
   },
