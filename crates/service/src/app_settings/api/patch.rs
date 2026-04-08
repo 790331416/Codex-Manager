@@ -10,7 +10,7 @@ use super::{
     set_gateway_sse_keepalive_interval_ms, set_gateway_upstream_proxy_url,
     set_gateway_upstream_stream_timeout_ms, set_gateway_user_agent_version,
     set_lightweight_mode_on_close_to_tray_setting, set_saved_service_addr, set_service_bind_mode,
-    set_ui_appearance_preset, set_ui_low_transparency_enabled, set_ui_theme,
+    set_ui_appearance_preset, set_ui_locale, set_ui_low_transparency_enabled, set_ui_theme,
     set_update_auto_check_enabled, BackgroundTasksInput, APP_SETTING_PLUGIN_MARKET_MODE_KEY,
     APP_SETTING_PLUGIN_MARKET_SOURCE_URL_KEY,
 };
@@ -24,6 +24,7 @@ pub(super) struct AppSettingsPatch {
     low_transparency: Option<bool>,
     theme: Option<String>,
     appearance_preset: Option<String>,
+    locale: Option<String>,
     service_addr: Option<String>,
     pub(super) service_listen_mode: Option<String>,
     route_strategy: Option<String>,
@@ -91,6 +92,9 @@ pub(super) fn apply_app_settings_patch(patch: AppSettingsPatch) -> Result<(), St
     }
     if let Some(preset) = patch.appearance_preset {
         let _ = set_ui_appearance_preset(Some(&preset))?;
+    }
+    if let Some(locale) = patch.locale {
+        let _ = set_ui_locale(Some(&locale))?;
     }
     if let Some(service_addr) = patch.service_addr {
         let _ = set_saved_service_addr(Some(&service_addr))?;

@@ -24,6 +24,7 @@ import {
   isExpectedInitializeResult,
   normalizeServiceAddr,
 } from "@/lib/utils/service";
+import { useI18n } from "@/lib/i18n/provider";
 import {
   getCanonicalStaticRouteUrl,
   normalizeRoutePath,
@@ -79,6 +80,7 @@ export function AppBootstrap({ children }: { children: React.ReactNode }) {
     runtimeCapabilities,
   } = useAppStore();
   const { setTheme } = useTheme();
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const pathname = usePathname();
   const router = useRouter();
@@ -570,7 +572,7 @@ export function AppBootstrap({ children }: { children: React.ReactNode }) {
             shouldBlockOnInitialDashboardSnapshot(true),
         },
       );
-      toast.success("服务已启动");
+      toast.success(t("服务已连接"));
     } catch (startError: unknown) {
       setServiceStatus({ connected: false, version: "" });
       setError(formatServiceError(startError));
@@ -615,9 +617,9 @@ export function AppBootstrap({ children }: { children: React.ReactNode }) {
               <>
                 <div className="h-14 w-14 animate-spin rounded-full border-4 border-primary border-t-transparent" />
                 <div className="flex flex-col items-center gap-2">
-                  <h2 className="text-2xl font-bold tracking-tight">正在准备环境</h2>
+                  <h2 className="text-2xl font-bold tracking-tight">{t("正在准备环境")}</h2>
                   <p className="px-4 text-center text-sm text-muted-foreground">
-                    正在同步本地配置，请稍候...
+                    {t("正在同步本地配置，请稍候...")}
                   </p>
                 </div>
               </>
@@ -629,8 +631,8 @@ export function AppBootstrap({ children }: { children: React.ReactNode }) {
                 <div className="flex flex-col items-center gap-2 text-center">
                   <h2 className="text-xl font-bold tracking-tight text-destructive">
                     {isUnsupportedWebRuntime
-                      ? "当前 Web 运行方式不受支持"
-                      : "无法同步核心服务状态"}
+                      ? t("当前 Web 运行方式不受支持")
+                      : t("无法同步核心服务状态")}
                   </h2>
                   {isUnsupportedWebRuntime ? (
                     <p className="px-4 text-center text-sm text-muted-foreground">
@@ -646,11 +648,11 @@ export function AppBootstrap({ children }: { children: React.ReactNode }) {
                   className={`grid w-full gap-3 ${supportsLocalServiceStart ? "grid-cols-2" : "grid-cols-1"}`}
                 >
                   <Button variant="outline" onClick={() => void init()} className="h-11 gap-2">
-                    <RefreshCw className="h-4 w-4" /> 重试
+                    <RefreshCw className="h-4 w-4" /> {t("重试")}
                   </Button>
                   {supportsLocalServiceStart ? (
                     <Button onClick={handleForceStart} className="h-11 gap-2 bg-primary">
-                      <Play className="h-4 w-4" /> 强制启动
+                      <Play className="h-4 w-4" /> {t("强制启动")}
                     </Button>
                   ) : null}
                 </div>

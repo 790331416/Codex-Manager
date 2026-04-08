@@ -394,6 +394,8 @@ export interface AppSettings {
   lowTransparency: boolean;
   lightweightModeOnCloseToTray: boolean;
   webAccessPasswordConfigured: boolean;
+  locale: string;
+  localeOptions: string[];
   serviceAddr: string;
   serviceListenMode: string;
   serviceListenModeOptions: string[];

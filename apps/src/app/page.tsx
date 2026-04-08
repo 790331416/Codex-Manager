@@ -17,6 +17,7 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDashboardStats } from "@/hooks/useDashboardStats";
 import { usePageTransitionReady } from "@/hooks/usePageTransitionReady";
+import { useI18n } from "@/lib/i18n/provider";
 import { cn } from "@/lib/utils";
 import { formatCompactNumber } from "@/lib/utils/usage";
 
@@ -257,6 +258,7 @@ function StatProgressCard({
 }
 
 export default function DashboardPage() {
+  const { t } = useI18n();
   const { stats, currentAccount, recommendations, requestLogs, isLoading, isServiceReady } =
     useDashboardStats();
   usePageTransitionReady("/", !isServiceReady || !isLoading);
@@ -274,46 +276,46 @@ export default function DashboardPage() {
           <>
             <Card className="glass-card overflow-hidden border-none shadow-md backdrop-blur-md transition-all hover:scale-[1.02]">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">总账号数</CardTitle>
+                <CardTitle className="text-sm font-medium">{t("总账号数")}</CardTitle>
                 <Users className="h-4 w-4 text-blue-500" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{stats.total}</div>
-                <p className="mt-1 text-[10px] text-muted-foreground">池中所有配置账号</p>
+                <p className="mt-1 text-[10px] text-muted-foreground">{t("池中所有配置账号")}</p>
                 <div className="mt-4 flex w-fit items-center gap-2 rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] text-blue-600 dark:text-blue-400">
                   <Activity className="h-3 w-3" />
-                  最近日志 {requestLogs.length} 条
+                  {t("最近日志")} {requestLogs.length} 条
                 </div>
               </CardContent>
             </Card>
 
             <StatProgressCard
-              title="可用账号"
+              title={t("可用账号")}
               value={stats.available}
               total={stats.total}
               icon={CheckCircle2}
               color="text-green-500"
-              sub="当前健康可调用的账号"
+              sub={t("当前健康可调用的账号")}
             />
 
             <StatProgressCard
-              title="不可用账号"
+              title={t("不可用账号")}
               value={stats.unavailable}
               total={stats.total}
               icon={XCircle}
               color="text-red-500"
-              sub="额度耗尽或授权失效"
+              sub={t("额度耗尽或授权失效")}
             />
 
             <Card className="overflow-hidden border-none bg-primary/10 shadow-md backdrop-blur-md transition-all hover:scale-[1.02]">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium text-primary">账号池剩余</CardTitle>
+                <CardTitle className="text-sm font-medium text-primary">{t("账号池剩余")}</CardTitle>
                 <PieChart className="h-4 w-4 text-primary" />
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between text-[10px]">
-                    <span className="text-muted-foreground">5小时内</span>
+                    <span className="text-muted-foreground">{t("5小时内")}</span>
                     <span className="font-bold">{formatPercent(stats.poolRemain?.primary)}</span>
                   </div>
                   <Progress
@@ -324,7 +326,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between text-[10px]">
-                    <span className="text-muted-foreground">7天内</span>
+                    <span className="text-muted-foreground">{t("7天内")}</span>
                     <span className="font-bold">{formatPercent(stats.poolRemain?.secondary)}</span>
                   </div>
                   <Progress
@@ -342,32 +344,32 @@ export default function DashboardPage() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {[ 
           {
-            title: "今日词元",
+            title: t("今日词元"),
             value: formatCompactTokenAmount(stats.todayTokens),
             icon: Zap,
             color: "text-yellow-500",
-            sub: "输入 + 输出合计",
+            sub: t("输入 + 输出合计"),
           },
           {
-            title: "缓存词元",
+            title: t("缓存词元"),
             value: formatCompactTokenAmount(stats.cachedTokens),
             icon: Database,
             color: "text-indigo-500",
-            sub: "上下文缓存命中",
+            sub: t("上下文缓存命中"),
           },
           {
-            title: "推理词元",
+            title: t("推理词元"),
             value: formatCompactTokenAmount(stats.reasoningTokens),
             icon: BrainCircuit,
             color: "text-purple-500",
-            sub: "大模型思考过程",
+            sub: t("大模型思考过程"),
           },
           {
-            title: "预计费用",
+            title: t("预计费用"),
             value: `$${Number(stats.todayCost || 0).toFixed(2)}`,
             icon: DollarSign,
             color: "text-emerald-500",
-            sub: "按官价估算",
+            sub: t("按官价估算"),
           },
         ].map((card) => (
           isLoading ? (
@@ -393,7 +395,7 @@ export default function DashboardPage() {
       <div className="grid gap-6 md:grid-cols-2">
         <Card className="glass-card min-h-[300px] border-none shadow-md">
           <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-base font-semibold">当前活跃账号</CardTitle>
+            <CardTitle className="text-base font-semibold">{t("当前活跃账号")}</CardTitle>
           </CardHeader>
           <CardContent className="flex min-h-[200px] flex-col justify-start">
             {isLoading ? (
@@ -407,21 +409,21 @@ export default function DashboardPage() {
             ) : currentAccount ? (
               <div className="space-y-4">
                 <AccountHighlightCard
-                  title="当前活跃账号"
+                  title={t("当前活跃账号")}
                   name={currentAccount.name}
                   subtitle={currentAccount.id}
                   tone="green"
                 />
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div className="space-y-3 rounded-xl bg-muted/30 p-4">
-                    <p className="text-xs text-muted-foreground">5小时剩余</p>
+                    <p className="text-xs text-muted-foreground">{t("5小时剩余")}</p>
                     <p className="text-lg font-bold">{formatPercent(currentAccount.primaryRemainPercent)}</p>
-                    <PercentBar label="剩余额度" value={currentAccount.primaryRemainPercent} tone="green" />
+                    <PercentBar label={t("剩余额度")} value={currentAccount.primaryRemainPercent} tone="green" />
                   </div>
                   <div className="space-y-3 rounded-xl bg-muted/30 p-4">
-                    <p className="text-xs text-muted-foreground">7天剩余</p>
+                    <p className="text-xs text-muted-foreground">{t("7天剩余")}</p>
                     <p className="text-lg font-bold">{formatPercent(currentAccount.secondaryRemainPercent)}</p>
-                    <PercentBar label="剩余额度" value={currentAccount.secondaryRemainPercent} tone="blue" />
+                    <PercentBar label={t("剩余额度")} value={currentAccount.secondaryRemainPercent} tone="blue" />
                   </div>
                 </div>
               </div>
@@ -430,7 +432,7 @@ export default function DashboardPage() {
                 <div className="rounded-full bg-accent/30 p-4 animate-pulse">
                   <Activity className="h-8 w-8 opacity-20" />
                 </div>
-                <p>{isServiceReady ? "暂无可识别的活跃账号" : "正在等待服务连接"}</p>
+                <p>{isServiceReady ? t("暂无可识别的活跃账号") : t("正在等待服务连接")}</p>
               </div>
             )}
           </CardContent>
@@ -438,11 +440,11 @@ export default function DashboardPage() {
 
         <Card className="glass-card min-h-[300px] border-none shadow-md">
           <CardHeader>
-            <CardTitle className="text-base font-semibold">智能推荐</CardTitle>
+            <CardTitle className="text-base font-semibold">{t("智能推荐")}</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             <p className="text-xs text-muted-foreground">
-              基于当前配额，系统会优先推荐剩余额度更高且仍可参与路由的账号。
+              {t("基于当前配额，系统会优先推荐剩余额度更高且仍可参与路由的账号。")}
             </p>
             {isLoading ? (
               <div className="space-y-4">
@@ -453,28 +455,28 @@ export default function DashboardPage() {
               <>
                 {recommendations.primaryPick ? (
                   <AccountHighlightCard
-                    title="5小时优先账号"
+                    title={t("5小时优先账号")}
                     name={recommendations.primaryPick.name}
                     subtitle={recommendations.primaryPick.id}
                     tone="green"
-                    progressLabel="剩余额度"
+                    progressLabel={t("剩余额度")}
                     progressValue={recommendations.primaryPick.primaryRemainPercent}
                   />
                 ) : null}
                 {recommendations.secondaryPick ? (
                   <AccountHighlightCard
-                    title="7天优先账号"
+                    title={t("7天优先账号")}
                     name={recommendations.secondaryPick.name}
                     subtitle={recommendations.secondaryPick.id}
                     tone="blue"
-                    progressLabel="剩余额度"
+                    progressLabel={t("剩余额度")}
                     progressValue={recommendations.secondaryPick.secondaryRemainPercent}
                   />
                 ) : null}
               </>
             ) : (
               <div className="rounded-xl bg-accent/20 p-4 text-sm text-muted-foreground">
-                {isServiceReady ? "当前没有可推荐的可用账号。" : "正在等待服务连接。"}
+                {isServiceReady ? t("当前没有可推荐的可用账号。") : t("正在等待服务连接。")}
               </div>
             )}
           </CardContent>

@@ -29,10 +29,11 @@ pub(super) use super::service::{
 pub(super) use super::store::{save_persisted_app_setting, save_persisted_bool_setting};
 pub(super) use super::ui::{
     current_close_to_tray_on_close_setting, current_lightweight_mode_on_close_to_tray_setting,
-    current_ui_appearance_preset, current_ui_low_transparency_enabled, current_ui_theme,
-    current_update_auto_check_enabled, set_close_to_tray_on_close_setting,
-    set_lightweight_mode_on_close_to_tray_setting, set_ui_appearance_preset,
-    set_ui_low_transparency_enabled, set_ui_theme, set_update_auto_check_enabled,
+    current_ui_appearance_preset, current_ui_locale, current_ui_low_transparency_enabled,
+    current_ui_theme, current_update_auto_check_enabled,
+    set_close_to_tray_on_close_setting, set_lightweight_mode_on_close_to_tray_setting,
+    set_ui_appearance_preset, set_ui_locale, set_ui_low_transparency_enabled,
+    set_ui_theme, set_update_auto_check_enabled,
 };
 pub(super) use super::{
     APP_SETTING_CLOSE_TO_TRAY_ON_CLOSE_KEY, APP_SETTING_GATEWAY_ACCOUNT_MAX_INFLIGHT_KEY,
@@ -43,8 +44,9 @@ pub(super) use super::{
     APP_SETTING_GATEWAY_UPSTREAM_STREAM_TIMEOUT_MS_KEY, APP_SETTING_GATEWAY_USER_AGENT_VERSION_KEY,
     APP_SETTING_LIGHTWEIGHT_MODE_ON_CLOSE_TO_TRAY_KEY, APP_SETTING_PLUGIN_MARKET_MODE_KEY,
     APP_SETTING_PLUGIN_MARKET_SOURCE_URL_KEY, APP_SETTING_SERVICE_ADDR_KEY,
-    APP_SETTING_UI_APPEARANCE_PRESET_KEY, APP_SETTING_UI_LOW_TRANSPARENCY_KEY,
-    APP_SETTING_UI_THEME_KEY, APP_SETTING_UPDATE_AUTO_CHECK_KEY,
+    APP_SETTING_UI_APPEARANCE_PRESET_KEY, APP_SETTING_UI_LOCALE_KEY,
+    APP_SETTING_UI_LOW_TRANSPARENCY_KEY, APP_SETTING_UI_THEME_KEY,
+    APP_SETTING_UPDATE_AUTO_CHECK_KEY,
 };
 
 /// 函数 `app_settings_get`

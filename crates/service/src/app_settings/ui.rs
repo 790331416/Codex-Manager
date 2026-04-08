@@ -2,17 +2,20 @@ use super::parse_bool_with_default;
 use super::{
     get_persisted_app_setting, save_persisted_app_setting, save_persisted_bool_setting,
     APP_SETTING_CLOSE_TO_TRAY_ON_CLOSE_KEY, APP_SETTING_LIGHTWEIGHT_MODE_ON_CLOSE_TO_TRAY_KEY,
-    APP_SETTING_UI_APPEARANCE_PRESET_KEY, APP_SETTING_UI_LOW_TRANSPARENCY_KEY,
+    APP_SETTING_UI_APPEARANCE_PRESET_KEY, APP_SETTING_UI_LOCALE_KEY,
+    APP_SETTING_UI_LOW_TRANSPARENCY_KEY,
     APP_SETTING_UI_THEME_KEY, APP_SETTING_UPDATE_AUTO_CHECK_KEY,
 };
 
 const DEFAULT_UI_THEME: &str = "tech";
 const DEFAULT_UI_APPEARANCE_PRESET: &str = "classic";
+const DEFAULT_UI_LOCALE: &str = "zh-CN";
 const VALID_UI_THEMES: &[&str] = &[
     "tech", "dark", "dark-one", "business", "mint", "sunset", "grape", "ocean", "forest", "rose",
     "slate", "aurora",
 ];
 const VALID_UI_APPEARANCE_PRESETS: &[&str] = &["modern", "classic"];
+const VALID_UI_LOCALES: &[&str] = &["zh-CN", "en", "ru", "ko"];
 
 /// 函数 `normalize_ui_theme`
 ///
@@ -57,6 +60,23 @@ fn normalize_ui_appearance_preset(raw: Option<&str>) -> String {
         candidate
     } else {
         DEFAULT_UI_APPEARANCE_PRESET.to_string()
+    }
+}
+
+fn normalize_ui_locale(raw: Option<&str>) -> String {
+    let candidate = raw.unwrap_or(DEFAULT_UI_LOCALE).trim();
+    let normalized = candidate.to_ascii_lowercase();
+    let next_value = match normalized.as_str() {
+        "zh" | "zh-cn" | "zh_hans" | "zh-hans" => "zh-CN",
+        "en" | "en-us" | "en-gb" => "en",
+        "ru" | "ru-ru" => "ru",
+        "ko" | "ko-kr" => "ko",
+        _ => DEFAULT_UI_LOCALE,
+    };
+    if VALID_UI_LOCALES.iter().any(|locale| *locale == next_value) {
+        next_value.to_string()
+    } else {
+        DEFAULT_UI_LOCALE.to_string()
     }
 }
 
@@ -256,4 +276,34 @@ pub fn set_ui_appearance_preset(preset: Option<&str>) -> Result<String, String> 
     let normalized = normalize_ui_appearance_preset(preset);
     save_persisted_app_setting(APP_SETTING_UI_APPEARANCE_PRESET_KEY, Some(&normalized))?;
     Ok(normalized)
+}
+
+pub fn current_ui_locale() -> String {
+    normalize_ui_locale(get_persisted_app_setting(APP_SETTING_UI_LOCALE_KEY).as_deref())
+}
+
+pub fn set_ui_locale(locale: Option<&str>) -> Result<String, String> {
+    let normalized = normalize_ui_locale(locale);
+    save_persisted_app_setting(APP_SETTING_UI_LOCALE_KEY, Some(&normalized))?;
+    Ok(normalized)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_ui_locale, DEFAULT_UI_LOCALE};
+
+    #[test]
+    fn ui_locale_normalization_defaults_to_chinese() {
+        assert_eq!(normalize_ui_locale(None), DEFAULT_UI_LOCALE);
+        assert_eq!(normalize_ui_locale(Some("")), DEFAULT_UI_LOCALE);
+        assert_eq!(normalize_ui_locale(Some("unknown")), DEFAULT_UI_LOCALE);
+    }
+
+    #[test]
+    fn ui_locale_normalization_accepts_supported_aliases() {
+        assert_eq!(normalize_ui_locale(Some("zh-cn")), "zh-CN");
+        assert_eq!(normalize_ui_locale(Some("EN-US")), "en");
+        assert_eq!(normalize_ui_locale(Some("ru-RU")), "ru");
+        assert_eq!(normalize_ui_locale(Some("ko-kr")), "ko");
+    }
 }

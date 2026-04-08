@@ -40,6 +40,7 @@ import { useApiKeys } from "@/hooks/useApiKeys";
 import { useDesktopPageActive } from "@/hooks/useDesktopPageActive";
 import { useDeferredDesktopActivation } from "@/hooks/useDeferredDesktopActivation";
 import { usePageTransitionReady } from "@/hooks/usePageTransitionReady";
+import { useI18n } from "@/lib/i18n/provider";
 import { accountClient } from "@/lib/api/account-client";
 import { useAppStore } from "@/lib/store/useAppStore";
 import { copyTextToClipboard } from "@/lib/utils/clipboard";
@@ -138,6 +139,7 @@ function ApiKeyStatCard({
 }
 
 export default function ApiKeysPage() {
+  const { t } = useI18n();
   const serviceAddr = useAppStore((state) => state.serviceStatus.addr);
   const {
     apiKeys,
@@ -317,7 +319,7 @@ export default function ApiKeysPage() {
     try {
       const secret = await ensureSecretLoaded(id);
       await copyTextToClipboard(secret);
-      toast.success("已复制到剪贴板");
+      toast.success(t("已复制到剪贴板"));
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
@@ -345,15 +347,15 @@ export default function ApiKeysPage() {
       {!isServiceReady ? (
         <Card className="glass-card border-none shadow-sm">
           <CardContent className="pt-6 text-sm text-muted-foreground">
-            服务未连接，平台密钥与模型配置暂不可用；连接恢复后会自动继续加载。
+            {t("服务未连接")}
           </CardContent>
         </Card>
       ) : null}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold tracking-tight">平台密钥</h2>
+          <h2 className="text-xl font-bold tracking-tight">{t("平台密钥")}</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            创建和管理网关调用所需的访问令牌
+            {t("创建和管理网关调用所需的访问令牌")}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -364,14 +366,14 @@ export default function ApiKeysPage() {
             disabled={!isServiceReady || isRefreshingModels}
           >
             <RefreshCw className={isRefreshingModels ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
-            刷新模型
+            {t("刷新模型")}
           </Button>
           <Button
             className="h-10 gap-2 shadow-lg shadow-primary/20"
             onClick={openCreateModal}
             disabled={!isServiceReady}
           >
-            <Plus className="h-4 w-4" /> 创建密钥
+            <Plus className="h-4 w-4" /> {t("创建密钥")}
           </Button>
         </div>
       </div>
@@ -385,18 +387,18 @@ export default function ApiKeysPage() {
         ) : (
           <>
             <ApiKeyStatCard
-              title="总使用 Token"
+              title={t("总使用 Token")}
               value={formatCompactTokenAmount(usageOverview?.totalTokens || 0)}
               icon={Zap}
               color="h-4 w-4 text-amber-500"
-              sub="按全部平台密钥累计"
+              sub={t("按全部平台密钥累计")}
             />
             <ApiKeyStatCard
-              title="总费用"
+              title={t("总费用")}
               value={formatUsd(usageOverview?.totalCostUsd || 0)}
               icon={DollarSign}
               color="h-4 w-4 text-emerald-500"
-              sub="按全部平台密钥累计"
+              sub={t("按全部平台密钥累计")}
             />
           </>
         )}
@@ -409,12 +411,12 @@ export default function ApiKeysPage() {
               <TableRow>
                 <TableHead>密钥 / ID</TableHead>
                 <TableHead>名称</TableHead>
-                <TableHead>协议</TableHead>
-                <TableHead>轮转策略</TableHead>
-                <TableHead>绑定模型</TableHead>
-                <TableHead>总使用 Token</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead className="text-center">操作</TableHead>
+                <TableHead>{t("协议")}</TableHead>
+                <TableHead>{t("轮转策略")}</TableHead>
+                <TableHead>{t("绑定模型")}</TableHead>
+                <TableHead>{t("总使用 Token")}</TableHead>
+                <TableHead>{t("状态")}</TableHead>
+                <TableHead className="text-center">{t("操作")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -436,7 +438,7 @@ export default function ApiKeysPage() {
                   <TableCell colSpan={8} className="h-48 text-center">
                     <div className="flex flex-col items-center justify-center gap-2 text-muted-foreground">
                       <Plus className="h-8 w-8 opacity-20" />
-                      <p>暂无平台密钥，点击右上角创建</p>
+                      <p>{t("创建密钥")}</p>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -456,7 +458,7 @@ export default function ApiKeysPage() {
                             {revealed
                               ? revealed
                               : loadingSecretId === key.id
-                                ? "读取中..."
+                                ? t("读取中...")
                                 : key.id}
                           </code>
                           <Button
@@ -483,7 +485,7 @@ export default function ApiKeysPage() {
                           </Button>
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm font-semibold">{key.name || "未命名"}</TableCell>
+                      <TableCell className="text-sm font-semibold">{key.name || t("未命名")}</TableCell>
                       <TableCell>
                         <Badge variant="outline" className="bg-accent/20 text-[10px] font-normal capitalize">
                           {key.protocol.replace(/_/g, " ")}
@@ -500,7 +502,7 @@ export default function ApiKeysPage() {
                           key.model
                         ) : (
                           <span title="跟随请求表示使用请求体里的实际 model；请求日志展示的是最终生效模型。">
-                            跟随请求
+                            {t("跟随请求")}
                           </span>
                         )}
                       </TableCell>
@@ -518,7 +520,7 @@ export default function ApiKeysPage() {
                             }
                           />
                           <span className="text-[10px] font-medium text-muted-foreground">
-                            {isEnabled ? "启用" : "禁用"}
+                            {isEnabled ? t("启用") : t("禁用")}
                           </span>
                         </div>
                       </TableCell>
@@ -530,7 +532,7 @@ export default function ApiKeysPage() {
                             className="h-8 w-8 text-muted-foreground transition-colors hover:text-primary"
                             disabled={!isServiceReady}
                             onClick={() => openEditModal(key.id)}
-                            title="编辑配置"
+                            title={t("编辑配置")}
                           >
                             <Settings2 className="h-4 w-4" />
                           </Button>
@@ -553,14 +555,14 @@ export default function ApiKeysPage() {
                                 disabled={!isServiceReady}
                                 onClick={() => openEditModal(key.id)}
                               >
-                                设置模型与推理
+                                {t("设置模型与推理")}
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 className="gap-2 text-red-500"
                                 disabled={!isServiceReady}
                                 onClick={() => handleDelete(key.id)}
                               >
-                                <Trash2 className="h-4 w-4" /> 删除密钥
+                                <Trash2 className="h-4 w-4" /> {t("删除密钥")}
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
@@ -587,9 +589,9 @@ export default function ApiKeysPage() {
             setDeleteKeyId(null);
           }
         }}
-        title="删除平台密钥"
-        description={`确定删除平台密钥 ${apiKeys.find((item) => item.id === deleteKeyId)?.name || ""} 吗？删除后不可恢复。`}
-        confirmText="删除"
+        title={t("删除密钥")}
+        description={`${t("删除密钥")} ${apiKeys.find((item) => item.id === deleteKeyId)?.name || ""}`}
+        confirmText={t("删除")}
         confirmVariant="destructive"
         onConfirm={() => {
           if (!deleteKeyId) return;

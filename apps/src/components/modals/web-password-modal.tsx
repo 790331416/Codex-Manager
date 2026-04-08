@@ -18,6 +18,7 @@ import { useAppStore } from "@/lib/store/useAppStore";
 import { appClient } from "@/lib/api/app-client";
 import { toast } from "sonner";
 import { ShieldAlert, ShieldCheck, KeyRound, Trash2 } from "lucide-react";
+import { useI18n } from "@/lib/i18n/provider";
 
 interface WebPasswordModalProps {
   open: boolean;
@@ -38,6 +39,7 @@ interface WebPasswordModalProps {
  * 返回函数执行结果
  */
 export function WebPasswordModal({ open, onOpenChange }: WebPasswordModalProps) {
+  const { t } = useI18n();
   const { appSettings, setAppSettings } = useAppStore();
   const { canAccessManagementRpc } = useRuntimeCapabilities();
   const [password, setPassword] = useState("");
@@ -77,7 +79,7 @@ export function WebPasswordModal({ open, onOpenChange }: WebPasswordModalProps) 
       } catch (err: unknown) {
         if (!cancelled) {
           toast.error(
-            `读取密码状态失败: ${err instanceof Error ? err.message : String(err)}`
+            `${t("密码")} ${t("失败")}: ${err instanceof Error ? err.message : String(err)}`
           );
         }
       }
@@ -105,15 +107,15 @@ export function WebPasswordModal({ open, onOpenChange }: WebPasswordModalProps) 
    */
   const handleSave = async () => {
     if (!canAccessManagementRpc) {
-      toast.info("当前运行环境暂不支持读取或保存访问密码");
+      toast.info(t("访问密码"));
       return;
     }
     if (!password) {
-      toast.error("请输入密码");
+      toast.error(t("新密码"));
       return;
     }
     if (password !== confirmPassword) {
-      toast.error("两次输入的密码不一致");
+      toast.error(t("确认新密码"));
       return;
     }
 
@@ -121,12 +123,12 @@ export function WebPasswordModal({ open, onOpenChange }: WebPasswordModalProps) 
     try {
       const settings = await appClient.setSettings({ webAccessPassword: password });
       setAppSettings(settings);
-      toast.success("访问密码已设置");
+      toast.success(t("保存"));
       onOpenChange(false);
       setPassword("");
       setConfirmPassword("");
     } catch (err: unknown) {
-      toast.error(`保存失败: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`${t("保存")} ${t("失败")}: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsLoading(false);
     }
@@ -147,19 +149,19 @@ export function WebPasswordModal({ open, onOpenChange }: WebPasswordModalProps) 
    */
   const handleClear = async () => {
     if (!canAccessManagementRpc) {
-      toast.info("当前运行环境暂不支持读取或保存访问密码");
+      toast.info(t("访问密码"));
       return;
     }
     setIsLoading(true);
     try {
       const settings = await appClient.setSettings({ webAccessPassword: "" });
       setAppSettings(settings);
-      toast.success("访问密码已清除");
+      toast.success(t("清除"));
       onOpenChange(false);
       setPassword("");
       setConfirmPassword("");
     } catch (err: unknown) {
-      toast.error(`清除失败: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`${t("清除")} ${t("失败")}: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsLoading(false);
     }
@@ -173,7 +175,7 @@ export function WebPasswordModal({ open, onOpenChange }: WebPasswordModalProps) 
             <div className="p-2 rounded-full bg-primary/10">
               <KeyRound className="h-5 w-5 text-primary" />
             </div>
-            <DialogTitle>访问密码</DialogTitle>
+            <DialogTitle>{t("访问密码")}</DialogTitle>
           </div>
           <DialogDescription>
             该密码用于保护 Web 管理页访问。在桌面端或 Web 端修改后，都会写入同一份服务配置并立即生效。
@@ -199,22 +201,22 @@ export function WebPasswordModal({ open, onOpenChange }: WebPasswordModalProps) 
           )}
 
           <div className="grid gap-2">
-            <Label htmlFor="password">新密码</Label>
+            <Label htmlFor="password">{t("新密码")}</Label>
             <Input 
               id="password" 
               type="password" 
-              placeholder="请输入新密码"
+              placeholder={t("新密码")}
               value={password}
               disabled={!canAccessManagementRpc}
               onChange={(e) => setPassword(e.target.value)}
             />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="confirm">确认新密码</Label>
+            <Label htmlFor="confirm">{t("确认新密码")}</Label>
             <Input 
               id="confirm" 
               type="password" 
-              placeholder="请再次输入新密码"
+              placeholder={t("确认新密码")}
               value={confirmPassword}
               disabled={!canAccessManagementRpc}
               onChange={(e) => setConfirmPassword(e.target.value)}
@@ -225,17 +227,17 @@ export function WebPasswordModal({ open, onOpenChange }: WebPasswordModalProps) 
         <DialogFooter className="gap-2 sm:gap-0">
           {appSettings.webAccessPasswordConfigured && (
             <Button variant="ghost" onClick={handleClear} disabled={!canAccessManagementRpc || isLoading} className="text-destructive hover:text-destructive hover:bg-destructive/10">
-              <Trash2 className="h-4 w-4 mr-2" /> 清除密码
+              <Trash2 className="h-4 w-4 mr-2" /> {t("清除")}
             </Button>
           )}
           <DialogClose
             className={buttonVariants({ variant: "outline" })}
             type="button"
           >
-            取消
+            {t("取消")}
           </DialogClose>
           <Button onClick={handleSave} disabled={!canAccessManagementRpc || isLoading}>
-            {isLoading ? "保存中..." : "保存设置"}
+            {isLoading ? `${t("保存")}...` : t("保存")}
           </Button>
         </DialogFooter>
       </DialogContent>

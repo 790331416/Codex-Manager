@@ -13,7 +13,8 @@ use super::{
     current_gateway_sse_keepalive_interval_ms, current_gateway_upstream_stream_timeout_ms,
     current_gateway_user_agent_version, current_lightweight_mode_on_close_to_tray_setting,
     current_saved_service_addr, current_service_bind_mode, current_ui_appearance_preset,
-    current_ui_low_transparency_enabled, current_ui_theme, current_update_auto_check_enabled,
+    current_ui_locale, current_ui_low_transparency_enabled, current_ui_theme,
+    current_update_auto_check_enabled,
     env_override_catalog_value, env_override_reserved_keys, env_override_unsupported_keys,
     residency_requirement_options, save_env_overrides_value, save_persisted_app_setting,
     save_persisted_bool_setting, sync_runtime_settings_from_storage,
@@ -25,8 +26,9 @@ use super::{
     APP_SETTING_GATEWAY_UPSTREAM_STREAM_TIMEOUT_MS_KEY, APP_SETTING_GATEWAY_USER_AGENT_VERSION_KEY,
     APP_SETTING_LIGHTWEIGHT_MODE_ON_CLOSE_TO_TRAY_KEY, APP_SETTING_PLUGIN_MARKET_MODE_KEY,
     APP_SETTING_PLUGIN_MARKET_SOURCE_URL_KEY, APP_SETTING_SERVICE_ADDR_KEY,
-    APP_SETTING_UI_APPEARANCE_PRESET_KEY, APP_SETTING_UI_LOW_TRANSPARENCY_KEY,
-    APP_SETTING_UI_THEME_KEY, APP_SETTING_UPDATE_AUTO_CHECK_KEY, SERVICE_BIND_MODE_ALL_INTERFACES,
+    APP_SETTING_UI_APPEARANCE_PRESET_KEY, APP_SETTING_UI_LOCALE_KEY,
+    APP_SETTING_UI_LOW_TRANSPARENCY_KEY, APP_SETTING_UI_THEME_KEY,
+    APP_SETTING_UPDATE_AUTO_CHECK_KEY, SERVICE_BIND_MODE_ALL_INTERFACES,
     SERVICE_BIND_MODE_LOOPBACK, SERVICE_BIND_MODE_SETTING_KEY,
 };
 
@@ -94,6 +96,7 @@ pub(super) fn current_app_settings_value(
     let low_transparency = current_ui_low_transparency_enabled();
     let theme = current_ui_theme();
     let appearance_preset = current_ui_appearance_preset();
+    let locale = current_ui_locale();
     let settings = list_app_settings_map();
     let service_addr = current_saved_service_addr();
     let service_listen_mode = if let Some(mode) = service_listen_mode_override {
@@ -141,6 +144,7 @@ pub(super) fn current_app_settings_value(
         low_transparency,
         &theme,
         &appearance_preset,
+        &locale,
         &service_addr,
         &service_listen_mode,
         &route_strategy,
@@ -174,6 +178,8 @@ pub(super) fn current_app_settings_value(
         "lowTransparency": low_transparency,
         "theme": theme,
         "appearancePreset": appearance_preset,
+        "locale": locale,
+        "localeOptions": ["zh-CN", "en", "ru", "ko"],
         "serviceAddr": service_addr,
         "serviceListenMode": service_listen_mode,
         "serviceListenModeOptions": [
@@ -317,6 +323,7 @@ fn persist_current_snapshot(
     low_transparency: bool,
     theme: &str,
     appearance_preset: &str,
+    locale: &str,
     service_addr: &str,
     service_listen_mode: &str,
     route_strategy: &str,
@@ -349,6 +356,7 @@ fn persist_current_snapshot(
         APP_SETTING_UI_APPEARANCE_PRESET_KEY,
         Some(appearance_preset),
     );
+    let _ = save_persisted_app_setting(APP_SETTING_UI_LOCALE_KEY, Some(locale));
     let _ = save_persisted_app_setting(APP_SETTING_SERVICE_ADDR_KEY, Some(service_addr));
     let _ = save_persisted_app_setting(SERVICE_BIND_MODE_SETTING_KEY, Some(service_listen_mode));
     let _ =

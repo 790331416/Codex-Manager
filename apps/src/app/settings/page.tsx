@@ -64,6 +64,8 @@ import {
   Variable,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { LanguageSwitcher } from "@/components/layout/language-switcher";
+import { useI18n } from "@/lib/i18n/provider";
 
 const ENV_DESCRIPTION_MAP: Record<string, string> = {
   CODEXMANAGER_UPSTREAM_TOTAL_TIMEOUT_MS:
@@ -576,6 +578,7 @@ function buildReleaseUrl(summary: UpdateCheckSummary | null): string {
 }
 
 export default function SettingsPage() {
+  const { t } = useI18n();
   const setStoreSettings = useAppStore((state) => state.setAppSettings);
   const storedSettings = useAppStore((state) => state.appSettings);
   const { theme, setTheme } = useTheme();
@@ -1461,19 +1464,19 @@ export default function SettingsPage() {
       >
         <TabsList className="glass-card mb-6 flex h-11 w-full justify-start overflow-x-auto rounded-xl border-none p-1 no-scrollbar lg:w-fit">
           <TabsTrigger value="general" className="gap-2 px-5 shrink-0">
-            <SettingsIcon className="h-4 w-4" /> 通用
+            <SettingsIcon className="h-4 w-4" /> {t("通用")}
           </TabsTrigger>
           <TabsTrigger value="appearance" className="gap-2 px-5 shrink-0">
-            <Palette className="h-4 w-4" /> 外观
+            <Palette className="h-4 w-4" /> {t("外观")}
           </TabsTrigger>
           <TabsTrigger value="gateway" className="gap-2 px-5 shrink-0">
-            <Globe className="h-4 w-4" /> 网关
+            <Globe className="h-4 w-4" /> {t("网关")}
           </TabsTrigger>
           <TabsTrigger value="tasks" className="gap-2 px-5 shrink-0">
-            <Cpu className="h-4 w-4" /> 任务
+            <Cpu className="h-4 w-4" /> {t("任务")}
           </TabsTrigger>
           <TabsTrigger value="env" className="gap-2 px-5 shrink-0">
-            <Variable className="h-4 w-4" /> 环境
+            <Variable className="h-4 w-4" /> {t("环境")}
           </TabsTrigger>
         </TabsList>
 
@@ -1481,17 +1484,32 @@ export default function SettingsPage() {
           <Card className="glass-card border-none shadow-md">
             <CardHeader>
               <div className="flex items-center gap-2">
-                <AppWindow className="h-4 w-4 text-primary" />
-                <CardTitle className="text-base">基础设置</CardTitle>
+                <Globe className="h-4 w-4 text-primary" />
+                <CardTitle className="text-base">{t("界面语言")}</CardTitle>
               </div>
-              <CardDescription>控制应用启动和窗口行为</CardDescription>
+              <CardDescription>
+                {t("切换应用界面语言，设置后会立即生效并持久化保存。")}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <LanguageSwitcher triggerClassName="w-full md:w-[220px]" />
+            </CardContent>
+          </Card>
+
+          <Card className="glass-card border-none shadow-md">
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <AppWindow className="h-4 w-4 text-primary" />
+                <CardTitle className="text-base">{t("基础设置")}</CardTitle>
+              </div>
+              <CardDescription>{t("控制应用启动和窗口行为")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
-                  <Label>自动检查更新</Label>
+                  <Label>{t("自动检查更新")}</Label>
                   <p className="text-xs text-muted-foreground">
-                    启动时自动检测新版本
+                    {t("启动时自动检测新版本")}
                   </p>
                 </div>
                 <Switch
@@ -1555,9 +1573,9 @@ export default function SettingsPage() {
               </div>
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
-                  <Label>关闭时最小化到托盘</Label>
+                  <Label>{t("关闭时最小化到托盘")}</Label>
                   <p className="text-xs text-muted-foreground">
-                    点击关闭按钮不会直接退出程序
+                    {t("点击关闭按钮不会直接退出程序")}
                   </p>
                 </div>
                 <Switch
@@ -1570,9 +1588,9 @@ export default function SettingsPage() {
               </div>
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
-                  <Label>视觉性能模式</Label>
+                  <Label>{t("视觉性能模式")}</Label>
                   <p className="text-xs text-muted-foreground">
-                    关闭毛玻璃等特效以提升低配电脑性能
+                    {t("关闭毛玻璃等特效以提升低配电脑性能")}
                   </p>
                 </div>
                 <Switch
@@ -1589,16 +1607,15 @@ export default function SettingsPage() {
             <CardHeader>
               <div className="flex items-center gap-2">
                 <Globe className="h-4 w-4 text-primary" />
-                <CardTitle className="text-base">服务监听</CardTitle>
+                <CardTitle className="text-base">{t("服务监听")}</CardTitle>
               </div>
               <CardDescription>
-                统一控制 Service 与 Web
-                的监听模式，决定仅本机访问还是开放给局域网
+                {t("统一控制 Service 与 Web 的监听模式，决定仅本机访问还是开放给局域网")}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
               <div className="grid gap-2">
-                <Label>监听地址</Label>
+                <Label>{t("监听地址")}</Label>
                 <Select
                   value={snapshot.serviceListenMode || "loopback"}
                   onValueChange={(value) => {
@@ -1635,13 +1652,13 @@ export default function SettingsPage() {
 
               <div className="rounded-2xl border border-border/50 bg-background/45 p-4 text-sm">
                 <div className="flex items-center justify-between gap-4">
-                  <span className="text-muted-foreground">当前访问地址</span>
+                  <span className="text-muted-foreground">{t("当前访问地址")}</span>
                   <code className="text-xs text-primary">
                     {snapshot.serviceAddr}
                   </code>
                 </div>
                 <div className="mt-2 flex items-center justify-between gap-4">
-                  <span className="text-muted-foreground">实际监听地址</span>
+                  <span className="text-muted-foreground">{t("实际监听地址")}</span>
                   <code className="text-xs text-primary">
                     {inferServiceBindPreview(
                       snapshot.serviceAddr,

@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "next-themes";
 import { useState } from "react";
+import { I18nProvider } from "@/lib/i18n/provider";
 
 /**
  * 函数 `Providers`
@@ -38,21 +39,23 @@ export function Providers({ children }: { children: React.ReactNode }) {
         disableTransitionOnChange
         themes={["tech", "dark", "dark-one", "business", "mint", "sunset", "grape", "ocean", "forest", "rose", "slate", "aurora"]}
       >
-        <TooltipProvider>
-          {children}
-          <Toaster 
-            position="top-right" 
-            richColors 
-            expand={false} 
-            visibleToasts={3}
-            closeButton
-            duration={4000}
-            theme="system"
-            toastOptions={{
-              closeButton: true,
-            }}
-          />
-        </TooltipProvider>
+        <I18nProvider>
+          <TooltipProvider>
+            {children}
+            <Toaster 
+              position="top-right" 
+              richColors 
+              expand={false} 
+              visibleToasts={3}
+              closeButton
+              duration={4000}
+              theme="system"
+              toastOptions={{
+                closeButton: true,
+              }}
+            />
+          </TooltipProvider>
+        </I18nProvider>
       </ThemeProvider>
     </QueryClientProvider>
   );

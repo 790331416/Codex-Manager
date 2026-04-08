@@ -17,6 +17,7 @@ import { normalizeRoutePath } from "@/lib/utils/static-routes";
 import { Button } from "@/components/ui/button";
 import { useRuntimeCapabilities } from "@/hooks/useRuntimeCapabilities";
 import { useAppStore } from "@/lib/store/useAppStore";
+import { useI18n } from "@/lib/i18n/provider";
 import {
   memo,
   useCallback,
@@ -28,13 +29,13 @@ import {
 } from "react";
 
 const NAV_ITEMS = [
-  { name: "仪表盘", href: "/", icon: LayoutDashboard },
-  { name: "账号管理", href: "/accounts/", icon: Users },
-  { name: "聚合API", href: "/aggregate-api/", icon: Database },
-  { name: "平台密钥", href: "/apikeys/", icon: Key },
-  { name: "插件中心", href: "/plugins/", icon: Puzzle },
-  { name: "请求日志", href: "/logs/", icon: FileText },
-  { name: "设置", href: "/settings/", icon: Settings },
+  { label: "仪表盘", href: "/", icon: LayoutDashboard },
+  { label: "账号管理", href: "/accounts/", icon: Users },
+  { label: "聚合API", href: "/aggregate-api/", icon: Database },
+  { label: "平台密钥", href: "/apikeys/", icon: Key },
+  { label: "插件中心", href: "/plugins/", icon: Puzzle },
+  { label: "请求日志", href: "/logs/", icon: FileText },
+  { label: "设置", href: "/settings/", icon: Settings },
 ];
 const DESKTOP_NAVIGATION_FALLBACK_MS = 2_500;
 const DESKTOP_ROUTE_WARMUP_TIMEOUT_MS = 4_000;
@@ -45,12 +46,14 @@ const NavItem = memo(({
   isSidebarOpen,
   onNavigate,
   onPrefetch,
+  itemName,
 }: {
   item: typeof NAV_ITEMS[0],
   isActive: boolean,
   isSidebarOpen: boolean,
   onNavigate: (href: string, event: MouseEvent<HTMLAnchorElement>) => void,
   onPrefetch: (href: string) => void,
+  itemName: string,
 }) => (
   <a
     href={item.href}
@@ -62,9 +65,9 @@ const NavItem = memo(({
       "flex items-center gap-3 rounded-lg px-3 py-2 transition-all duration-200 hover:bg-accent hover:text-accent-foreground",
       isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground"
     )}
-  >
+    >
     <item.icon className="h-4 w-4 shrink-0" />
-    {isSidebarOpen && <span className="text-sm truncate">{item.name}</span>}
+    {isSidebarOpen && <span className="text-sm truncate">{itemName}</span>}
   </a>
 ));
 
@@ -84,6 +87,7 @@ NavItem.displayName = "NavItem";
  * 返回函数执行结果
  */
 export function Sidebar() {
+  const { t } = useI18n();
   const pathname = usePathname();
   const router = useRouter();
   const {
@@ -284,6 +288,7 @@ export function Sidebar() {
       <NavItem 
         key={item.href} 
         item={item} 
+        itemName={t(item.label)}
         isActive={normalizeRoutePath(item.href) === activePathname} 
         isSidebarOpen={isSidebarOpen}
         onNavigate={handleNavigate}
@@ -308,7 +313,7 @@ export function Sidebar() {
           {isSidebarOpen && (
             <div className="flex flex-col overflow-hidden animate-in fade-in duration-300">
               <span className="text-sm font-bold truncate">CodexManager</span>
-              <span className="text-xs text-muted-foreground truncate opacity-70">账号池 · 用量管理</span>
+              <span className="text-xs text-muted-foreground truncate opacity-70">{t("账号池 · 用量管理")}</span>
             </div>
           )}
         </div>
@@ -330,7 +335,7 @@ export function Sidebar() {
           {isSidebarOpen ? (
             <>
               <ChevronLeft className="h-4 w-4 shrink-0" />
-              <span className="text-sm">收起侧边栏</span>
+              <span className="text-sm">{t("收起侧边栏")}</span>
             </>
           ) : (
             <ChevronRight className="h-4 w-4 shrink-0" />
