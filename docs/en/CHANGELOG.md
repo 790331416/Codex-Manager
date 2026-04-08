@@ -1,18 +1,39 @@
-# Update log
+# Changelog
 
-This file is used to record externally visible changes to CodexManager and serves as the single source of truth for version history.
-The format refers to Keep a Changelog, and is combined with the actual maintenance method of the current project to achieve minimum convergence.
+This file records externally visible changes to CodexManager and serves as the single source of truth for version history.
+It follows Keep a Changelog with a lightweight adaptation for this repository.
 
 ## [Unreleased]
 
-## [0.1.19] - 2026-04-06
+## [0.1.19] - 2026-04-08
+
+### Added
+- Aggregate API now supports multiple authentication types and custom `action` settings, and passthrough routing can hit the correct upstream based on auth mode and action.
+- Internationalization now persists the selected locale and uses split message catalogs, with the remaining dashboard, modal, sidebar, and usage labels localized across languages.
 
 ### Fixed
-- Adjust the positioning method of the "Amount Details" floating card on the account page. The floating layer on the right side is changed to be aligned with the center line of the balance overview card to reduce the visual misalignment of the prompt content that is obviously upward.
-- Align the Gemini → Codex/Responses request link (CPA compliant), and clean up the Gemini route unused code to eliminate compilation warnings.
+- Fixed Aggregate API passthrough streams so Anthropic `message_stop` events are recognized correctly, reducing premature stream termination and state misreads.
+- Fixed the gateway forwarding unsupported `service_tier` values upstream; standard Responses requests now keep only supported values to avoid upstream rejection.
+- Changed the collaboration and security entry pages to show Chinese content by default and cleaned up the multilingual doc entry flow to make release docs easier to open from the repository root.
 
 ### Changed
-- The release version is upgraded to `0.1.19`, and the version notes of workspace, front-end package, Tauri desktop, lock file, README and CHANGELOG are updated simultaneously.
+- Formal documentation is now organized by language folders, and the root entry documents plus multilingual landing pages were refreshed together.
+- The release version is upgraded to `0.1.19`, and the version notes of workspace, front-end package, Tauri desktop, lock file, README, and CHANGELOG are updated simultaneously.
+
+## [0.1.18] - 2026-04-06
+
+### Added
+- Added direct sort controls for the account list and a quota-first sorting mode, making it easier to inspect accounts with tight remaining quota.
+- Added the initial Gemini CLI compatibility layer, including key request paths such as streaming `tools`, MCP tool names, and SSE `tool_call` handling.
+
+### Fixed
+- Fixed the misaligned "quota details" popup on the account page by anchoring the right-hand panel to the center line of the quota overview card.
+- Fixed Gemini issues around completed tool output being treated as plain text, streaming cached-token logging, request adaptation compatibility, and token refresh edge cases.
+
+### Changed
+- Aligned the Gemini → Codex / Responses request path toward CPA-compatible behavior, including developer messages, tool-name mapping, FIFO `call_id`, `reasoning`, `include`, and `parallel_tool_calls`.
+- Removed unused Gemini-path code and refreshed the CPA acknowledgement plus version-related documentation notes.
+- The release version is upgraded to `0.1.18`, and the version notes of workspace, front-end package, Tauri desktop, lock file, README, and CHANGELOG are updated simultaneously.
 
 ## [0.1.17] - 2026-04-05
 
