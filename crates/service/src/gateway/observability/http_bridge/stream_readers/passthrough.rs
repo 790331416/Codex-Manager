@@ -1,7 +1,8 @@
 use super::{
-    classify_upstream_stream_read_error, inspect_sse_frame, merge_usage, sse_keepalive_interval,
-    stream_reader_disconnected_message, upstream_hint_or_stream_incomplete_message, Arc, Cursor,
-    Mutex, PassthroughSseCollector, Read, SseKeepAliveFrame, SseTerminal, UpstreamSseFramePump,
+    classify_upstream_stream_read_error, inspect_sse_frame_for_protocol, merge_usage,
+    sse_keepalive_interval, stream_reader_disconnected_message,
+    upstream_hint_or_stream_incomplete_message, Arc, Cursor, Mutex, PassthroughSseCollector,
+    PassthroughSseProtocol, Read, SseKeepAliveFrame, SseTerminal, UpstreamSseFramePump,
     UpstreamSseFramePumpItem,
 };
 use crate::gateway::http_bridge::extract_error_hint_from_body;
@@ -11,6 +12,7 @@ pub(crate) struct PassthroughSseUsageReader {
     out_cursor: Cursor<Vec<u8>>,
     usage_collector: Arc<Mutex<PassthroughSseCollector>>,
     keepalive_frame: SseKeepAliveFrame,
+    protocol: PassthroughSseProtocol,
     finished: bool,
 }
 
@@ -30,12 +32,14 @@ impl PassthroughSseUsageReader {
         upstream: reqwest::blocking::Response,
         usage_collector: Arc<Mutex<PassthroughSseCollector>>,
         keepalive_frame: SseKeepAliveFrame,
+        protocol: PassthroughSseProtocol,
     ) -> Self {
         Self {
             upstream: UpstreamSseFramePump::new(upstream),
             out_cursor: Cursor::new(Vec::new()),
             usage_collector,
             keepalive_frame,
+            protocol,
             finished: false,
         }
     }
@@ -53,7 +57,7 @@ impl PassthroughSseUsageReader {
     /// # 返回
     /// 无
     fn update_usage_from_frame(&self, lines: &[String]) {
-        let inspection = inspect_sse_frame(lines);
+        let inspection = inspect_sse_frame_for_protocol(lines, self.protocol);
         if let Ok(mut collector) = self.usage_collector.lock() {
             if let Some(event_type) = inspection.last_event_type {
                 collector.last_event_type = Some(event_type);

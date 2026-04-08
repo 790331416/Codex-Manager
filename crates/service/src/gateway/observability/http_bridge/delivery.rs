@@ -13,8 +13,8 @@ use super::{
     extract_error_message_from_json, looks_like_sse_payload, merge_usage, parse_usage_from_json,
     push_trace_id_header, usage_has_signal, AnthropicSseReader, GeminiSseReader,
     OpenAIChatCompletionsSseReader, OpenAICompletionsSseReader, PassthroughSseCollector,
-    PassthroughSseUsageReader, SseKeepAliveFrame, UpstreamResponseBridgeResult,
-    UpstreamResponseUsage,
+    PassthroughSseProtocol, PassthroughSseUsageReader, SseKeepAliveFrame,
+    UpstreamResponseBridgeResult, UpstreamResponseUsage,
 };
 
 const REQUEST_ID_HEADER_CANDIDATES: &[&str] = &["x-request-id", "x-oai-request-id"];
@@ -753,6 +753,7 @@ pub(crate) fn respond_with_upstream(
     upstream: reqwest::blocking::Response,
     _inflight_guard: super::super::AccountInFlightGuard,
     response_adapter: ResponseAdapter,
+    passthrough_sse_protocol: Option<PassthroughSseProtocol>,
     gemini_stream_output_mode: Option<GeminiStreamOutputMode>,
     request_path: &str,
     tool_name_restore_map: Option<&ToolNameRestoreMap>,
@@ -761,6 +762,8 @@ pub(crate) fn respond_with_upstream(
     trace_id: Option<&str>,
 ) -> Result<UpstreamResponseBridgeResult, String> {
     let keepalive_frame = resolve_stream_keepalive_frame(response_adapter, request_path);
+    let passthrough_sse_protocol =
+        passthrough_sse_protocol.unwrap_or(PassthroughSseProtocol::Generic);
     let upstream_request_id =
         first_upstream_header(upstream.headers(), REQUEST_ID_HEADER_CANDIDATES);
     let upstream_cf_ray = first_upstream_header(upstream.headers(), &[CF_RAY_HEADER_NAME]);
@@ -1105,6 +1108,7 @@ pub(crate) fn respond_with_upstream(
                         upstream,
                         Arc::clone(&usage_collector),
                         keepalive_frame,
+                        passthrough_sse_protocol,
                     ),
                     None,
                     None,

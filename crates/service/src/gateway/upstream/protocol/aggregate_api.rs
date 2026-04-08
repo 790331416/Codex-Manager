@@ -123,22 +123,6 @@ fn replace_query_param(mut url: reqwest::Url, name: &str, value: &str) -> reqwes
     url
 }
 
-fn is_partial_stream_success(
-    is_stream: bool,
-    stream_terminal_seen: bool,
-    stream_terminal_error: bool,
-    delivery_error: bool,
-    output_text_len: usize,
-    output_tokens: Option<i64>,
-    total_tokens: Option<i64>,
-) -> bool {
-    is_stream
-        && !stream_terminal_seen
-        && !stream_terminal_error
-        && !delivery_error
-        && (output_text_len > 0 || output_tokens.unwrap_or(0) > 0 || total_tokens.unwrap_or(0) > 0)
-}
-
 fn parse_auth_config(candidate: &AggregateApi) -> Result<(AggregateApiAuthConfig, HashSet<String>), String> {
     let auth_type = candidate.auth_type.trim().to_ascii_lowercase();
     let raw_params = candidate
@@ -243,6 +227,24 @@ fn parse_auth_config(candidate: &AggregateApi) -> Result<(AggregateApiAuthConfig
     }
 
     Ok((AggregateApiAuthConfig::ApiKeyDefaultBearer, injected_headers))
+}
+
+fn resolve_passthrough_sse_protocol(
+    candidate: &AggregateApi,
+    path: &str,
+    response_adapter: super::super::super::ResponseAdapter,
+) -> Option<super::super::super::PassthroughSseProtocol> {
+    if response_adapter != super::super::super::ResponseAdapter::Passthrough {
+        return None;
+    }
+    let provider_type = normalize_provider_type_value(candidate.provider_type.as_str());
+    if provider_type != AGGREGATE_API_PROVIDER_CLAUDE {
+        return None;
+    }
+    if path == "/v1/messages" || path.starts_with("/v1/messages?") {
+        return Some(super::super::super::PassthroughSseProtocol::AnthropicNative);
+    }
+    None
 }
 
 /// 函数 `should_skip_forward_header`
@@ -869,6 +871,8 @@ pub(in super::super) fn proxy_aggregate_request(
             }
 
             let inflight_guard = super::super::super::acquire_account_inflight(key_id);
+            let passthrough_sse_protocol =
+                resolve_passthrough_sse_protocol(&candidate, path, response_adapter);
             let bridge = super::super::super::respond_with_upstream(
                 request
                     .take()
@@ -876,6 +880,7 @@ pub(in super::super) fn proxy_aggregate_request(
                 upstream,
                 inflight_guard,
                 response_adapter,
+                passthrough_sse_protocol,
                 None,
                 path,
                 None,
@@ -909,21 +914,8 @@ pub(in super::super) fn proxy_aggregate_request(
                 bridge.upstream_content_type.as_deref(),
                 bridge.last_sse_event_type.as_deref(),
             );
-            let has_partial_stream_success = is_partial_stream_success(
-                is_stream,
-                bridge.stream_terminal_seen,
-                bridge.stream_terminal_error.is_some(),
-                bridge.delivery_error.is_some(),
-                bridge_output_text_len,
-                bridge.usage.output_tokens,
-                bridge.usage.total_tokens,
-            );
-            let bridge_ok = bridge.is_ok(is_stream) || has_partial_stream_success;
-            let mut final_error = if has_partial_stream_success {
-                None
-            } else {
-                bridge.upstream_error_hint.clone()
-            };
+            let bridge_ok = bridge.is_ok(is_stream);
+            let mut final_error = bridge.upstream_error_hint.clone();
             if final_error.is_none() && !bridge_ok {
                 final_error =
                     Some(bridge.error_message(is_stream).unwrap_or_else(|| {
@@ -1201,7 +1193,8 @@ mod bridge_tests {
 mod tests {
     use codexmanager_core::storage::AggregateApi;
 
-    use super::{build_upstream_url, effective_action_path, is_partial_stream_success};
+    use super::{build_upstream_url, effective_action_path, resolve_passthrough_sse_protocol};
+    use crate::gateway::{PassthroughSseProtocol, ResponseAdapter};
 
     fn aggregate_api_with_action(action: Option<&str>) -> AggregateApi {
         AggregateApi {
@@ -1230,29 +1223,19 @@ mod tests {
     }
 
     #[test]
-    fn partial_stream_with_output_is_treated_as_success_signal() {
-        assert!(is_partial_stream_success(
-            true,
-            false,
-            false,
-            false,
-            12,
-            Some(0),
-            Some(0),
-        ));
+    fn claude_messages_passthrough_uses_anthropic_native_terminal_rules() {
+        let api = aggregate_api_with_action(None);
+        let protocol =
+            resolve_passthrough_sse_protocol(&api, "/v1/messages?beta=true", ResponseAdapter::Passthrough);
+        assert_eq!(protocol, Some(PassthroughSseProtocol::AnthropicNative));
     }
 
     #[test]
-    fn partial_stream_without_signal_is_not_treated_as_success() {
-        assert!(!is_partial_stream_success(
-            true,
-            false,
-            false,
-            false,
-            0,
-            Some(0),
-            Some(0),
-        ));
+    fn non_passthrough_adapter_does_not_override_sse_protocol() {
+        let api = aggregate_api_with_action(None);
+        let protocol =
+            resolve_passthrough_sse_protocol(&api, "/v1/messages?beta=true", ResponseAdapter::AnthropicSse);
+        assert_eq!(protocol, None);
     }
 
     #[test]

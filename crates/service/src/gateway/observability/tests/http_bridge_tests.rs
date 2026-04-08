@@ -5,7 +5,8 @@ use super::{
     should_skip_chat_live_text_event, should_skip_completion_live_text_event,
     synthesize_chat_completion_sse_from_json, synthesize_completions_sse_from_json,
     GeminiSseReader, OpenAIChatCompletionsSseReader, OpenAICompletionsSseReader, OpenAIStreamMeta,
-    PassthroughSseCollector, PassthroughSseUsageReader, SseKeepAliveFrame,
+    PassthroughSseCollector, PassthroughSseProtocol, PassthroughSseUsageReader,
+    SseKeepAliveFrame,
 };
 use crate::gateway::GeminiStreamOutputMode;
 use serde_json::json;
@@ -1555,6 +1556,7 @@ fn passthrough_sse_reader_emits_keepalive_for_responses_stream() {
         upstream,
         Arc::clone(&usage_collector),
         SseKeepAliveFrame::OpenAIResponses,
+        PassthroughSseProtocol::Generic,
     );
     let mut mapped = String::new();
     reader
@@ -1593,6 +1595,7 @@ fn passthrough_sse_reader_captures_raw_html_error_body() {
         upstream,
         Arc::clone(&usage_collector),
         SseKeepAliveFrame::OpenAIResponses,
+        PassthroughSseProtocol::Generic,
     );
     let mut mapped = String::new();
     reader
@@ -1613,6 +1616,43 @@ fn passthrough_sse_reader_captures_raw_html_error_body() {
         collector.terminal_error.as_deref(),
         Some("Cloudflare 安全验证页（title=Just a moment...）")
     );
+}
+
+#[test]
+fn passthrough_sse_reader_treats_message_stop_as_terminal_for_anthropic_native() {
+    let (upstream, server) = open_streaming_mock_http_response(
+        "text/event-stream",
+        &[(
+            "event: message_start\n\
+             data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\"}}\n\n\
+             event: content_block_delta\n\
+             data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"你好\"}}\n\n\
+             event: message_stop\n\
+             data: {\"type\":\"message_stop\"}\n\n",
+            0,
+        )],
+    );
+    let usage_collector = Arc::new(Mutex::new(PassthroughSseCollector::default()));
+    let mut reader = PassthroughSseUsageReader::new(
+        upstream,
+        Arc::clone(&usage_collector),
+        SseKeepAliveFrame::Anthropic,
+        PassthroughSseProtocol::AnthropicNative,
+    );
+    let mut mapped = String::new();
+    reader
+        .read_to_string(&mut mapped)
+        .expect("read anthropic passthrough sse");
+    server.join().expect("join anthropic passthrough upstream");
+
+    let collector = usage_collector
+        .lock()
+        .expect("lock usage collector")
+        .clone();
+    assert!(mapped.contains("event: message_stop"));
+    assert!(collector.saw_terminal);
+    assert_eq!(collector.last_event_type.as_deref(), Some("message_stop"));
+    assert_eq!(collector.terminal_error, None);
 }
 
 /// 函数 `openai_chat_sse_reader_emits_keepalive_chunk_during_idle_gap`

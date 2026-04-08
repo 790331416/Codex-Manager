@@ -10,10 +10,11 @@ use super::{
     append_output_text, apply_openai_stream_meta_defaults, build_chat_fallback_content_chunk,
     build_completion_fallback_text_chunk, collect_output_text_from_event_fields,
     collect_response_output_text, extract_openai_completed_output_text, extract_sse_frame_payload,
-    inspect_sse_frame, is_response_completed_event_name, map_chunk_has_chat_text,
-    map_chunk_has_completion_text, merge_usage, normalize_chat_chunk_delta_role,
-    parse_sse_frame_json, should_skip_chat_live_text_event, should_skip_completion_live_text_event,
-    update_openai_stream_meta, OpenAIStreamMeta, SseTerminal, UpstreamResponseUsage,
+    inspect_sse_frame, inspect_sse_frame_for_protocol, is_response_completed_event_name,
+    map_chunk_has_chat_text, map_chunk_has_completion_text, merge_usage,
+    normalize_chat_chunk_delta_role, parse_sse_frame_json, should_skip_chat_live_text_event,
+    should_skip_completion_live_text_event, update_openai_stream_meta, OpenAIStreamMeta,
+    PassthroughSseProtocol, SseTerminal, UpstreamResponseUsage,
 };
 
 #[path = "stream_readers/anthropic.rs"]

@@ -162,6 +162,7 @@ pub(super) fn finalize_upstream_response(
         response,
         inflight_guard,
         response_adapter,
+        None,
         gemini_stream_output_mode,
         path,
         Some(tool_name_restore_map),

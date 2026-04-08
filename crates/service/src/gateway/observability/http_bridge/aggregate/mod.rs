@@ -14,6 +14,7 @@ pub(super) use sse_aggregate::{collect_non_stream_json_from_sse_bytes, looks_lik
 #[cfg(test)]
 pub(super) use sse_frame::parse_usage_from_sse_frame;
 pub(super) use sse_frame::{
-    extract_sse_frame_payload, inspect_sse_frame, is_response_completed_event_name,
-    parse_sse_frame_json, SseTerminal,
+    extract_sse_frame_payload, inspect_sse_frame, inspect_sse_frame_for_protocol,
+    is_response_completed_event_name, parse_sse_frame_json, SseTerminal,
 };
+pub(crate) use sse_frame::PassthroughSseProtocol;
