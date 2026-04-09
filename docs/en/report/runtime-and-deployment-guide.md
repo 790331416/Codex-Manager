@@ -76,3 +76,4 @@ xattr -dr com.apple.quarantine /Applications/CodexManager.app
 ## Related documents
 - Environment and runtime configuration: [Environment and Runtime Configuration](environment-and-runtime-config.md)
 - Minimal troubleshooting guide: [Minimal Troubleshooting Guide](minimal-troubleshooting-guide.md)
+- Nginx reverse proxy cache issue: [Nginx Reverse Proxy Cache Hit Issue](nginx-reverse-proxy-cache-hit-issue.md)

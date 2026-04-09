@@ -24,6 +24,10 @@
 /.tmp-antigravity-manager*/
 
 # Docs/specs
+/docs/
+!/docs/
+!/docs/**/
+!/docs/**/*.md
 /docs/**/*.tmp.md
 /docs/**/*.local.md
 /specs/
