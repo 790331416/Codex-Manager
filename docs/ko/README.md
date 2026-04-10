@@ -34,7 +34,7 @@ CodexManager를 후원해 주신 다음 스폰서께 감사드립니다.
   <tr>
     <td align="center" valign="middle" width="180">
       <a href="https://gzxsy.vip/">
-        <img src="../../assets/images/sponsors/xingsiyan.png" alt="Xing Si Yan Gateway" width="120" />
+        <img src="../../assets/images/sponsors/xingsiyan.jpg" alt="Xing Si Yan Gateway" width="120" />
       </a>
     </td>
     <td valign="top">
