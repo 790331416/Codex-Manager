@@ -117,7 +117,17 @@ export function ApiKeyModal({ open, onOpenChange, apiKey }: ApiKeyModalProps) {
 
   const { data: models } = useQuery({
     queryKey: ["apikey-models"],
-    queryFn: () => accountClient.listModels(false),
+    queryFn: async () => {
+      const cached = await accountClient.listModels(false);
+      if (cached.length > 0) {
+        return cached;
+      }
+      try {
+        return await accountClient.listModels(true);
+      } catch {
+        return cached;
+      }
+    },
     enabled: open && isServiceReady,
   });
 
