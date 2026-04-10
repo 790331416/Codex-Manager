@@ -28,7 +28,7 @@
       </a>
     </td>
     <td valign="top">
-      <strong>XiaoMo AI Shop (MoDuanXia)</strong> предоставляет пользователям CodexManager стабильные сервисы пополнения GPT и Gemini с самостоятельной покупкой и активацией. Зарегистрируйтесь на <a href="https://www.aixiamo.com/">официальном сайте</a> и введите <code>cliproxyapi</code> при пополнении, чтобы получить специальную скидку.
+      <strong>XiaoMo AI Shop (MoDuanXia)</strong> предоставляет пользователям CodexManager стабильные сервисы пополнения GPT и Gemini с самостоятельной покупкой и активацией. Зарегистрируйтесь на <a href="https://www.aixiamo.com/">официальном сайте</a>.
     </td>
   </tr>
   <tr>
@@ -43,7 +43,7 @@
   </tr>
 </table>
 
-Другие спонсоры: PackyCode, AICodeMirror, BmoPlus, LingtrueAPI, Poixe AI
+Другие участники поддержки: [Wonderdch](https://github.com/Wonderdch), [suxinwl](https://github.com/suxinwl), [Hermit](https://github.com/HermitChen), [Suifeng023](https://github.com/Suifeng023), [HK-hub](https://github.com/HK-hub)
 
 ## Экосистема и связка
 

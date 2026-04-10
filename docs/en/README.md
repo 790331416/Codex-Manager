@@ -28,7 +28,7 @@ Thanks to the following sponsors for supporting CodexManager.
       </a>
     </td>
     <td valign="top">
-      <strong>XiaoMo AI Shop (MoDuanXia)</strong> provides stable GPT and Gemini membership top-up services for CodexManager users, with self-service purchase and activation. Register on the <a href="https://www.aixiamo.com/">official site</a> and enter <code>cliproxyapi</code> during recharge to get a dedicated discount.
+      <strong>XiaoMo AI Shop (MoDuanXia)</strong> provides stable GPT and Gemini membership top-up services for CodexManager users, with self-service purchase and activation. Register on the <a href="https://www.aixiamo.com/">official site</a>.
     </td>
   </tr>
   <tr>
@@ -43,7 +43,7 @@ Thanks to the following sponsors for supporting CodexManager.
   </tr>
 </table>
 
-Other sponsors: PackyCode, AICodeMirror, BmoPlus, LingtrueAPI, Poixe AI
+Other supporters: [Wonderdch](https://github.com/Wonderdch), [suxinwl](https://github.com/suxinwl), [Hermit](https://github.com/HermitChen), [Suifeng023](https://github.com/Suifeng023), [HK-hub](https://github.com/HK-hub)
 
 ## Ecosystem Pairing
 

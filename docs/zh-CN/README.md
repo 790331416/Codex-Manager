@@ -28,7 +28,7 @@
       </a>
     </td>
     <td valign="top">
-      <strong>小末 AI 小卖铺（末端夏）</strong> 为 CodexManager 用户提供稳定的 GPT / Gemini 会员与充值服务，支持自助购买、自助兑换激活。通过<a href="https://www.aixiamo.com/">官网</a>注册，并在充值期间输入 <code>cliproxyapi</code>，可享专属优惠。
+      <strong>小末 AI 小卖铺（末端夏）</strong> 为 CodexManager 用户提供稳定的 GPT / Gemini 会员与充值服务，支持自助购买、自助兑换激活。通过<a href="https://www.aixiamo.com/">官网</a>注册
     </td>
   </tr>
   <tr>
@@ -43,7 +43,7 @@
   </tr>
 </table>
 
-其他赞助商：PackyCode、AICodeMirror、BmoPlus、LingtrueAPI、Poixe AI
+其他支持者：[Wonderdch](https://github.com/Wonderdch)、[suxinwl](https://github.com/suxinwl)、[Hermit](https://github.com/HermitChen)、[Suifeng023](https://github.com/Suifeng023)、[HK-hub](https://github.com/HK-hub)
 
 ## 文档首页
 | 如果你现在要做什么 | 建议先看 |
