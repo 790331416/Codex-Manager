@@ -786,6 +786,22 @@ export const EN_MESSAGES: MessageCatalog = {
   "源模型=目标模型": "Source model = target model",
   "越大，机器越愿意多开线程处理请求。":
     "The larger it is, the more threads the machine will use.",
+  "运行模式": "Run mode",
+  "普通用户选择一个模式即可，系统会自动按档位调整并发。需要更细的控制时，再打开高级参数。":
+    "Most users only need to pick a mode. The system will tune concurrency for that tier automatically. Open Advanced parameters only if you need finer control.",
+  "选择运行模式": "Choose a run mode",
+  "推荐": "Recommended",
+  "省资源": "Save resources",
+  "高吞吐": "High throughput",
+  "按当前机器推荐": "Recommend for this machine",
+  "高级参数": "Advanced parameters",
+  "当前配置来自高级参数，可在高级参数中继续微调。":
+    "The current configuration comes from advanced parameters. You can keep fine-tuning it there.",
+  "自定义（来自高级参数）": "Custom (from advanced parameters)",
+  "已按当前机器资源自动推荐，适合作为这台机器的默认档位。":
+    "Automatically recommended for this machine's resources and suitable as the default mode here.",
+  "只有在你明确知道这些参数含义时再调整。改动会直接影响并发和资源占用。":
+    "Only adjust these when you clearly understand what they do. Changes here directly affect concurrency and resource usage.",
   "运行": "Run",
   "运行失败": "Run failed",
   "运行时": "Runtime",

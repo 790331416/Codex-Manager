@@ -289,7 +289,7 @@ pub(super) async fn rpc_proxy(
     let resp = match resp {
         Ok(v) => v,
         Err(err) => {
-            let msg = format!("upstream error: {err}");
+            let msg = format_upstream_error_message(state.service_addr.as_str(), &err);
             return (StatusCode::BAD_GATEWAY, msg).into_response();
         }
     };
@@ -309,6 +309,31 @@ pub(super) async fn rpc_proxy(
         axum::http::HeaderValue::from_static("application/json"),
     );
     out
+}
+
+/// 函数 `format_upstream_error_message`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-10
+///
+/// # 参数
+/// - service_addr: 参数 service_addr
+/// - err: 参数 err
+///
+/// # 返回
+/// 返回函数执行结果
+fn format_upstream_error_message(
+    service_addr: &str,
+    err: impl std::fmt::Display,
+) -> String {
+    let mut message = format!("upstream error: {err}");
+    if service_addr.contains("host.docker.internal") {
+        message.push_str(
+            "; Linux Docker 中 `host.docker.internal` 可能不可解析，建议让 web 与 service 加入同一 Docker 网络，并使用容器地址如 `codexmanager-service:48760`；如果必须走宿主机端口，请增加 `--add-host=host.docker.internal:host-gateway`",
+        );
+    }
+    message
 }
 
 /// 函数 `quit`
@@ -332,4 +357,17 @@ pub(super) async fn quit(State(state): State<Arc<AppState>>) -> impl IntoRespons
     }
     let _ = state.shutdown_tx.send(true);
     Html("<html><body>OK</body></html>")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_upstream_error_message;
+
+    #[test]
+    fn format_upstream_error_message_adds_docker_hint_for_host_internal() {
+        let err = std::io::Error::other("dns failed");
+        let message = format_upstream_error_message("host.docker.internal:9760", &err);
+        assert!(message.contains("host.docker.internal"));
+        assert!(message.contains("codexmanager-service:48760"));
+    }
 }

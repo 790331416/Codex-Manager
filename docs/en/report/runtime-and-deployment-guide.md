@@ -45,21 +45,30 @@ Then open: `http://localhost:48761/`
 ```bash
 # service
 docker build -f docker/Dockerfile.service -t codexmanager-service .
-docker run --rm -p 48760:48760 -v codexmanager-data:/data \
+docker network create codexmanager-net
+
+docker run --rm --name codexmanager-service \
+  --network codexmanager-net \
+  --network-alias codexmanager-service \
+  -p 48760:48760 \
+  -v codexmanager-data:/data \
   -e CODEXMANAGER_RPC_TOKEN=replace_with_your_token \
   codexmanager-service
 
-# web (requires access to the service)
+# web (containers should talk over the Docker network, not the host-mapped port)
 docker build -f docker/Dockerfile.web -t codexmanager-web .
-docker run --rm -p 48761:48761 \
+docker run --rm --name codexmanager-web \
+  --network codexmanager-net \
+  -p 48761:48761 \
   -v codexmanager-data:/data \
   -e CODEXMANAGER_WEB_NO_SPAWN_SERVICE=1 \
-  -e CODEXMANAGER_SERVICE_ADDR=host.docker.internal:48760 \
+  -e CODEXMANAGER_SERVICE_ADDR=codexmanager-service:48760 \
   -e CODEXMANAGER_RPC_TOKEN=replace_with_your_token \
   codexmanager-web
 ```
 
 - If you want the Web password, settings, cached model list, and other runtime state to stay consistent with the service, `codexmanager-web` and `codexmanager-service` must share the same `/data` volume.
+- If you must reach the host-mapped port from the container, add `--add-host=host.docker.internal:host-gateway` on Linux; otherwise `host.docker.internal` often does not resolve.
 
 ## macOS first launch
 - The current macOS release artifacts are not notarized with an Apple Developer account, so Gatekeeper may show `Corrupted` or refuse to open them the first time.

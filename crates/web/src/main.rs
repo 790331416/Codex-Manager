@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
+#[cfg(target_os = "linux")]
+use std::{net::Ipv4Addr, net::ToSocketAddrs};
 
 use axum::body::Bytes;
 use axum::extract::{Request, State};
@@ -99,12 +101,13 @@ fn normalize_addr(raw: &str) -> Option<String> {
 fn normalize_connect_addr(raw: &str) -> Option<String> {
     let normalized = normalize_addr(raw)?;
     let Some((host, port)) = normalized.rsplit_once(':') else {
-        return Some(normalized);
+        return Some(rewrite_linux_docker_host_addr(normalized));
     };
-    match host {
+    let normalized = match host {
         "0.0.0.0" | "::" | "[::]" => Some(format!("localhost:{port}")),
         _ => Some(normalized),
-    }
+    }?;
+    Some(rewrite_linux_docker_host_addr(normalized))
 }
 
 /// 函数 `browser_open_addr`
@@ -144,6 +147,96 @@ fn resolve_service_addr() -> String {
     read_env_trim("CODEXMANAGER_SERVICE_ADDR")
         .and_then(|v| normalize_connect_addr(&v))
         .unwrap_or_else(|| codexmanager_service::DEFAULT_ADDR.to_string())
+}
+
+/// 函数 `rewrite_linux_docker_host_addr`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-10
+///
+/// # 参数
+/// - addr: 参数 addr
+///
+/// # 返回
+/// 返回函数执行结果
+#[cfg(target_os = "linux")]
+fn rewrite_linux_docker_host_addr(addr: String) -> String {
+    let Some((host, port)) = addr.rsplit_once(':') else {
+        return addr;
+    };
+    if !host.eq_ignore_ascii_case("host.docker.internal") {
+        return addr;
+    }
+    if addr
+        .to_socket_addrs()
+        .ok()
+        .and_then(|mut addrs| addrs.next())
+        .is_some()
+    {
+        return addr;
+    }
+    linux_default_gateway_ipv4()
+        .map(|gateway| format!("{gateway}:{port}"))
+        .unwrap_or(addr)
+}
+
+/// 函数 `rewrite_linux_docker_host_addr`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-10
+///
+/// # 参数
+/// - addr: 参数 addr
+///
+/// # 返回
+/// 返回函数执行结果
+#[cfg(not(target_os = "linux"))]
+fn rewrite_linux_docker_host_addr(addr: String) -> String {
+    addr
+}
+
+/// 函数 `linux_default_gateway_ipv4`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-10
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 返回函数执行结果
+#[cfg(target_os = "linux")]
+fn linux_default_gateway_ipv4() -> Option<Ipv4Addr> {
+    let routes = std::fs::read_to_string("/proc/net/route").ok()?;
+    parse_linux_default_gateway_ipv4(&routes)
+}
+
+/// 函数 `parse_linux_default_gateway_ipv4`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-10
+///
+/// # 参数
+/// - routes: 参数 routes
+///
+/// # 返回
+/// 返回函数执行结果
+#[cfg(target_os = "linux")]
+fn parse_linux_default_gateway_ipv4(routes: &str) -> Option<Ipv4Addr> {
+    for line in routes.lines().skip(1) {
+        let columns = line.split_whitespace().collect::<Vec<_>>();
+        if columns.len() < 3 || columns[1] != "00000000" {
+            continue;
+        }
+        let gateway = u32::from_str_radix(columns[2], 16).ok()?;
+        let bytes = gateway.to_le_bytes();
+        return Some(Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3]));
+    }
+    None
 }
 
 /// 函数 `resolve_web_addr`
@@ -559,6 +652,16 @@ mod tests {
         assert_eq!(
             normalize_connect_addr("192.168.1.8:48760").as_deref(),
             Some("192.168.1.8:48760")
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn parse_linux_default_gateway_ipv4_reads_default_route() {
+        let routes = "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\neth0\t00000000\t010011AC\t0003\t0\t0\t0\t00000000\t0\t0\t0\n";
+        assert_eq!(
+            parse_linux_default_gateway_ipv4(routes),
+            Some(Ipv4Addr::new(172, 17, 0, 1))
         );
     }
 
