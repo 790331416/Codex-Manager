@@ -99,8 +99,8 @@ See:
 
 The sample covers:
 
-- `manager.example.com -> codexmanager-service:48760`
-- `web.example.com -> codexmanager-web:48761`
+- `manager.example.com -> codexmanager-service:45760`
+- `web.example.com -> codexmanager-web:45761`
 - HTTPS redirect
 - underscore header support
 - explicit session header forwarding

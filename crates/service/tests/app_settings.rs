@@ -260,7 +260,7 @@ fn sync_runtime_settings_from_storage_preserves_explicit_process_env_over_persis
             .set_app_setting(
                 codexmanager_service::APP_SETTING_ENV_OVERRIDES_KEY,
                 &serde_json::to_string(&json!({
-                    "CODEXMANAGER_WEB_ADDR": "localhost:48761"
+                    "CODEXMANAGER_WEB_ADDR": "localhost:45761"
                 }))
                 .expect("serialize env overrides"),
                 now_ts(),
@@ -268,13 +268,13 @@ fn sync_runtime_settings_from_storage_preserves_explicit_process_env_over_persis
             .expect("save env overrides");
         drop(storage);
 
-        let _env = override_env_vars(&[("CODEXMANAGER_WEB_ADDR", Some("0.0.0.0:48761"))]);
+        let _env = override_env_vars(&[("CODEXMANAGER_WEB_ADDR", Some("0.0.0.0:45761"))]);
 
         codexmanager_service::sync_runtime_settings_from_storage();
 
         assert_eq!(
             std::env::var("CODEXMANAGER_WEB_ADDR").ok().as_deref(),
-            Some("0.0.0.0:48761")
+            Some("0.0.0.0:45761")
         );
     });
 }
@@ -1231,7 +1231,7 @@ fn app_settings_get_drops_web_addr_from_persisted_env_snapshot() {
             .set_app_setting(
                 codexmanager_service::APP_SETTING_ENV_OVERRIDES_KEY,
                 &serde_json::to_string(&json!({
-                    "CODEXMANAGER_WEB_ADDR": "0.0.0.0:48761",
+                    "CODEXMANAGER_WEB_ADDR": "0.0.0.0:45761",
                     "CODEXMANAGER_WEB_ROOT": "D:/tmp/web"
                 }))
                 .expect("serialize env overrides"),

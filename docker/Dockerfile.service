@@ -25,15 +25,15 @@ RUN apt-get update \
 
 COPY --from=builder /src/target/release/codexmanager-service /usr/local/bin/codexmanager-service
 
-ENV CODEXMANAGER_SERVICE_ADDR=0.0.0.0:48760
+ENV CODEXMANAGER_SERVICE_ADDR=0.0.0.0:45760
 ENV CODEXMANAGER_DB_PATH=/data/codexmanager.db
 ENV CODEXMANAGER_RPC_TOKEN_FILE=/data/codexmanager.rpc-token
 
 VOLUME ["/data"]
-EXPOSE 48760
+EXPOSE 45760
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:48760/health || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:45760/health || exit 1
 
 USER ${APP_USER}
 

@@ -162,7 +162,9 @@ export function formatServiceError(error: unknown): string {
     return "服务返回空响应（可能启动未完成、已异常退出或端口被占用）";
   }
   if (lower.includes("port is in use") || lower.includes("unexpected service responded")) {
-    return `端口已被占用或响应来源不是 CodexManager 服务（${LOOPBACK_PROXY_HINT}）`;
+    const hintMatch = normalized.match(/\((.*?)\)/);
+    const ext = hintMatch ? ` [详细原因: ${hintMatch[1]}]` : "";
+    return `端口已被占用或响应来源不是 CodexManager 服务${ext}（若开启全局代理，请将 localhost/127.0.0.1/::1 设为直连）`;
   }
   if (lower.includes("missing user_agent") || lower.includes("missing useragent")) {
     return `响应缺少服务标识（疑似非 CodexManager 服务，${LOOPBACK_PROXY_HINT}）`;

@@ -549,16 +549,16 @@ mod tests {
     #[test]
     fn normalize_connect_addr_maps_all_interfaces_to_localhost() {
         assert_eq!(
-            normalize_connect_addr("0.0.0.0:48760").as_deref(),
-            Some("localhost:48760")
+            normalize_connect_addr("0.0.0.0:45760").as_deref(),
+            Some("localhost:45760")
         );
         assert_eq!(
-            normalize_connect_addr("[::]:48760").as_deref(),
-            Some("localhost:48760")
+            normalize_connect_addr("[::]:45760").as_deref(),
+            Some("localhost:45760")
         );
         assert_eq!(
-            normalize_connect_addr("192.168.1.8:48760").as_deref(),
-            Some("192.168.1.8:48760")
+            normalize_connect_addr("192.168.1.8:45760").as_deref(),
+            Some("192.168.1.8:45760")
         );
     }
 
@@ -576,16 +576,16 @@ mod tests {
     #[test]
     fn browser_open_addr_maps_all_interfaces_to_loopback() {
         assert_eq!(
-            browser_open_addr("0.0.0.0:48761").as_deref(),
-            Some("127.0.0.1:48761")
+            browser_open_addr("0.0.0.0:45761").as_deref(),
+            Some("127.0.0.1:45761")
         );
         assert_eq!(
-            browser_open_addr("[::]:48761").as_deref(),
-            Some("127.0.0.1:48761")
+            browser_open_addr("[::]:45761").as_deref(),
+            Some("127.0.0.1:45761")
         );
         assert_eq!(
-            browser_open_addr("192.168.1.8:48761").as_deref(),
-            Some("192.168.1.8:48761")
+            browser_open_addr("192.168.1.8:45761").as_deref(),
+            Some("192.168.1.8:45761")
         );
     }
 

@@ -315,8 +315,8 @@ export const EN_MESSAGES: MessageCatalog = {
     "Service is disconnected. Account authorization and callback parsing are temporarily unavailable until it reconnects.",
   "备注/描述": "Notes / Description",
   "例如：主号 / 测试号": "For example: primary / test",
-  "手动解析回调（当本地 48760 端口占用时）":
-    "Manual callback parsing (when local port 48760 is occupied)",
+  "手动解析回调（当本地 45760 端口占用时）":
+    "Manual callback parsing (when local port 45760 is occupied)",
   "粘贴浏览器跳转后的完整回调 URL（包含 state 和 code）":
     "Paste the full callback URL after browser redirect (including state and code)",
   "解析": "Parse",

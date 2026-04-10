@@ -22,7 +22,7 @@ import {
   normalizeServiceAddr,
 } from "@/lib/utils/service";
 
-const DEFAULT_SERVICE_ADDR = "localhost:48760";
+const DEFAULT_SERVICE_ADDR = "localhost:45760";
 
 /**
  * 函数 `Header`
@@ -43,13 +43,13 @@ export function Header() {
   const { t } = useI18n();
   const [webPasswordModalOpen, setWebPasswordModalOpen] = useState(false);
   const [isToggling, setIsToggling] = useState(false);
-  const [portInput, setPortInput] = useState("48760");
+  const [portInput, setPortInput] = useState("45760");
   const { canManageService } = useRuntimeCapabilities();
 
   useEffect(() => {
     const current = String(serviceStatus.addr || DEFAULT_SERVICE_ADDR);
     const [, port = current] = current.split(":");
-    setPortInput(port || "48760");
+    setPortInput(port || "45760");
   }, [serviceStatus.addr]);
 
   /**
@@ -194,7 +194,7 @@ export function Header() {
               <span className="text-xs font-medium text-muted-foreground">{t("监听端口")}</span>
               <Input
                 className="h-7 w-16 border-none bg-transparent p-0 text-xs font-mono focus-visible:ring-0"
-                placeholder="48760"
+                placeholder="45760"
                 value={portInput}
                 onChange={(event) => {
                   const nextPort = event.target.value.replace(/[^\d]/g, "");

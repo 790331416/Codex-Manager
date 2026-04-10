@@ -84,7 +84,7 @@ Suggested additions:
 
 ```powershell
 pwsh -NoLogo -NoProfile -File scripts/tests/web_runtime_probe.ps1 `
-  -Base http://localhost:48761
+  -Base http://localhost:45761
 pwsh -NoLogo -NoProfile -File scripts/tests/web_ui_smoke.ps1 -SkipBuild
 ```
 

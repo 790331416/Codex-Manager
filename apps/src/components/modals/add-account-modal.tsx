@@ -621,7 +621,7 @@ export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
               <div className="space-y-3 pt-4 border-t">
                 <div className="space-y-2">
                   <Label className="text-xs flex items-center gap-1.5 text-muted-foreground">
-                    <Hash className="h-3 w-3" /> {t("手动解析回调（当本地 48760 端口占用时）")}
+                    <Hash className="h-3 w-3" /> {t("手动解析回调（当本地 45760 端口占用时）")}
                   </Label>
                   <div className="flex gap-2">
                     <Input 

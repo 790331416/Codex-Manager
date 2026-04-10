@@ -343,8 +343,8 @@ function parseIntegerInput(value: string, minimum = 0): number | null {
  * 返回函数执行结果
  */
 function inferServiceBindPreview(addr: string, mode: string): string {
-  const normalizedAddr = String(addr || "").trim() || "localhost:48760";
-  const [, port = "48760"] = normalizedAddr.split(":");
+  const normalizedAddr = String(addr || "").trim() || "localhost:45760";
+  const [, port = "45760"] = normalizedAddr.split(":");
   return mode === "all_interfaces" ? `0.0.0.0:${port}` : `localhost:${port}`;
 }
 

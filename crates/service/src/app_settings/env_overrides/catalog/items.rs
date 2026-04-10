@@ -371,7 +371,7 @@ pub(crate) const ENV_OVERRIDE_CATALOG: &[EnvOverrideCatalogItem] = &[
         "Web 监听地址",
         ENV_OVERRIDE_SCOPE_WEB,
         ENV_OVERRIDE_APPLY_MODE_RESTART,
-        "localhost:48761",
+        "localhost:45761",
     ),
     EnvOverrideCatalogItem::new(
         "CODEXMANAGER_WEB_NO_OPEN",

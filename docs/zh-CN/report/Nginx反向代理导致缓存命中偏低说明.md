@@ -112,8 +112,8 @@ proxy_send_timeout 3600s;
 
 这份示例同时覆盖了：
 
-- `manager.example.com -> codexmanager-service:48760`
-- `web.example.com -> codexmanager-web:48761`
+- `manager.example.com -> codexmanager-service:45760`
+- `web.example.com -> codexmanager-web:45761`
 - HTTPS 跳转
 - 下划线请求头支持
 - 会话相关头透传

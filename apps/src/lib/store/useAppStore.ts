@@ -21,7 +21,7 @@ export const useAppStore = create<AppState>((set) => ({
     connected: false,
     version: "",
     uptime: 0,
-    addr: "localhost:48760",
+    addr: "localhost:45760",
   },
   appSettings: {
     updateAutoCheck: true,
@@ -32,7 +32,7 @@ export const useAppStore = create<AppState>((set) => ({
     webAccessPasswordConfigured: false,
     locale: "zh-CN",
     localeOptions: ["zh-CN", "en", "ru", "ko"],
-    serviceAddr: "localhost:48760",
+    serviceAddr: "localhost:45760",
     serviceListenMode: "loopback",
     serviceListenModeOptions: ["loopback", "all_interfaces"],
     routeStrategy: "ordered",

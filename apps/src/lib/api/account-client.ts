@@ -364,7 +364,8 @@ export const accountClient = {
   refreshUsage: (accountId?: string) =>
     invoke(
       "service_usage_refresh",
-      withAddr(accountId ? { accountId } : {})
+      withAddr(accountId ? { accountId } : {}),
+      { timeoutMs: 120000 }
     ),
   async aggregateUsage(): Promise<UsageAggregateSummary> {
     const result = await invoke<unknown>("service_usage_aggregate", withAddr());

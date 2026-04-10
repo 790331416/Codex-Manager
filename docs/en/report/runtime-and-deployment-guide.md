@@ -22,8 +22,8 @@
 2. We recommend starting `codexmanager-start`. It launches service + web together and can be stopped with `Ctrl+C`.
 3. You can also start only `codexmanager-web`; it automatically launches `codexmanager-service` from the same directory and opens the browser.
 4. Or start `codexmanager-service` first, then `codexmanager-web`.
-5. Default addresses: service `localhost:48760`, Web UI `http://localhost:48761/`.
-6. To stop everything, visit `http://localhost:48761/__quit`. If the web process launched the service automatically, it will try to stop both.
+5. Default addresses: service `localhost:45760`, Web UI `http://localhost:45761/`.
+6. To stop everything, visit `http://localhost:45761/__quit`. If the web process launched the service automatically, it will try to stop both.
 7. If you reverse-proxy or split-deploy frontend assets yourself, you must forward both `/api/runtime` and `/api/rpc`. Serving static assets alone is not enough.
 
 ## Docker deployment
@@ -39,22 +39,22 @@
 docker compose -f docker/docker-compose.yml up --build
 ```
 
-Then open: `http://localhost:48761/`
+Then open: `http://localhost:45761/`
 
 ### Method 2: build and run separately
 ```bash
 # service
 docker build -f docker/Dockerfile.service -t codexmanager-service .
-docker run --rm -p 48760:48760 -v codexmanager-data:/data \
+docker run --rm -p 45760:45760 -v codexmanager-data:/data \
   -e CODEXMANAGER_RPC_TOKEN=replace_with_your_token \
   codexmanager-service
 
 # web (requires access to the service)
 docker build -f docker/Dockerfile.web -t codexmanager-web .
-docker run --rm -p 48761:48761 \
+docker run --rm -p 45761:45761 \
   -v codexmanager-data:/data \
   -e CODEXMANAGER_WEB_NO_SPAWN_SERVICE=1 \
-  -e CODEXMANAGER_SERVICE_ADDR=host.docker.internal:48760 \
+  -e CODEXMANAGER_SERVICE_ADDR=host.docker.internal:45760 \
   -e CODEXMANAGER_RPC_TOKEN=replace_with_your_token \
   codexmanager-web
 ```

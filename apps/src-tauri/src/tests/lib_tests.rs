@@ -165,7 +165,7 @@ fn rpc_call_falls_back_to_next_socket_after_empty_response() {
 
     let res = rpc_call_with_sockets(
         "initialize",
-        "localhost:48760",
+        "localhost:45760",
         &[bad_addr, good_addr],
         None,
     )

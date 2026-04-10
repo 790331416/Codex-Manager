@@ -1368,7 +1368,7 @@ export function normalizeAppSettings(payload: unknown): AppSettings {
     ),
     locale: asString(source.locale) || "zh-CN",
     localeOptions: asArray(source.localeOptions).map((item) => asString(item)).filter(Boolean),
-    serviceAddr: asString(source.serviceAddr) || "localhost:48760",
+    serviceAddr: asString(source.serviceAddr) || "localhost:45760",
     serviceListenMode: asString(source.serviceListenMode) || "loopback",
     serviceListenModeOptions: asArray(source.serviceListenModeOptions).map((item) =>
       asString(item)

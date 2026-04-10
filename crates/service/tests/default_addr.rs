@@ -78,7 +78,7 @@ fn with_bind_mode(mode: Option<&str>, test: impl FnOnce()) {
 /// 无
 #[test]
 fn default_addr_is_localhost() {
-    assert_eq!(codexmanager_service::DEFAULT_ADDR, "localhost:48760");
+    assert_eq!(codexmanager_service::DEFAULT_ADDR, "localhost:45760");
 }
 
 /// 函数 `default_bind_addr_is_all_interfaces`
@@ -94,7 +94,7 @@ fn default_addr_is_localhost() {
 /// 无
 #[test]
 fn default_bind_addr_is_all_interfaces() {
-    assert_eq!(codexmanager_service::DEFAULT_BIND_ADDR, "0.0.0.0:48760");
+    assert_eq!(codexmanager_service::DEFAULT_BIND_ADDR, "0.0.0.0:45760");
 }
 
 /// 函数 `default_web_addr_is_localhost`
@@ -110,7 +110,7 @@ fn default_bind_addr_is_all_interfaces() {
 /// 无
 #[test]
 fn default_web_addr_is_localhost() {
-    assert_eq!(codexmanager_service::DEFAULT_WEB_ADDR, "localhost:48761");
+    assert_eq!(codexmanager_service::DEFAULT_WEB_ADDR, "localhost:45761");
 }
 
 /// 函数 `default_web_bind_addr_is_all_interfaces`
@@ -126,7 +126,7 @@ fn default_web_addr_is_localhost() {
 /// 无
 #[test]
 fn default_web_bind_addr_is_all_interfaces() {
-    assert_eq!(codexmanager_service::DEFAULT_WEB_BIND_ADDR, "0.0.0.0:48761");
+    assert_eq!(codexmanager_service::DEFAULT_WEB_BIND_ADDR, "0.0.0.0:45761");
 }
 
 /// 函数 `listener_bind_addr_defaults_to_loopback`
@@ -145,15 +145,15 @@ fn listener_bind_addr_defaults_to_loopback() {
     with_bind_mode(None, || {
         assert_eq!(
             codexmanager_service::default_listener_bind_addr(),
-            "localhost:48760"
+            "localhost:45760"
         );
         assert_eq!(
-            codexmanager_service::listener_bind_addr("localhost:48760"),
-            "localhost:48760"
+            codexmanager_service::listener_bind_addr("localhost:45760"),
+            "localhost:45760"
         );
         assert_eq!(
-            codexmanager_service::listener_bind_addr("127.0.0.1:48760"),
-            "localhost:48760"
+            codexmanager_service::listener_bind_addr("127.0.0.1:45760"),
+            "localhost:45760"
         );
     });
 }
@@ -176,15 +176,15 @@ fn listener_bind_addr_maps_loopback_to_all_interfaces_when_enabled() {
         || {
             assert_eq!(
                 codexmanager_service::default_listener_bind_addr(),
-                "0.0.0.0:48760"
+                "0.0.0.0:45760"
             );
             assert_eq!(
-                codexmanager_service::listener_bind_addr("localhost:48760"),
-                "0.0.0.0:48760"
+                codexmanager_service::listener_bind_addr("localhost:45760"),
+                "0.0.0.0:45760"
             );
             assert_eq!(
-                codexmanager_service::listener_bind_addr("127.0.0.1:48760"),
-                "0.0.0.0:48760"
+                codexmanager_service::listener_bind_addr("127.0.0.1:45760"),
+                "0.0.0.0:45760"
             );
         },
     );
@@ -206,7 +206,7 @@ fn default_web_listener_addr_tracks_service_bind_mode() {
     with_bind_mode(None, || {
         assert_eq!(
             codexmanager_service::default_web_listener_addr(),
-            "localhost:48761"
+            "localhost:45761"
         );
     });
 
@@ -215,7 +215,7 @@ fn default_web_listener_addr_tracks_service_bind_mode() {
         || {
             assert_eq!(
                 codexmanager_service::default_web_listener_addr(),
-                "0.0.0.0:48761"
+                "0.0.0.0:45761"
             );
         },
     );
@@ -286,12 +286,12 @@ fn default_web_listener_addr_tracks_service_port_offset() {
 fn listener_bind_addr_keeps_explicit_all_interfaces() {
     with_bind_mode(None, || {
         assert_eq!(
-            codexmanager_service::listener_bind_addr("0.0.0.0:48760"),
-            "0.0.0.0:48760"
+            codexmanager_service::listener_bind_addr("0.0.0.0:45760"),
+            "0.0.0.0:45760"
         );
         assert_eq!(
-            codexmanager_service::listener_bind_addr("192.168.1.10:48760"),
-            "192.168.1.10:48760"
+            codexmanager_service::listener_bind_addr("192.168.1.10:45760"),
+            "192.168.1.10:45760"
         );
     });
 }
@@ -312,12 +312,12 @@ fn current_service_bind_mode_prefers_runtime_env() {
     with_bind_mode(
         Some(codexmanager_service::SERVICE_BIND_MODE_ALL_INTERFACES),
         || {
-            std::env::set_var("CODEXMANAGER_SERVICE_ADDR", "localhost:48760");
+            std::env::set_var("CODEXMANAGER_SERVICE_ADDR", "localhost:45760");
             assert_eq!(
                 codexmanager_service::current_service_bind_mode(),
                 codexmanager_service::SERVICE_BIND_MODE_LOOPBACK
             );
-            std::env::set_var("CODEXMANAGER_SERVICE_ADDR", "0.0.0.0:48760");
+            std::env::set_var("CODEXMANAGER_SERVICE_ADDR", "0.0.0.0:45760");
             assert_eq!(
                 codexmanager_service::current_service_bind_mode(),
                 codexmanager_service::SERVICE_BIND_MODE_ALL_INTERFACES

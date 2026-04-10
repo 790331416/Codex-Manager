@@ -15,6 +15,7 @@ static TRACE_BODY_PREVIEW_MAX_BYTES: AtomicUsize =
     AtomicUsize::new(DEFAULT_TRACE_BODY_PREVIEW_MAX_BYTES);
 static FRONT_PROXY_MAX_BODY_BYTES: AtomicUsize =
     AtomicUsize::new(DEFAULT_FRONT_PROXY_MAX_BODY_BYTES);
+static INPUT_TRUNCATION_THRESHOLD_BYTES: AtomicUsize = AtomicUsize::new(0);
 static UPSTREAM_CONNECT_TIMEOUT_SECS: AtomicU64 =
     AtomicU64::new(DEFAULT_UPSTREAM_CONNECT_TIMEOUT_SECS);
 static UPSTREAM_TOTAL_TIMEOUT_MS: AtomicU64 = AtomicU64::new(DEFAULT_UPSTREAM_TOTAL_TIMEOUT_MS);
@@ -43,6 +44,7 @@ const DEFAULT_ENABLE_REQUEST_COMPRESSION: bool = true;
 const DEFAULT_REQUEST_GATE_WAIT_TIMEOUT_MS: u64 = 300;
 const DEFAULT_TRACE_BODY_PREVIEW_MAX_BYTES: usize = 0;
 const DEFAULT_FRONT_PROXY_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
+const DEFAULT_INPUT_TRUNCATION_THRESHOLD_BYTES: usize = 0;
 const DEFAULT_FREE_ACCOUNT_MAX_MODEL: &str = "auto";
 const DEFAULT_MODEL_FORWARD_RULES: &str = "";
 const DEFAULT_CODEX_USER_AGENT_VERSION: &str = "0.101.0";
@@ -51,6 +53,7 @@ const MAX_UPSTREAM_PROXY_POOL_SIZE: usize = 5;
 const ENV_REQUEST_GATE_WAIT_TIMEOUT_MS: &str = "CODEXMANAGER_REQUEST_GATE_WAIT_TIMEOUT_MS";
 const ENV_TRACE_BODY_PREVIEW_MAX_BYTES: &str = "CODEXMANAGER_TRACE_BODY_PREVIEW_MAX_BYTES";
 const ENV_FRONT_PROXY_MAX_BODY_BYTES: &str = "CODEXMANAGER_FRONT_PROXY_MAX_BODY_BYTES";
+const ENV_INPUT_TRUNCATION_THRESHOLD_BYTES: &str = "CODEXMANAGER_INPUT_TRUNCATION_THRESHOLD_BYTES";
 const ENV_UPSTREAM_CONNECT_TIMEOUT_SECS: &str = "CODEXMANAGER_UPSTREAM_CONNECT_TIMEOUT_SECS";
 const ENV_UPSTREAM_TOTAL_TIMEOUT_MS: &str = "CODEXMANAGER_UPSTREAM_TOTAL_TIMEOUT_MS";
 const ENV_UPSTREAM_STREAM_TIMEOUT_MS: &str = "CODEXMANAGER_UPSTREAM_STREAM_TIMEOUT_MS";
@@ -428,6 +431,11 @@ pub(crate) fn trace_body_preview_max_bytes() -> usize {
 pub(crate) fn front_proxy_max_body_bytes() -> usize {
     ensure_runtime_config_loaded();
     FRONT_PROXY_MAX_BODY_BYTES.load(Ordering::Relaxed)
+}
+
+pub(crate) fn input_truncation_threshold_bytes() -> usize {
+    ensure_runtime_config_loaded();
+    INPUT_TRUNCATION_THRESHOLD_BYTES.load(Ordering::Relaxed)
 }
 
 /// 函数 `upstream_proxy_url`
@@ -840,6 +848,13 @@ pub(super) fn reload_from_env() {
         env_usize_or(
             ENV_FRONT_PROXY_MAX_BODY_BYTES,
             DEFAULT_FRONT_PROXY_MAX_BODY_BYTES,
+        ),
+        Ordering::Relaxed,
+    );
+    INPUT_TRUNCATION_THRESHOLD_BYTES.store(
+        env_usize_or(
+            ENV_INPUT_TRUNCATION_THRESHOLD_BYTES,
+            DEFAULT_INPUT_TRUNCATION_THRESHOLD_BYTES,
         ),
         Ordering::Relaxed,
     );

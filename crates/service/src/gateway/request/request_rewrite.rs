@@ -2,6 +2,7 @@ use serde_json::Value;
 
 mod request_rewrite_chat_completions;
 mod request_rewrite_prompt_cache;
+mod request_rewrite_input_truncation;
 mod request_rewrite_responses;
 mod request_rewrite_shared;
 
@@ -743,9 +744,10 @@ fn apply_request_overrides_with_prompt_cache_key_mode(
             }
 
             if !changed {
-                return body;
+                return request_rewrite_input_truncation::maybe_truncate_input(path, body);
             }
-            return serde_json::to_vec(&payload).unwrap_or(body);
+            let serialized = serde_json::to_vec(&payload).unwrap_or(body);
+            return request_rewrite_input_truncation::maybe_truncate_input(path, serialized);
         }
     }
 

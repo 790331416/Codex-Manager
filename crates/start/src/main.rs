@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const ENV_CANDIDATES: [&str; 3] = ["codexmanager.env", "CodexManager.env", ".env"];
-const DEFAULT_SERVICE_ADDR: &str = "localhost:48760";
+const DEFAULT_SERVICE_ADDR: &str = "localhost:45760";
 
 #[cfg(target_os = "windows")]
 mod windows_job {
@@ -726,11 +726,11 @@ mod tests {
     /// 无
     #[test]
     fn normalize_connect_addr_maps_all_interfaces_to_localhost() {
-        assert_eq!(normalize_connect_addr("0.0.0.0:48760"), "localhost:48760");
-        assert_eq!(normalize_connect_addr("[::]:48760"), "localhost:48760");
+        assert_eq!(normalize_connect_addr("0.0.0.0:45760"), "localhost:45760");
+        assert_eq!(normalize_connect_addr("[::]:45760"), "localhost:45760");
         assert_eq!(
-            normalize_connect_addr("192.168.1.8:48760"),
-            "192.168.1.8:48760"
+            normalize_connect_addr("192.168.1.8:45760"),
+            "192.168.1.8:45760"
         );
     }
 
@@ -747,8 +747,8 @@ mod tests {
     /// 无
     #[test]
     fn browser_open_addr_maps_all_interfaces_to_loopback() {
-        assert_eq!(browser_open_addr("0.0.0.0:48761"), "127.0.0.1:48761");
-        assert_eq!(browser_open_addr("[::]:48761"), "127.0.0.1:48761");
-        assert_eq!(browser_open_addr("192.168.1.8:48761"), "192.168.1.8:48761");
+        assert_eq!(browser_open_addr("0.0.0.0:45761"), "127.0.0.1:45761");
+        assert_eq!(browser_open_addr("[::]:45761"), "127.0.0.1:45761");
+        assert_eq!(browser_open_addr("192.168.1.8:45761"), "192.168.1.8:45761");
     }
 }

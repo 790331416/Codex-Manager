@@ -3,10 +3,10 @@ use super::{
     APP_SETTING_SERVICE_ADDR_KEY,
 };
 
-pub const DEFAULT_ADDR: &str = "localhost:48760";
-pub const DEFAULT_BIND_ADDR: &str = "0.0.0.0:48760";
-pub const DEFAULT_WEB_ADDR: &str = "localhost:48761";
-pub const DEFAULT_WEB_BIND_ADDR: &str = "0.0.0.0:48761";
+pub const DEFAULT_ADDR: &str = "localhost:45760";
+pub const DEFAULT_BIND_ADDR: &str = "0.0.0.0:45760";
+pub const DEFAULT_WEB_ADDR: &str = "localhost:45761";
+pub const DEFAULT_WEB_BIND_ADDR: &str = "0.0.0.0:45761";
 pub const SERVICE_BIND_MODE_SETTING_KEY: &str = "service.bind_mode";
 pub const SERVICE_BIND_MODE_LOOPBACK: &str = "loopback";
 pub const SERVICE_BIND_MODE_ALL_INTERFACES: &str = "all_interfaces";

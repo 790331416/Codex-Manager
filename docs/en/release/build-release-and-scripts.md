@@ -120,7 +120,7 @@ This updates:
 ## Protocol regression probe
 ```powershell
 pwsh -NoLogo -NoProfile -File scripts/tests/gateway_regression_suite.ps1 `
-  -Base http://localhost:48760 -ApiKey <key> -Model gpt-5.3-codex
+  -Base http://localhost:45760 -ApiKey <key> -Model gpt-5.3-codex
 ```
 
 It runs the following in sequence:

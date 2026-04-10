@@ -6,7 +6,7 @@ use std::time::Duration;
 use super::address::{resolve_service_addr, resolve_socket_addrs};
 use super::http::parse_http_body;
 
-const RPC_CONNECT_TIMEOUT: Duration = Duration::from_millis(400);
+const RPC_CONNECT_TIMEOUT: Duration = Duration::from_millis(2000);
 const RPC_DEFAULT_IO_TIMEOUT: Duration = Duration::from_secs(10);
 const RPC_BULK_USAGE_REFRESH_IO_TIMEOUT: Duration = Duration::from_secs(600);
 

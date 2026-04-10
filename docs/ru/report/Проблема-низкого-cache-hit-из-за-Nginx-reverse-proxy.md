@@ -99,8 +99,8 @@ proxy_send_timeout 3600s;
 
 Пример покрывает:
 
-- `manager.example.com -> codexmanager-service:48760`
-- `web.example.com -> codexmanager-web:48761`
+- `manager.example.com -> codexmanager-service:45760`
+- `web.example.com -> codexmanager-web:45761`
 - HTTPS redirect
 - поддержку заголовков с подчеркиванием
 - явную передачу session-заголовков
