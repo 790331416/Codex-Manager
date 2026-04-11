@@ -98,6 +98,20 @@ fn normalize_sort(value: Option<i64>) -> i64 {
     value.unwrap_or(0)
 }
 
+fn normalize_status(value: Option<String>) -> Result<String, String> {
+    match value {
+        Some(raw) => {
+            let normalized = raw.trim().to_ascii_lowercase().replace('-', "_");
+            match normalized.as_str() {
+                "active" | "enabled" | "enable" => Ok("active".to_string()),
+                "disabled" | "disable" | "inactive" => Ok("disabled".to_string()),
+                other => Err(format!("unsupported aggregate api status: {other}")),
+            }
+        }
+        None => Ok("active".to_string()),
+    }
+}
+
 fn normalize_auth_type(value: Option<String>) -> Result<String, String> {
     match value {
         Some(raw) => {
@@ -959,6 +973,7 @@ pub(crate) fn update_aggregate_api(
     provider_type: Option<String>,
     supplier_name: Option<String>,
     sort: Option<i64>,
+    status: Option<String>,
     auth_type: Option<String>,
     auth_custom_enabled: Option<bool>,
     auth_params: Option<serde_json::Value>,
@@ -1005,6 +1020,12 @@ pub(crate) fn update_aggregate_api(
     if sort.is_some() {
         storage
             .update_aggregate_api_sort(api_id, normalize_sort(sort))
+            .map_err(|err| err.to_string())?;
+    }
+    if let Some(status) = status {
+        let normalized_status = normalize_status(Some(status))?;
+        storage
+            .update_aggregate_api_status(api_id, normalized_status.as_str())
             .map_err(|err| err.to_string())?;
     }
     if let Some(url) = url {

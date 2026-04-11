@@ -34,6 +34,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -119,6 +120,7 @@ export default function AggregateApiPage() {
   >({});
   const [loadingSecretId, setLoadingSecretId] = useState<string | null>(null);
   const [testingApiId, setTestingApiId] = useState<string | null>(null);
+  const [togglingApiId, setTogglingApiId] = useState<string | null>(null);
 
   const { data: aggregateApis = [], isLoading } = useQuery({
     queryKey: ["aggregate-apis"],
@@ -258,6 +260,43 @@ export default function AggregateApiPage() {
     },
     onError: (error: unknown) => {
       toast.error(`${t("设为优先")} ${t("失败")}: ${error instanceof Error ? error.message : String(error)}`);
+    },
+  });
+
+  const toggleStatusMutation = useMutation({
+    mutationFn: async ({
+      api,
+      enabled,
+    }: {
+      api: AggregateApi;
+      enabled: boolean;
+    }) => {
+      await accountClient.updateAggregateApi(api.id, {
+        supplierName: api.supplierName || api.url,
+        status: enabled ? "active" : "disabled",
+      });
+      return enabled;
+    },
+    onMutate: async ({ api }) => {
+      setTogglingApiId(api.id);
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["aggregate-apis"] }),
+        queryClient.invalidateQueries({ queryKey: ["apikeys"] }),
+        queryClient.invalidateQueries({ queryKey: ["startup-snapshot"] }),
+      ]);
+      toast.success(t("状态已更新"));
+    },
+    onError: (error: unknown) => {
+      toast.error(
+        `${t("更新状态失败")}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    },
+    onSettled: async (_result, _error, variables) => {
+      setTogglingApiId((current) =>
+        current === variables.api.id ? null : current,
+      );
     },
   });
 
@@ -481,6 +520,7 @@ export default function AggregateApiPage() {
                   <TableHead className="w-[148px]">{t("密钥")}</TableHead>
                   <TableHead className="w-[64px] text-center">{t("顺序")}</TableHead>
                   <TableHead className="w-[130px]">{t("测试连通性")}</TableHead>
+                  <TableHead className="w-[104px]">{t("状态")}</TableHead>
                   <TableHead className="text-center">{t("操作")}</TableHead>
                 </TableRow>
               </TableHeader>
@@ -503,6 +543,9 @@ export default function AggregateApiPage() {
                       <TableCell>
                         <Skeleton className="h-6 w-20 rounded-full" />
                       </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-6 w-16 rounded-full" />
+                      </TableCell>
                       <TableCell className="text-center">
                         <Skeleton className="mx-auto h-8 w-8" />
                       </TableCell>
@@ -510,7 +553,7 @@ export default function AggregateApiPage() {
                   ))
                 ) : filteredAggregateApis.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="h-48 text-center">
+                    <TableCell colSpan={7} className="h-48 text-center">
                       <div className="flex flex-col items-center justify-center gap-2 text-muted-foreground">
                         <ShieldCheck className="h-8 w-8 opacity-20" />
                         <p>
@@ -529,6 +572,10 @@ export default function AggregateApiPage() {
                 ) : (
                   filteredAggregateApis.map((api) => {
                     const revealed = revealedSecrets[api.id];
+                    const isEnabled =
+                      String(api.status || "")
+                        .trim()
+                        .toLowerCase() !== "disabled";
                     const createdTimeText = formatTsFromSeconds(
                       api.createdAt,
                       t("未知时间"),
@@ -699,6 +746,23 @@ export default function AggregateApiPage() {
                               </TooltipContent>
                             </Tooltip>
                           ) : null}
+                        </TableCell>
+                        <TableCell className="align-middle">
+                          <div className="flex items-center gap-2">
+                            <Switch
+                              className="scale-75"
+                              checked={isEnabled}
+                              disabled={
+                                !isServiceReady || togglingApiId === api.id
+                              }
+                              onCheckedChange={(enabled) =>
+                                toggleStatusMutation.mutate({ api, enabled })
+                              }
+                            />
+                            <span className="text-[10px] font-medium text-muted-foreground">
+                              {isEnabled ? t("启用") : t("禁用")}
+                            </span>
+                          </div>
                         </TableCell>
                         <TableCell>
                           <div className="table-action-cell gap-1">

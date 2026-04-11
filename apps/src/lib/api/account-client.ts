@@ -107,6 +107,7 @@ interface AggregateApiPayload {
   providerType?: string | null;
   supplierName?: string | null;
   sort?: number | null;
+  status?: string | null;
   url?: string | null;
   key?: string | null;
   authType?: string | null;
@@ -471,6 +472,7 @@ export const accountClient = {
         providerType: params.providerType || null,
         supplierName: params.supplierName || null,
         sort: typeof params.sort === "number" ? params.sort : null,
+        status: params.status || null,
         url: params.url || null,
         key: params.key || null,
         authType: params.authType || null,
@@ -498,6 +500,7 @@ export const accountClient = {
         providerType: params.providerType || null,
         supplierName: params.supplierName || null,
         sort: typeof params.sort === "number" ? params.sort : null,
+        status: params.status || null,
         url: params.url || null,
         key: params.key || null,
         authType: params.authType || null,

@@ -186,6 +186,14 @@ impl Storage {
         Ok(())
     }
 
+    pub fn update_aggregate_api_status(&self, api_id: &str, status: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE aggregate_apis SET status = ?1, updated_at = ?2 WHERE id = ?3",
+            (status, now_ts(), api_id),
+        )?;
+        Ok(())
+    }
+
     /// 函数 `update_aggregate_api_type`
     ///
     /// 作者: gaohongshun
