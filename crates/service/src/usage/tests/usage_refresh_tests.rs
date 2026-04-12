@@ -1,7 +1,8 @@
 use super::{
     clear_pending_usage_refresh_tasks_for_tests, enqueue_usage_refresh_with_worker,
     next_usage_poll_cursor, reset_usage_poll_cursor_for_tests, run_token_refresh_task,
-    token_refresh_due_cutoff, token_refresh_schedule, usage_poll_batch_indices,
+    should_retry_usage_refresh_with_token, token_refresh_due_cutoff, token_refresh_schedule,
+    usage_poll_batch_indices,
 };
 use codexmanager_core::storage::{now_ts, Storage, Token};
 use std::collections::HashSet;
@@ -174,6 +175,38 @@ fn schedule_skips_when_refresh_token_is_empty() {
     let (exp, scheduled_at) = token_refresh_schedule(&token, now, 600, 2700);
     assert_eq!(exp, None);
     assert_eq!(scheduled_at, i64::MAX);
+}
+
+/// 函数 `usage_refresh_retry_skips_when_refresh_token_is_empty`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-12
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn usage_refresh_retry_skips_when_refresh_token_is_empty() {
+    let token = Token {
+        account_id: "acc-empty-refresh".to_string(),
+        id_token: "id".to_string(),
+        access_token: "access".to_string(),
+        refresh_token: String::new(),
+        api_key_access_token: None,
+        last_refresh: now_ts(),
+    };
+
+    assert!(!should_retry_usage_refresh_with_token(
+        &token,
+        "usage endpoint status 401 Unauthorized"
+    ));
+    assert!(!should_retry_usage_refresh_with_token(
+        &token,
+        "usage endpoint status 403 Forbidden"
+    ));
 }
 
 /// 函数 `due_cutoff_includes_next_poll_window_and_buffer`

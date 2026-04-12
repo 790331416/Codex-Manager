@@ -461,7 +461,15 @@ fn refresh_usage_for_token(
             store_usage_snapshot(storage, &current.account_id, value)?;
             Ok(UsageRefreshResult { _status: status })
         }
-        Err(err) if should_retry_with_refresh(&err) => {
+        Err(err) if should_retry_usage_refresh_with_token(&current, &err) => {
+            if current.refresh_token.trim().is_empty() {
+                log::debug!(
+                    "skip usage refresh token retry for account without refresh token: account_id={}",
+                    current.account_id
+                );
+                mark_usage_unreachable_if_needed(storage, &current.account_id, &err);
+                return Err(err);
+            }
             // 中文注释：token 刷新与持久化独立封装，避免轮询流程继续膨胀；
             // 不下沉会让后续 async 迁移时刷新链路与业务编排强耦合，回归范围扩大。
             if let Err(refresh_err) =
@@ -752,4 +760,20 @@ fn token_refresh_schedule(
 fn token_refresh_due_cutoff(now_ts_secs: i64, poll_interval_secs: u64) -> i64 {
     let lookahead_secs = poll_interval_secs.saturating_add(TOKEN_REFRESH_LOOKAHEAD_BUFFER_SECS);
     now_ts_secs.saturating_add(i64::try_from(lookahead_secs).unwrap_or(i64::MAX))
+}
+
+/// 函数 `should_retry_usage_refresh_with_token`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-12
+///
+/// # 参数
+/// - token: 参数 token
+/// - err: 参数 err
+///
+/// # 返回
+/// 返回函数执行结果
+pub(super) fn should_retry_usage_refresh_with_token(token: &Token, err: &str) -> bool {
+    should_retry_with_refresh(err) && !token.refresh_token.trim().is_empty()
 }
