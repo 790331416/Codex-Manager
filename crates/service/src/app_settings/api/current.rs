@@ -1,31 +1,28 @@
 use crate::app_settings::{list_app_settings_map, listener_bind_addr_for_mode};
 use crate::initialize_storage_if_needed;
 use crate::web_access_password_configured;
-use codexmanager_core::rpc::types::ModelOption;
+use codexmanager_core::rpc::types::ModelInfo;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
 use super::{
     current_background_tasks_snapshot_value, current_close_to_tray_on_close_setting,
     current_codex_cli_guide_dismissed, current_env_overrides, current_gateway_account_max_inflight,
-    current_gateway_free_account_max_model,
-    current_gateway_model_forward_rules, current_gateway_originator,
-    current_gateway_residency_requirement,
+    current_gateway_free_account_max_model, current_gateway_model_forward_rules,
+    current_gateway_originator, current_gateway_residency_requirement,
     current_gateway_sse_keepalive_interval_ms, current_gateway_upstream_stream_timeout_ms,
     current_gateway_user_agent_version, current_lightweight_mode_on_close_to_tray_setting,
     current_saved_service_addr, current_service_bind_mode, current_ui_appearance_preset,
     current_ui_locale, current_ui_low_transparency_enabled, current_ui_theme,
     current_update_auto_check_enabled, default_gateway_originator,
-    default_gateway_user_agent_version, env_override_catalog_value,
-    env_override_reserved_keys, env_override_unsupported_keys,
-    residency_requirement_options, save_env_overrides_value,
+    default_gateway_user_agent_version, env_override_catalog_value, env_override_reserved_keys,
+    env_override_unsupported_keys, residency_requirement_options, save_env_overrides_value,
     save_persisted_app_setting, save_persisted_bool_setting, sync_runtime_settings_from_storage,
     APP_SETTING_CLOSE_TO_TRAY_ON_CLOSE_KEY, APP_SETTING_GATEWAY_ACCOUNT_MAX_INFLIGHT_KEY,
     APP_SETTING_GATEWAY_BACKGROUND_TASKS_KEY, APP_SETTING_GATEWAY_FREE_ACCOUNT_MAX_MODEL_KEY,
-    APP_SETTING_GATEWAY_MODEL_FORWARD_RULES_KEY,
-    APP_SETTING_GATEWAY_ORIGINATOR_KEY, APP_SETTING_GATEWAY_RESIDENCY_REQUIREMENT_KEY,
-    APP_SETTING_GATEWAY_ROUTE_STRATEGY_KEY, APP_SETTING_GATEWAY_SSE_KEEPALIVE_INTERVAL_MS_KEY,
-    APP_SETTING_GATEWAY_UPSTREAM_PROXY_URL_KEY,
+    APP_SETTING_GATEWAY_MODEL_FORWARD_RULES_KEY, APP_SETTING_GATEWAY_ORIGINATOR_KEY,
+    APP_SETTING_GATEWAY_RESIDENCY_REQUIREMENT_KEY, APP_SETTING_GATEWAY_ROUTE_STRATEGY_KEY,
+    APP_SETTING_GATEWAY_SSE_KEEPALIVE_INTERVAL_MS_KEY, APP_SETTING_GATEWAY_UPSTREAM_PROXY_URL_KEY,
     APP_SETTING_GATEWAY_UPSTREAM_STREAM_TIMEOUT_MS_KEY, APP_SETTING_GATEWAY_USER_AGENT_VERSION_KEY,
     APP_SETTING_LIGHTWEIGHT_MODE_ON_CLOSE_TO_TRAY_KEY, APP_SETTING_PLUGIN_MARKET_MODE_KEY,
     APP_SETTING_PLUGIN_MARKET_SOURCE_URL_KEY, APP_SETTING_SERVICE_ADDR_KEY,
@@ -233,7 +230,7 @@ pub(super) fn current_app_settings_value(
 /// 返回函数执行结果
 fn load_free_account_max_model_options(current: &str) -> Vec<String> {
     let cached = crate::apikey_models::read_model_options(false)
-        .map(|result| result.items)
+        .map(|result| result.models)
         .unwrap_or_default();
     collect_free_account_max_model_options(current, &cached)
 }
@@ -250,7 +247,7 @@ fn load_free_account_max_model_options(current: &str) -> Vec<String> {
 ///
 /// # 返回
 /// 返回函数执行结果
-fn collect_free_account_max_model_options(current: &str, cached: &[ModelOption]) -> Vec<String> {
+fn collect_free_account_max_model_options(current: &str, cached: &[ModelInfo]) -> Vec<String> {
     let mut items = vec!["auto".to_string()];
     for slug in cached
         .iter()
@@ -466,7 +463,7 @@ mod tests {
         collect_free_account_max_model_options, normalize_market_mode,
         DEFAULT_FREE_ACCOUNT_MAX_MODEL_OPTIONS,
     };
-    use codexmanager_core::rpc::types::ModelOption;
+    use codexmanager_core::rpc::types::ModelInfo;
 
     /// 函数 `free_account_max_model_options_fallback_to_curated_defaults`
     ///
@@ -505,25 +502,30 @@ mod tests {
         let actual = collect_free_account_max_model_options(
             "gpt-5.2",
             &[
-                ModelOption {
+                ModelInfo {
                     slug: "gpt-5".to_string(),
                     display_name: "gpt-5".to_string(),
+                    ..Default::default()
                 },
-                ModelOption {
+                ModelInfo {
                     slug: "gpt-5.1-codex".to_string(),
                     display_name: "gpt-5.1-codex".to_string(),
+                    ..Default::default()
                 },
-                ModelOption {
+                ModelInfo {
                     slug: "gpt-5.4-pro".to_string(),
                     display_name: "gpt-5.4-pro".to_string(),
+                    ..Default::default()
                 },
-                ModelOption {
+                ModelInfo {
                     slug: "o3".to_string(),
                     display_name: "o3".to_string(),
+                    ..Default::default()
                 },
-                ModelOption {
+                ModelInfo {
                     slug: "gpt-5.1-codex".to_string(),
                     display_name: "gpt-5.1-codex".to_string(),
+                    ..Default::default()
                 },
             ],
         );

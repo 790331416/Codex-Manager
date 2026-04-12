@@ -119,7 +119,7 @@ export function ApiKeyModal({ open, onOpenChange, apiKey }: ApiKeyModalProps) {
     queryKey: ["apikey-models"],
     queryFn: async () => {
       const cached = await accountClient.listModels(false);
-      if (cached.length > 0) {
+      if (cached.models.length > 0) {
         return cached;
       }
       try {
@@ -131,8 +131,15 @@ export function ApiKeyModal({ open, onOpenChange, apiKey }: ApiKeyModalProps) {
     enabled: open && isServiceReady,
   });
 
+  const visibleModels = (models?.models || []).filter((model) => {
+    if (model.supportedInApi) {
+      return true;
+    }
+    return Boolean(modelSlug) && model.slug === modelSlug;
+  });
+
   const modelLabelMap = Object.fromEntries(
-    (models || []).map((model) => [model.slug, model.slug]),
+    visibleModels.map((model) => [model.slug, model.displayName || model.slug]),
   );
 
   useEffect(() => {
@@ -431,9 +438,9 @@ export function ApiKeyModal({ open, onOpenChange, apiKey }: ApiKeyModalProps) {
                 </SelectTrigger>
                 <SelectContent align="start">
                   <SelectItem value="auto">{t("跟随请求")}</SelectItem>
-                  {models?.map((model) => (
+                  {visibleModels.map((model) => (
                     <SelectItem key={model.slug} value={model.slug}>
-                      {model.slug}
+                      {model.displayName || model.slug}
                     </SelectItem>
                   ))}
                 </SelectContent>

@@ -9,7 +9,7 @@ import {
   normalizeApiKeyList,
   normalizeApiKeyUsageStats,
   normalizeLoginStartResult,
-  normalizeModelOptions,
+  normalizeModelCatalog,
   normalizeUsageAggregateSummary,
   normalizeUsageList,
   normalizeUsageSnapshot,
@@ -28,7 +28,7 @@ import {
   CurrentAccessTokenAccountReadResult,
   LoginStatusResult,
   LoginStartResult,
-  ModelOption,
+  ModelCatalog,
   UsageAggregateSummary,
 } from "../../types";
 
@@ -584,12 +584,12 @@ export const accountClient = {
     invoke("service_apikey_disable", withAddr({ keyId })),
   enableApiKey: (keyId: string) =>
     invoke("service_apikey_enable", withAddr({ keyId })),
-  async listModels(refreshRemote?: boolean): Promise<ModelOption[]> {
+  async listModels(refreshRemote?: boolean): Promise<ModelCatalog> {
     const result = await invoke<unknown>(
       "service_apikey_models",
       withAddr({ refreshRemote })
     );
-    return normalizeModelOptions(result);
+    return normalizeModelCatalog(result);
   },
   async readApiKeySecret(keyId: string): Promise<string> {
     const result = await invoke<{ key?: string }>(

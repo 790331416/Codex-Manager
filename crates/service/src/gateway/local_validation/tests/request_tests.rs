@@ -2,7 +2,7 @@ use super::*;
 use crate::gateway::{
     adapt_request_for_protocol, apply_request_overrides_with_service_tier_and_prompt_cache_key,
 };
-use codexmanager_core::rpc::types::ModelOption;
+use codexmanager_core::rpc::types::{ModelInfo, ModelsResponse};
 use codexmanager_core::storage::{now_ts, Storage};
 use serde_json::Value;
 
@@ -339,16 +339,21 @@ fn anthropic_model_must_exist_in_cached_model_options() {
     storage
         .upsert_model_options_cache(
             "default",
-            &serde_json::to_string(&vec![
-                ModelOption {
-                    slug: "claude-sonnet-4".to_string(),
-                    display_name: "claude-sonnet-4".to_string(),
-                },
-                ModelOption {
-                    slug: "gpt-5.4-mini".to_string(),
-                    display_name: "gpt-5.4-mini".to_string(),
-                },
-            ])
+            &serde_json::to_string(&ModelsResponse {
+                models: vec![
+                    ModelInfo {
+                        slug: "claude-sonnet-4".to_string(),
+                        display_name: "claude-sonnet-4".to_string(),
+                        ..Default::default()
+                    },
+                    ModelInfo {
+                        slug: "gpt-5.4-mini".to_string(),
+                        display_name: "gpt-5.4-mini".to_string(),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            })
             .expect("serialize model options"),
             now_ts(),
         )

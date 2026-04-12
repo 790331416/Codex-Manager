@@ -47,9 +47,9 @@ export function useApiKeys() {
     )
   );
   const startupApiKeys = startupSnapshot?.apiKeys || [];
-  const startupApiModels = startupSnapshot?.apiModelOptions || [];
+  const startupApiModels = startupSnapshot?.apiModels;
   const hasStartupApiKeySnapshot = startupApiKeys.length > 0;
-  const hasStartupApiModelSnapshot = startupApiModels.length > 0;
+  const hasStartupApiModelSnapshot = (startupApiModels?.models?.length || 0) > 0;
 
   /**
    * 函数 `ensureServiceReady`
@@ -87,7 +87,7 @@ export function useApiKeys() {
     enabled: areApiKeyQueriesEnabled,
     retry: 1,
     placeholderData: (previousData) =>
-      previousData || (startupApiModels.length > 0 ? startupApiModels : undefined),
+      previousData || (startupApiModels?.models?.length ? startupApiModels : undefined),
   });
 
   /**
@@ -197,7 +197,8 @@ export function useApiKeys() {
 
   return {
     apiKeys: apiKeysQuery.data || [],
-    models: modelsQuery.data || [],
+    modelCatalog: modelsQuery.data || { models: [] },
+    models: modelsQuery.data?.models || [],
     isLoading:
       isServiceReady &&
       !hasStartupApiKeySnapshot &&

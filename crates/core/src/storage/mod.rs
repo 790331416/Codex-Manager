@@ -297,6 +297,69 @@ pub struct ModelOptionsCacheRecord {
     pub updated_at: i64,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct ModelCatalogScopeRecord {
+    pub scope: String,
+    pub extra_json: String,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ModelCatalogModelRecord {
+    pub scope: String,
+    pub slug: String,
+    pub display_name: String,
+    pub description: Option<String>,
+    pub default_reasoning_level: Option<String>,
+    pub shell_type: Option<String>,
+    pub visibility: Option<String>,
+    pub supported_in_api: Option<bool>,
+    pub priority: Option<i64>,
+    pub availability_nux_json: Option<String>,
+    pub upgrade_json: Option<String>,
+    pub base_instructions: Option<String>,
+    pub model_messages_json: Option<String>,
+    pub supports_reasoning_summaries: Option<bool>,
+    pub default_reasoning_summary: Option<String>,
+    pub support_verbosity: Option<bool>,
+    pub default_verbosity_json: Option<String>,
+    pub apply_patch_tool_type: Option<String>,
+    pub web_search_tool_type: Option<String>,
+    pub truncation_mode: Option<String>,
+    pub truncation_limit: Option<i64>,
+    pub truncation_extra_json: Option<String>,
+    pub supports_parallel_tool_calls: Option<bool>,
+    pub supports_image_detail_original: Option<bool>,
+    pub context_window: Option<i64>,
+    pub auto_compact_token_limit: Option<i64>,
+    pub effective_context_window_percent: Option<i64>,
+    pub minimal_client_version_json: Option<String>,
+    pub supports_search_tool: Option<bool>,
+    pub extra_json: String,
+    pub sort_index: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ModelCatalogReasoningLevelRecord {
+    pub scope: String,
+    pub slug: String,
+    pub effort: String,
+    pub description: String,
+    pub extra_json: String,
+    pub sort_index: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ModelCatalogStringItemRecord {
+    pub scope: String,
+    pub slug: String,
+    pub value: String,
+    pub sort_index: i64,
+    pub updated_at: i64,
+}
+
 #[derive(Debug)]
 pub struct Storage {
     conn: Connection,
@@ -575,6 +638,11 @@ impl Storage {
             include_str!("../../migrations/046_request_logs_gateway_mode.sql"),
             |s| s.ensure_request_log_request_type_and_service_tier_columns(),
         )?;
+        self.apply_sql_or_compat_migration(
+            "047_model_catalog_models",
+            include_str!("../../migrations/047_model_catalog_models.sql"),
+            |s| s.ensure_model_catalog_models_table(),
+        )?;
         self.ensure_api_key_rotation_columns()?;
         self.ensure_aggregate_apis_table()?;
         self.ensure_aggregate_api_secrets_table()?;
@@ -582,6 +650,7 @@ impl Storage {
         self.ensure_gateway_error_logs_table()?;
         self.ensure_request_log_request_type_and_service_tier_columns()?;
         self.ensure_request_log_effective_service_tier_column()?;
+        self.ensure_model_catalog_models_table()?;
         Ok(())
     }
 

@@ -1782,10 +1782,14 @@ fn gateway_models_returns_cached_without_upstream() {
         })
         .expect("insert api key");
 
-    let cached = vec![ModelOption {
-        slug: "gpt-5.3-codex".to_string(),
-        display_name: "GPT-5.3 Codex".to_string(),
-    }];
+    let cached = ModelsResponse {
+        models: vec![ModelInfo {
+            slug: "gpt-5.3-codex".to_string(),
+            display_name: "GPT-5.3 Codex".to_string(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
     let items_json = serde_json::to_string(&cached).expect("serialize cached model options");
     storage
         .upsert_model_options_cache("default", &items_json, now_ts())
@@ -1803,13 +1807,118 @@ fn gateway_models_returns_cached_without_upstream() {
     let value: serde_json::Value =
         serde_json::from_str(&response_body).expect("parse models list response");
     let data = value
-        .get("data")
+        .get("models")
         .and_then(|v| v.as_array())
         .expect("models list data array");
     assert!(
         data.iter()
-            .any(|item| item.get("id").and_then(|v| v.as_str()) == Some("gpt-5.3-codex")),
+            .any(|item| item.get("slug").and_then(|v| v.as_str()) == Some("gpt-5.3-codex")),
         "models response missing cached id: {response_body}"
+    );
+}
+
+/// 函数 `gateway_models_hides_descriptions_for_codex_cli_only`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-12
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn gateway_models_hides_descriptions_for_codex_cli_only() {
+    let _lock = test_env_guard();
+    let dir = new_test_dir("codexmanager-gateway-models-codex-cli");
+    let db_path: PathBuf = dir.join("codexmanager.db");
+
+    let _db_guard = EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
+    let _upstream_guard = EnvGuard::set(
+        "CODEXMANAGER_UPSTREAM_BASE_URL",
+        "http://127.0.0.1:1/backend-api/codex",
+    );
+
+    let storage = Storage::open(&db_path).expect("open db");
+    storage.init().expect("init db");
+    let now = now_ts();
+
+    let platform_key = "pk_models_cli";
+    storage
+        .insert_api_key(&ApiKey {
+            id: "gk_models_cli".to_string(),
+            name: Some("models-cli".to_string()),
+            model_slug: None,
+            reasoning_effort: None,
+            service_tier: None,
+            rotation_strategy: "account_rotation".to_string(),
+            aggregate_api_id: None,
+            account_plan_filter: None,
+            aggregate_api_url: None,
+            client_type: "codex".to_string(),
+            protocol_type: "openai_compat".to_string(),
+            auth_scheme: "authorization_bearer".to_string(),
+            upstream_base_url: None,
+            static_headers_json: None,
+            key_hash: hash_platform_key_for_test(platform_key),
+            status: "active".to_string(),
+            created_at: now,
+            last_used_at: None,
+        })
+        .expect("insert api key");
+
+    let cached = ModelsResponse {
+        models: vec![ModelInfo {
+            slug: "gpt-5.3-codex".to_string(),
+            display_name: "GPT-5.3 Codex".to_string(),
+            description: Some("Latest frontier agentic coding model.".to_string()),
+            supported_in_api: true,
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let items_json = serde_json::to_string(&cached).expect("serialize cached model options");
+    storage
+        .upsert_model_options_cache("default", &items_json, now_ts())
+        .expect("upsert model options cache");
+
+    let server = codexmanager_service::start_one_shot_server().expect("start server");
+    let headers = &[
+        ("Authorization", &format!("Bearer {platform_key}")[..]),
+        (
+            "User-Agent",
+            "codex_cli_rs/0.101.0 (Windows 11; x86_64) terminal",
+        ),
+    ];
+    let (status, response_body) = get_http_raw(&server.addr, "/v1/models", headers);
+    server.join();
+    assert_eq!(status, 200, "gateway response: {response_body}");
+
+    let value: serde_json::Value =
+        serde_json::from_str(&response_body).expect("parse models list response");
+    let data = value
+        .get("models")
+        .and_then(|v| v.as_array())
+        .expect("models list data array");
+    assert!(
+        data[0].get("description").is_none(),
+        "codex cli response should hide description: {response_body}"
+    );
+
+    let cached_record = storage
+        .get_model_options_cache("default")
+        .expect("read cache")
+        .expect("cache exists");
+    let cached_value: serde_json::Value =
+        serde_json::from_str(&cached_record.items_json).expect("parse cached json");
+    let cached_models = cached_value
+        .get("models")
+        .and_then(|v| v.as_array())
+        .expect("cached models array");
+    assert_eq!(
+        cached_models[0].get("description").and_then(|v| v.as_str()),
+        Some("Latest frontier agentic coding model.")
     );
 }
 
@@ -1903,7 +2012,7 @@ fn apikey_models_refresh_includes_client_version_query() {
     );
     let items = value
         .get("result")
-        .and_then(|v| v.get("items"))
+        .and_then(|v| v.get("models"))
         .and_then(|v| v.as_array())
         .expect("models items array");
     assert_eq!(items.len(), 1, "unexpected rpc result: {response_body}");
@@ -1915,6 +2024,211 @@ fn apikey_models_refresh_includes_client_version_query() {
     assert_eq!(
         captured.path,
         "/backend-api/codex/models?client_version=0.101.0"
+    );
+}
+
+/// 函数 `apikey_models_refresh_merges_cached_catalog_without_removal`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-12
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn apikey_models_refresh_merges_cached_catalog_without_removal() {
+    let _lock = test_env_guard();
+    let dir = new_test_dir("codexmanager-apikey-models-merge");
+    let db_path: PathBuf = dir.join("codexmanager.db");
+
+    let _db_guard = EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
+
+    let upstream_body = serde_json::json!({
+        "models": [
+            {
+                "slug": "gpt-5.4",
+                "display_name": "GPT-5.4 New",
+                "supported_in_api": true,
+                "supported_reasoning_levels": [
+                    { "effort": "high", "description": "deeper" }
+                ]
+            }
+        ]
+    })
+    .to_string();
+    let (upstream_addr, _upstream_rx, upstream_join) =
+        start_mock_upstream_once_with_content_type(&upstream_body, "application/json");
+    let upstream_base = format!("http://{upstream_addr}/backend-api/codex");
+    let _upstream_guard = EnvGuard::set("CODEXMANAGER_UPSTREAM_BASE_URL", &upstream_base);
+
+    let storage = Storage::open(&db_path).expect("open db");
+    storage.init().expect("init db");
+    let now = now_ts();
+    let cached = ModelsResponse {
+        models: vec![
+            ModelInfo {
+                slug: "gpt-5.4".to_string(),
+                display_name: "GPT-5.4".to_string(),
+                description: Some("cached description".to_string()),
+                supported_in_api: true,
+                input_modalities: vec!["text".to_string(), "image".to_string()],
+                ..Default::default()
+            },
+            ModelInfo {
+                slug: "gpt-legacy".to_string(),
+                display_name: "GPT Legacy".to_string(),
+                supported_in_api: true,
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    };
+    let cached_json = serde_json::to_string(&cached).expect("serialize cached models");
+    storage
+        .upsert_model_options_cache("default", &cached_json, now)
+        .expect("seed model options cache");
+
+    storage
+        .insert_account(&Account {
+            id: "acc_models_merge".to_string(),
+            label: "models-merge".to_string(),
+            issuer: "https://auth.openai.com".to_string(),
+            chatgpt_account_id: Some("chatgpt_models_merge".to_string()),
+            workspace_id: None,
+            group_name: None,
+            sort: 0,
+            status: "active".to_string(),
+            created_at: now,
+            updated_at: now,
+        })
+        .expect("insert account");
+    storage
+        .insert_token(&Token {
+            account_id: "acc_models_merge".to_string(),
+            id_token: String::new(),
+            access_token: "access_token_models_merge".to_string(),
+            refresh_token: String::new(),
+            api_key_access_token: Some("api_access_token_models_merge".to_string()),
+            last_refresh: now,
+        })
+        .expect("insert token");
+
+    let server = codexmanager_service::start_one_shot_server().expect("start server");
+    let request_body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "apikey/models",
+        "params": { "refreshRemote": true }
+    })
+    .to_string();
+    let (status, response_body) = post_http_raw(
+        &server.addr,
+        "/rpc",
+        &request_body,
+        &[
+            ("Content-Type", "application/json"),
+            (
+                "X-CodexManager-Rpc-Token",
+                codexmanager_service::rpc_auth_token(),
+            ),
+        ],
+    );
+    server.join();
+    upstream_join.join().expect("join upstream");
+    assert_eq!(status, 200, "rpc response: {response_body}");
+
+    let value: serde_json::Value =
+        serde_json::from_str(&response_body).expect("parse rpc response body");
+    let models = value
+        .get("result")
+        .and_then(|v| v.get("models"))
+        .and_then(|v| v.as_array())
+        .expect("models array");
+    assert_eq!(models.len(), 2, "unexpected rpc result: {response_body}");
+    assert_eq!(
+        models[0].get("slug").and_then(|v| v.as_str()),
+        Some("gpt-5.4")
+    );
+    assert_eq!(
+        models[1].get("slug").and_then(|v| v.as_str()),
+        Some("gpt-legacy")
+    );
+    assert_eq!(
+        models[0].get("display_name").and_then(|v| v.as_str()),
+        Some("GPT-5.4 New")
+    );
+    assert_eq!(
+        models[0].get("description").and_then(|v| v.as_str()),
+        Some("cached description")
+    );
+    assert_eq!(
+        models[0]
+            .get("input_modalities")
+            .and_then(|v| v.as_array())
+            .map(|items| items.len()),
+        Some(2)
+    );
+    assert_eq!(
+        models[0]
+            .get("supported_reasoning_levels")
+            .and_then(|v| v.as_array())
+            .map(|items| items.len()),
+        Some(1)
+    );
+
+    let cached_record = storage
+        .get_model_options_cache("default")
+        .expect("read model options cache")
+        .expect("model cache exists");
+    let cached_models: serde_json::Value =
+        serde_json::from_str(&cached_record.items_json).expect("parse cached model json");
+    let cached_items = cached_models
+        .get("models")
+        .and_then(|v| v.as_array())
+        .expect("cached models array");
+    assert_eq!(cached_items.len(), 2);
+
+    let row_models = storage
+        .list_model_catalog_models("default")
+        .expect("read model catalog rows");
+    assert_eq!(row_models.len(), 2);
+    assert_eq!(row_models[0].slug, "gpt-5.4");
+    assert_eq!(row_models[1].slug, "gpt-legacy");
+    assert_eq!(
+        row_models[0].description.as_deref(),
+        Some("cached description")
+    );
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&row_models[0].extra_json)
+            .expect("parse row extra json"),
+        serde_json::json!({})
+    );
+    let reasoning_levels = storage
+        .list_model_catalog_reasoning_levels("default")
+        .expect("read reasoning rows");
+    assert_eq!(reasoning_levels.len(), 1);
+    assert_eq!(reasoning_levels[0].slug, "gpt-5.4");
+    assert_eq!(reasoning_levels[0].effort, "high");
+    let input_modalities = storage
+        .list_model_catalog_input_modalities("default")
+        .expect("read modality rows");
+    assert_eq!(
+        input_modalities
+            .iter()
+            .filter(|item| item.slug == "gpt-5.4")
+            .count(),
+        2
+    );
+    let scope = storage
+        .get_model_catalog_scope("default")
+        .expect("read scope row")
+        .expect("scope row exists");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&scope.extra_json).expect("parse scope extra"),
+        serde_json::json!({})
     );
 }
 

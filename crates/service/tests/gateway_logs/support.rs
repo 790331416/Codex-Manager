@@ -3,7 +3,8 @@ mod shared;
 
 pub(super) use shared::{test_env_guard, EnvGuard};
 
-pub(super) use codexmanager_core::rpc::types::ModelOption;
+pub(super) use codexmanager_core::rpc::types::ModelInfo;
+pub(super) use codexmanager_core::rpc::types::ModelsResponse;
 pub(super) use codexmanager_core::storage::{now_ts, Account, ApiKey, Storage, Token};
 pub(super) use sha2::{Digest, Sha256};
 pub(super) use std::collections::HashMap;
@@ -248,14 +249,18 @@ pub(super) fn hash_platform_key_for_test(key: &str) -> String {
 /// # 返回
 /// 无
 pub(super) fn seed_model_options_cache(storage: &Storage, models: &[&str]) {
-    let items = models
-        .iter()
-        .map(|slug| ModelOption {
-            slug: (*slug).to_string(),
-            display_name: (*slug).to_string(),
-        })
-        .collect::<Vec<_>>();
-    let items_json = serde_json::to_string(&items).expect("serialize model options cache");
+    let items_json = serde_json::to_string(&ModelsResponse {
+        models: models
+            .iter()
+            .map(|slug| ModelInfo {
+                slug: (*slug).to_string(),
+                display_name: (*slug).to_string(),
+                ..Default::default()
+            })
+            .collect::<Vec<_>>(),
+        ..Default::default()
+    })
+    .expect("serialize model options cache");
     storage
         .upsert_model_options_cache("default", &items_json, now_ts())
         .expect("upsert model options cache");

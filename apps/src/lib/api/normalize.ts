@@ -19,7 +19,10 @@ import {
   GatewayErrorLogListResult,
   InstalledPluginSummary,
   LoginStartResult,
-  ModelOption,
+  ModelCatalog,
+  ModelInfo,
+  ModelReasoningLevel,
+  ModelTruncationPolicy,
   PluginCatalogEntry,
   PluginCatalogResult,
   PluginCatalogTask,
@@ -134,6 +137,16 @@ function asBoolean(value: unknown, fallback = false): boolean {
     if (["0", "false", "no", "off"].includes(normalized)) return false;
   }
   return fallback;
+}
+
+function toNullableBoolean(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  return null;
+}
+
+function toNullableObject(value: unknown): Record<string, unknown> | null {
+  const object = asObject(value);
+  return Object.keys(object).length > 0 ? object : null;
 }
 
 /**
@@ -450,11 +463,11 @@ export function attachUsagesToAccounts(
 }
 
 /**
- * 函数 `normalizeModelOptions`
+ * 函数 `normalizeModelReasoningLevels`
  *
  * 作者: gaohongshun
  *
- * 时间: 2026-04-02
+ * 时间: 2026-04-12
  *
  * # 参数
  * - payload: 参数 payload
@@ -462,20 +475,128 @@ export function attachUsagesToAccounts(
  * # 返回
  * 返回函数执行结果
  */
-export function normalizeModelOptions(payload: unknown): ModelOption[] {
-  const source = asObject(payload);
-  const items = asArray(source.items ?? payload);
+function normalizeModelReasoningLevels(payload: unknown): ModelReasoningLevel[] {
+  const items = asArray(payload);
   return items
     .map((item) => {
       const current = asObject(item);
-      const slug = asString(current.slug);
-      if (!slug) return null;
+      const effort = asString(current.effort);
+      if (!effort) return null;
       return {
-        slug,
-        displayName: asString(current.displayName ?? current.display_name) || slug,
+        effort,
+        description: asString(current.description),
+        ...current,
       };
     })
-    .filter((item): item is ModelOption => Boolean(item));
+    .filter((item): item is ModelReasoningLevel => Boolean(item));
+}
+
+function normalizeModelTruncationPolicy(payload: unknown): ModelTruncationPolicy | null {
+  const source = asObject(payload);
+  const mode = asString(source.mode);
+  if (!mode) return null;
+  return {
+    mode,
+    limit: toNullableNumber(source.limit) ?? 0,
+    ...source,
+  };
+}
+
+function normalizeModelInfo(payload: unknown): ModelInfo | null {
+  const source = asObject(payload);
+  const slug = asString(source.slug);
+  if (!slug) return null;
+  const rawInputModalities =
+    source.input_modalities ?? source.inputModalities ?? ["text", "image"];
+
+  return {
+    slug,
+    displayName: asString(source.display_name ?? source.displayName) || slug,
+    description: asString(source.description) || null,
+    defaultReasoningLevel:
+      asString(source.default_reasoning_level ?? source.defaultReasoningLevel) || null,
+    supportedReasoningLevels: normalizeModelReasoningLevels(
+      source.supported_reasoning_levels ?? source.supportedReasoningLevels,
+    ),
+    shellType: asString(source.shell_type ?? source.shellType) || null,
+    visibility: asString(source.visibility) || null,
+    supportedInApi: asBoolean(source.supported_in_api ?? source.supportedInApi, true),
+    priority: toNullableNumber(source.priority) ?? 0,
+    additionalSpeedTiers: asArray(
+      source.additional_speed_tiers ?? source.additionalSpeedTiers,
+    ).map((item) => asString(item)),
+    availabilityNux: toNullableObject(source.availability_nux ?? source.availabilityNux),
+    upgrade: toNullableObject(source.upgrade),
+    baseInstructions:
+      asString(source.base_instructions ?? source.baseInstructions) || null,
+    modelMessages: toNullableObject(source.model_messages ?? source.modelMessages),
+    supportsReasoningSummaries: toNullableBoolean(
+      source.supports_reasoning_summaries ?? source.supportsReasoningSummaries,
+    ),
+    defaultReasoningSummary:
+      asString(source.default_reasoning_summary ?? source.defaultReasoningSummary) || null,
+    supportVerbosity: toNullableBoolean(
+      source.support_verbosity ?? source.supportVerbosity,
+    ),
+    defaultVerbosity: source.default_verbosity ?? source.defaultVerbosity ?? null,
+    applyPatchToolType:
+      asString(source.apply_patch_tool_type ?? source.applyPatchToolType) || null,
+    webSearchToolType:
+      asString(source.web_search_tool_type ?? source.webSearchToolType) || null,
+    truncationPolicy: normalizeModelTruncationPolicy(
+      source.truncation_policy ?? source.truncationPolicy,
+    ),
+    supportsParallelToolCalls: toNullableBoolean(
+      source.supports_parallel_tool_calls ?? source.supportsParallelToolCalls,
+    ),
+    supportsImageDetailOriginal: toNullableBoolean(
+      source.supports_image_detail_original ?? source.supportsImageDetailOriginal,
+    ),
+    contextWindow: toNullableNumber(source.context_window ?? source.contextWindow),
+    autoCompactTokenLimit: toNullableNumber(
+      source.auto_compact_token_limit ?? source.autoCompactTokenLimit,
+    ),
+    effectiveContextWindowPercent: toNullableNumber(
+      source.effective_context_window_percent ?? source.effectiveContextWindowPercent,
+    ),
+    experimentalSupportedTools: asArray(
+      source.experimental_supported_tools ?? source.experimentalSupportedTools,
+    ).map((item) => asString(item)),
+    inputModalities: asArray(rawInputModalities).map((item) => asString(item)),
+    minimalClientVersion:
+      source.minimal_client_version ?? source.minimalClientVersion ?? null,
+    supportsSearchTool: toNullableBoolean(
+      source.supports_search_tool ?? source.supportsSearchTool,
+    ),
+    availableInPlans: asArray(source.available_in_plans ?? source.availableInPlans).map((item) =>
+      asString(item),
+    ),
+    ...source,
+  };
+}
+
+/**
+ * 函数 `normalizeModelCatalog`
+ *
+ * 作者: gaohongshun
+ *
+ * 时间: 2026-04-12
+ *
+ * # 参数
+ * - payload: 参数 payload
+ *
+ * # 返回
+ * 返回函数执行结果
+ */
+export function normalizeModelCatalog(payload: unknown): ModelCatalog {
+  const source = asObject(payload);
+  const items = asArray(source.models ?? payload);
+  return {
+    ...source,
+    models: items
+      .map((item) => normalizeModelInfo(item))
+      .filter((item): item is ModelInfo => Boolean(item)),
+  };
 }
 
 /**
@@ -1448,7 +1569,7 @@ export function normalizeStartupSnapshot(payload: unknown): StartupSnapshot {
     usageSnapshots,
     usageAggregateSummary: normalizeUsageAggregateSummary(source.usageAggregateSummary),
     apiKeys: normalizeApiKeyList(source.apiKeys),
-    apiModelOptions: normalizeModelOptions(source.apiModelOptions),
+    apiModels: normalizeModelCatalog(source.apiModels ?? { models: source.apiModelOptions }),
     manualPreferredAccountId: asString(source.manualPreferredAccountId),
     requestLogTodaySummary: normalizeTodaySummary(source.requestLogTodaySummary),
     requestLogs: normalizeRequestLogs(source.requestLogs),

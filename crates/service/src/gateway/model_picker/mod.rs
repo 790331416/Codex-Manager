@@ -1,5 +1,5 @@
 use codexmanager_core::auth::parse_id_token_claims;
-use codexmanager_core::rpc::types::ModelOption;
+use codexmanager_core::rpc::types::ModelsResponse;
 use codexmanager_core::storage::{Account, Storage, Token};
 use reqwest::Method;
 use serde_json::Value;
@@ -7,7 +7,7 @@ use serde_json::Value;
 mod parse;
 mod request;
 
-use parse::parse_model_options;
+pub(crate) use parse::parse_models_response;
 use request::send_models_request;
 
 /// 函数 `should_retry_models_with_openai_fallback`
@@ -42,7 +42,7 @@ fn should_retry_models_with_openai_fallback(err: &str) -> bool {
 ///
 /// # 返回
 /// 返回函数执行结果
-pub(crate) fn fetch_models_for_picker() -> Result<Vec<ModelOption>, String> {
+pub(crate) fn fetch_models_for_picker() -> Result<ModelsResponse, String> {
     let storage = super::open_storage().ok_or_else(|| "storage unavailable".to_string())?;
     let mut candidates = super::collect_gateway_candidates(&storage)?;
     if candidates.is_empty() {
@@ -65,7 +65,7 @@ pub(crate) fn fetch_models_for_picker() -> Result<Vec<ModelOption>, String> {
             &account,
             &mut token,
         ) {
-            Ok(response_body) => return Ok(parse_model_options(&response_body)),
+            Ok(response_body) => return Ok(parse_models_response(&response_body)),
             Err(err) => {
                 // ChatGPT upstream occasionally returns HTML challenge. Try OpenAI fallback.
                 if should_retry_models_with_openai_fallback(&err) {
@@ -78,7 +78,7 @@ pub(crate) fn fetch_models_for_picker() -> Result<Vec<ModelOption>, String> {
                             &account,
                             &mut token,
                         ) {
-                            return Ok(parse_model_options(&response_body));
+                            return Ok(parse_models_response(&response_body));
                         }
                     }
                 }

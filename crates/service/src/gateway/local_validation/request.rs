@@ -3,7 +3,6 @@ use crate::apikey_profile::{
     PROTOCOL_ANTHROPIC_NATIVE, PROTOCOL_GEMINI_NATIVE, ROTATION_AGGREGATE_API,
 };
 use bytes::Bytes;
-use codexmanager_core::rpc::types::ModelOption;
 use codexmanager_core::storage::ApiKey;
 use reqwest::Method;
 use tiny_http::Request;
@@ -74,18 +73,17 @@ fn ensure_anthropic_model_is_listed(
         return Err(LocalValidationError::new(400, "claude model is required"));
     };
 
-    let cached = storage.get_model_options_cache("default").map_err(|err| {
+    let models = crate::apikey_models::read_model_options_from_storage(storage).map_err(|err| {
         LocalValidationError::new(500, format!("model options cache read failed: {err}"))
     })?;
-    let Some(cache) = cached else {
+    if models.is_empty() {
         return Err(LocalValidationError::new(
             400,
             format!("claude model not found in model list: {model}"),
         ));
-    };
-
-    let items = serde_json::from_str::<Vec<ModelOption>>(&cache.items_json).unwrap_or_default();
-    let found = items
+    }
+    let found = models
+        .models
         .iter()
         .any(|item| item.slug.trim().eq_ignore_ascii_case(model));
     if found {

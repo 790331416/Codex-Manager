@@ -823,3 +823,73 @@ fn request_logs_compact_migration_drops_legacy_usage_columns_and_preserves_rows(
     assert_eq!(token_row.3, Some(3));
     assert_eq!(token_row.4, Some(2));
 }
+
+#[test]
+fn init_upgrades_legacy_model_catalog_table_to_structured_schema() {
+    let storage = Storage::open_in_memory().expect("open in memory");
+    storage
+        .conn
+        .execute_batch(
+            "CREATE TABLE model_catalog_models (
+                scope TEXT NOT NULL,
+                slug TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                model_json TEXT NOT NULL,
+                sort_index INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (scope, slug)
+            );",
+        )
+        .expect("create legacy model catalog table");
+    storage
+        .ensure_migrations_table()
+        .expect("ensure migration tracker");
+
+    storage.init().expect("run init on legacy model catalog");
+
+    assert!(storage
+        .has_column("model_catalog_models", "description")
+        .expect("description column"));
+    assert!(storage
+        .has_column("model_catalog_models", "supported_in_api")
+        .expect("supported_in_api column"));
+    assert!(storage
+        .has_column("model_catalog_models", "minimal_client_version_json")
+        .expect("minimal client version column"));
+    assert!(storage
+        .has_column("model_catalog_models", "extra_json")
+        .expect("extra_json column"));
+    assert!(!storage
+        .has_column("model_catalog_models", "model_json")
+        .expect("model_json column removed"));
+
+    let scope_table_exists = storage
+        .conn
+        .query_row(
+            "SELECT COUNT(1) FROM sqlite_master WHERE type = 'table' AND name = 'model_catalog_scopes'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("check scope table");
+    assert_eq!(scope_table_exists, 1);
+
+    let reasoning_table_exists = storage
+        .conn
+        .query_row(
+            "SELECT COUNT(1) FROM sqlite_master WHERE type = 'table' AND name = 'model_catalog_reasoning_levels'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("check reasoning table");
+    assert_eq!(reasoning_table_exists, 1);
+
+    let plans_table_exists = storage
+        .conn
+        .query_row(
+            "SELECT COUNT(1) FROM sqlite_master WHERE type = 'table' AND name = 'model_catalog_available_in_plans'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("check plans table");
+    assert_eq!(plans_table_exists, 1);
+}

@@ -23,7 +23,7 @@ pub(crate) fn read_startup_snapshot(
     let usage_snapshots = usage_list::read_usage_snapshots()?;
     let usage_aggregate_summary = usage_aggregate::read_usage_aggregate_summary()?;
     let api_keys = apikey_list::read_api_keys()?;
-    let api_model_options = apikey_models::read_model_options(false)?.items;
+    let api_models = apikey_models::read_model_options(false)?;
     let manual_preferred_account_id = gateway::manual_preferred_account();
     let request_log_today_summary = requestlog_today_summary::read_requestlog_today_summary()?;
     let request_logs = requestlog_list::read_request_logs(None, request_log_limit)?;
@@ -33,7 +33,7 @@ pub(crate) fn read_startup_snapshot(
         usage_snapshots,
         usage_aggregate_summary,
         api_keys,
-        api_model_options,
+        api_models,
         manual_preferred_account_id,
         request_log_today_summary,
         request_logs,

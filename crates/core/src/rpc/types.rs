@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::BTreeMap;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -547,16 +549,108 @@ pub struct AggregateApiTestResult {
     pub latency_ms: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelOption {
-    pub slug: String,
-    pub display_name: String,
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ModelsResponse {
+    #[serde(default)]
+    pub models: Vec<ModelInfo>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ApiKeyModelListResult {
-    pub items: Vec<ModelOption>,
+impl ModelsResponse {
+    pub fn is_empty(&self) -> bool {
+        self.models.is_empty()
+    }
+}
+
+fn default_supported_in_api() -> bool {
+    true
+}
+
+fn default_input_modalities() -> Vec<String> {
+    vec!["text".to_string(), "image".to_string()]
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ModelInfo {
+    pub slug: String,
+    pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_reasoning_level: Option<String>,
+    #[serde(default)]
+    pub supported_reasoning_levels: Vec<ModelReasoningLevel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shell_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<String>,
+    #[serde(default = "default_supported_in_api")]
+    pub supported_in_api: bool,
+    #[serde(default)]
+    pub priority: i64,
+    #[serde(default)]
+    pub additional_speed_tiers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub availability_nux: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upgrade: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_instructions: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_messages: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_reasoning_summaries: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_reasoning_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub support_verbosity: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_verbosity: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apply_patch_tool_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_search_tool_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub truncation_policy: Option<ModelTruncationPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_parallel_tool_calls: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_image_detail_original: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_compact_token_limit: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_context_window_percent: Option<i64>,
+    #[serde(default)]
+    pub experimental_supported_tools: Vec<String>,
+    #[serde(default = "default_input_modalities")]
+    pub input_modalities: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minimal_client_version: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_search_tool: Option<bool>,
+    #[serde(default)]
+    pub available_in_plans: Vec<String>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ModelReasoningLevel {
+    pub effort: String,
+    pub description: String,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ModelTruncationPolicy {
+    pub mode: String,
+    pub limit: i64,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -757,7 +851,7 @@ pub struct StartupSnapshotResult {
     #[serde(default)]
     pub usage_aggregate_summary: UsageAggregateSummaryResult,
     pub api_keys: Vec<ApiKeySummary>,
-    pub api_model_options: Vec<ModelOption>,
+    pub api_models: ModelsResponse,
     pub manual_preferred_account_id: Option<String>,
     pub request_log_today_summary: RequestLogTodaySummaryResult,
     pub request_logs: Vec<RequestLogSummary>,
