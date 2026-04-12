@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  Download,
   MoreVertical,
   PencilLine,
   Plus,
@@ -69,9 +70,12 @@ export default function ModelsPage() {
     refreshRemote,
     saveModel,
     deleteModel,
+    exportCodexCache,
+    canExportCodexCache,
     isRefreshing,
     isSaving,
     isDeleting,
+    isExporting,
   } = useManagedModels();
   const isPageActive = useDesktopPageActive("/models/");
   usePageTransitionReady("/models/", !isServiceReady || !isLoading);
@@ -192,6 +196,18 @@ export default function ModelsPage() {
                     <RefreshCw className={`mr-2 h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
                     {t("远端并入")}
                   </Button>
+                  {canExportCodexCache ? (
+                    <Button
+                      variant="outline"
+                      onClick={() => void exportCodexCache()}
+                      disabled={isExporting}
+                    >
+                      <Download
+                        className={`mr-2 h-4 w-4 ${isExporting ? "animate-spin" : ""}`}
+                      />
+                      {t("导出到本地 Codex 缓存")}
+                    </Button>
+                  ) : null}
                   <Button
                     onClick={() => {
                       setEditingSlug(null);
@@ -238,7 +254,7 @@ export default function ModelsPage() {
                 </Select>
               </div>
               <div className="text-xs text-muted-foreground">
-                {t("保存后会自动同步到 `~/.codex/models_cache.json`；如需让 `/model` 立即看到最新模型与说明，仍需重启正在运行中的 Codex 会话。")}
+                {t("保存后会自动同步到 `~/.codex/models_cache.json`；如需让 `/model` 立即看到最新模型与说明，仍需重启正在运行中的 Codex 会话。Web 端可通过上方导出按钮下载同名 `models_cache.json`，再手动放入本地 `~/.codex/`；桌面端继续由本地自动同步。")}
               </div>
             </div>
           </CardHeader>

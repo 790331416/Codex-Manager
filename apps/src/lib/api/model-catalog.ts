@@ -165,6 +165,11 @@ function omitNullishEntries(source: Record<string, unknown>): Record<string, unk
   );
 }
 
+function parseCodexCliVersion(userAgent: string): string {
+  const match = String(userAgent || "").match(/codex_cli_rs\/([^\s]+)/);
+  return match?.[1]?.trim() || "";
+}
+
 function serializeModelForCodexCache(
   model: ManagedModelInfo | ModelInfo
 ): Record<string, unknown> {
@@ -265,4 +270,25 @@ export function serializeManagedModelCatalogForCodexCache(
       return left.slug.localeCompare(right.slug);
     })
     .map((model) => serializeModelForCodexCache(model));
+}
+
+export function buildCodexModelsCachePayload(
+  models: Array<ManagedModelInfo | ModelInfo>,
+  userAgent: string,
+  options?: {
+    etag?: string | null;
+    fetchedAt?: string;
+  }
+): Record<string, unknown> {
+  const clientVersion = parseCodexCliVersion(userAgent);
+  if (!clientVersion) {
+    throw new Error("无法从 userAgent 解析 Codex CLI 版本");
+  }
+
+  return {
+    fetched_at: options?.fetchedAt || new Date().toISOString(),
+    etag: options?.etag ?? null,
+    client_version: clientVersion,
+    models: serializeManagedModelCatalogForCodexCache(models),
+  };
 }

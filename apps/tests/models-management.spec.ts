@@ -182,6 +182,11 @@ test("models page supports creating and deleting a managed model", async ({ page
   ).toBeVisible();
   await expect(page.locator("tr", { hasText: "gpt-5.4" })).toBeVisible();
 
+  const exportDownloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "导出到本地 Codex 缓存" }).click();
+  const exportDownload = await exportDownloadPromise;
+  expect(exportDownload.suggestedFilename()).toBe("models_cache.json");
+
   await page.getByRole("button", { name: "新增自定义模型" }).click();
   await page.getByLabel("Slug").fill("my-custom-model");
   await page.getByLabel("显示名称").fill("My Custom Model");

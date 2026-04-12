@@ -5,7 +5,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { accountClient, ManagedModelPayload } from "@/lib/api/account-client";
 import { serviceClient } from "@/lib/api/service-client";
-import { serializeManagedModelCatalogForCodexCache } from "@/lib/api/model-catalog";
+import {
+  buildCodexModelsCachePayload,
+  serializeManagedModelCatalogForCodexCache,
+} from "@/lib/api/model-catalog";
 import { getAppErrorMessage } from "@/lib/api/transport";
 import { useDesktopPageActive } from "@/hooks/useDesktopPageActive";
 import { useDeferredDesktopActivation } from "@/hooks/useDeferredDesktopActivation";
@@ -20,7 +23,11 @@ export function useManagedModels() {
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const serviceStatus = useAppStore((state) => state.serviceStatus);
-  const { canAccessManagementRpc, isDesktopRuntime } = useRuntimeCapabilities();
+  const {
+    canAccessManagementRpc,
+    isDesktopRuntime,
+    canUseBrowserDownloadExport,
+  } = useRuntimeCapabilities();
   const isServiceReady = canAccessManagementRpc && serviceStatus.connected;
   const isPageActive = useDesktopPageActive("/models/");
   const isQueryEnabled = useDeferredDesktopActivation(isServiceReady && isPageActive);
@@ -44,15 +51,35 @@ export function useManagedModels() {
     const initializeResult = await serviceClient.initialize(serviceStatus.addr);
     const userAgent = String(initializeResult.userAgent || "").trim();
     if (!userAgent.includes("codex_cli_rs/")) {
-      throw new Error("当前服务未返回可用的 Codex CLI 标识");
+      throw new Error(t("当前服务未返回可用的 Codex CLI 标识"));
     }
 
     codexUserAgentRef.current = userAgent;
     return userAgent;
   };
 
+  const triggerBrowserDownload = (fileName: string, content: string): void => {
+    if (typeof document === "undefined") {
+      throw new Error(t("当前环境不支持浏览器导出"));
+    }
+
+    const blob = new Blob([content], {
+      type: "application/json;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = fileName;
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  };
+
   const syncCatalogToCodexCache = async (
     catalog: ManagedModelCatalog | null | undefined,
+    options?: { force?: boolean },
   ): Promise<string | null> => {
     if (!catalog) {
       return "模型目录为空";
@@ -72,7 +99,7 @@ export function useManagedModels() {
     }
 
     const fingerprint = JSON.stringify(models);
-    if (syncedCatalogFingerprintRef.current === fingerprint) {
+    if (!options?.force && syncedCatalogFingerprintRef.current === fingerprint) {
       return null;
     }
 
@@ -161,6 +188,47 @@ export function useManagedModels() {
     },
   });
 
+  const exportMutation = useMutation({
+    mutationFn: async () => {
+      if (!isServiceReady) {
+        throw new Error(t("服务未连接"));
+      }
+
+      const catalog = query.data ?? (await reloadManagedCatalog());
+      const models = catalog.items || [];
+      if (!models.length) {
+        throw new Error(t("模型目录为空"));
+      }
+
+      if (isDesktopRuntime) {
+        const cacheSyncError = await syncCatalogToCodexCache(catalog, { force: true });
+        if (cacheSyncError) {
+          throw new Error(cacheSyncError);
+        }
+        return { mode: "desktop" as const };
+      }
+
+      if (!canUseBrowserDownloadExport) {
+        throw new Error(t("当前环境不支持导出 Codex 缓存"));
+      }
+
+      const userAgent = await resolveCodexUserAgent();
+      const payload = buildCodexModelsCachePayload(models, userAgent);
+      triggerBrowserDownload("models_cache.json", `${JSON.stringify(payload, null, 2)}\n`);
+      return { mode: "browser" as const };
+    },
+    onSuccess: (result) => {
+      toast.success(
+        result?.mode === "browser"
+          ? t("Codex 缓存已下载，请保存到 `~/.codex/models_cache.json`")
+          : t("已导出到本地 Codex 缓存")
+      );
+    },
+    onError: (error) => {
+      toast.error(`${t("导出失败")}: ${getAppErrorMessage(error)}`);
+    },
+  });
+
   useEffect(() => {
     codexUserAgentRef.current = "";
     syncedCatalogFingerprintRef.current = "";
@@ -205,8 +273,16 @@ export function useManagedModels() {
       await deleteMutation.mutateAsync(slug);
       return true;
     },
+    exportCodexCache: async () => {
+      if (!ensureServiceReady("导出模型目录")) return false;
+      await exportMutation.mutateAsync();
+      return true;
+    },
     isRefreshing: refreshMutation.isPending,
     isSaving: saveMutation.isPending,
     isDeleting: deleteMutation.isPending,
+    isExporting: exportMutation.isPending,
+    canExportCodexCache:
+      !isDesktopRuntime && isServiceReady && Boolean(query.data?.items?.length),
   };
 }

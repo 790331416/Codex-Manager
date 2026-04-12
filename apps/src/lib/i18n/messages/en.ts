@@ -264,6 +264,19 @@ export const EN_MESSAGES: MessageCatalog = {
   "更新状态失败": "Failed to update status",
   "模型列表已刷新": "Model list refreshed",
   "刷新模型失败": "Failed to refresh models",
+  "导出到本地 Codex 缓存": "Export to local Codex cache",
+  "已导出到本地 Codex 缓存": "Exported to local Codex cache",
+  "Codex 缓存已下载，请保存到 `~/.codex/models_cache.json`":
+    "Codex cache downloaded. Please save it to `~/.codex/models_cache.json`.",
+  "保存后会自动同步到 `~/.codex/models_cache.json`；如需让 `/model` 立即看到最新模型与说明，仍需重启正在运行中的 Codex 会话。桌面端可直接点击上方导出按钮替换本地缓存；浏览器模式则会下载同名 `models_cache.json`，再手动放入 `~/.codex/`。":
+    "After saving, the cache is automatically synced to `~/.codex/models_cache.json`. To make `/model` pick up the latest models and descriptions immediately, you still need to restart the running Codex session. On desktop, use the export button above to replace the local cache directly; in browser mode, a `models_cache.json` file will be downloaded and you can place it into `~/.codex/` manually.",
+  "保存后会自动同步到 `~/.codex/models_cache.json`；如需让 `/model` 立即看到最新模型与说明，仍需重启正在运行中的 Codex 会话。Web 端可通过上方导出按钮下载同名 `models_cache.json`，再手动放入本地 `~/.codex/`；桌面端继续由本地自动同步。":
+    "After saving, the cache is automatically synced to `~/.codex/models_cache.json`. To make `/model` pick up the latest models and descriptions immediately, you still need to restart the running Codex session. On the web, use the export button above to download a `models_cache.json` file and place it into the local `~/.codex/` folder manually; desktop continues to sync locally automatically.",
+  "当前环境不支持浏览器导出": "The current runtime does not support browser export",
+  "当前环境不支持导出 Codex 缓存": "The current runtime does not support exporting the Codex cache",
+  "当前服务未返回可用的 Codex CLI 标识":
+    "The current service did not return a usable Codex CLI identifier",
+  "模型目录为空": "The model catalog is empty",
   "读取密钥失败": "Failed to read key",
   "累计Token": "Total Token",
   "当前筛选结果中的总Token": "Total Token in the current filtered result",
@@ -999,6 +1012,10 @@ export const EN_MESSAGES: MessageCatalog = {
     "Read the steps on the left first, then copy the template on the right into `config.toml`. If you do not check “Don't show this guide again”, you will see it again the next time you open the app.",
   "推荐先完整读一遍，再复制模板；这比自己手写 provider 名称和地址更不容易出错。":
     "Read through it once before copying the template. This is much less error-prone than typing the provider name and address by hand.",
+  "如果你要把当前模型目录替换到本地 Codex 缓存，可以去模型管理页点击“导出到本地 Codex 缓存”；桌面端会直接写入 `~/.codex/models_cache.json`，浏览器模式会下载同名文件。":
+    "If you want to replace the current model catalog into the local Codex cache, go to the Models page and click “Export to local Codex cache”; desktop mode writes directly to `~/.codex/models_cache.json`, while browser mode downloads a file with the same name.",
+  "如果你在 Web 端部署并访问，可以去模型管理页点击“导出到本地 Codex 缓存”；浏览器会下载同名 `models_cache.json`，你再手动放入本地 `~/.codex/models_cache.json`。":
+    "If you are accessing a web deployment, go to the Models page and click “Export to local Codex cache”; the browser will download a `models_cache.json` file, and you can then place it into the local `~/.codex/models_cache.json` manually.",
   "建议按下面的顺序完成接入": "Recommended setup order",
   "分步导引": "Step-by-step guide",
   "你当前在第 {current} 步，共 {total} 步。":
@@ -1033,7 +1050,11 @@ export const EN_MESSAGES: MessageCatalog = {
   "`model_provider = \"cm\"` 必须和 `[model_providers.cm]` 完全一致。":
     "`model_provider = \"cm\"` must exactly match `[model_providers.cm]`.",
   "`base_url` 默认应指向 `https://localhost:48760/v1`。":
-    "`base_url` should normally point to `https://localhost:48760/v1`.",
+  "`base_url` should normally point to `https://localhost:48760/v1`.",
+  "如果你要把当前模型目录替换到本地 Codex 缓存，可以去模型管理页点击“导出到本地 Codex 缓存”；桌面端会直接写入 `~/.codex/models_cache.json`，浏览器模式会下载同名文件供你手动放入 `.codex` 目录。":
+    "If you want to replace the current model catalog into the local Codex cache, go to the Models page and click “Export to local Codex cache”; desktop mode writes directly to `~/.codex/models_cache.json`, while browser mode downloads a file with the same name for you to place into the `.codex` directory manually.",
+  "如果你在 Web 端想手动替换本地 Codex 缓存，优先用模型管理页右上角的导出按钮；它会下载同名 `models_cache.json` 供你手动放入本地 `.codex` 目录。":
+    "If you want to manually replace the local Codex cache on the web, use the export button in the top-right of the Models page first; it downloads a `models_cache.json` file for you to place into the local `.codex` directory manually.",
   "如果你在设置里换过端口，把这里同步改掉后再重新打开 CLI 测试。":
     "If you changed the port in Settings, update it here as well and then reopen the CLI to test again.",
   "使用时最容易忽略的 3 个点": "Three easy-to-miss details",

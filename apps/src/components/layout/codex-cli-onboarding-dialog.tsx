@@ -53,6 +53,7 @@ const GUIDE_STEPS = [
     details: [
       "`model_provider = \"cm\"` 必须和 `[model_providers.cm]` 完全一致。",
       "`base_url` 默认应指向 `https://localhost:48760/v1`。",
+      "如果你在 Web 端部署并访问，可以去模型管理页点击“导出到本地 Codex 缓存”；浏览器会下载同名 `models_cache.json`，你再手动放入本地 `~/.codex/models_cache.json`。",
       "如果你在设置里换过端口，把这里同步改掉后再重新打开 CLI 测试。",
     ],
   },
@@ -171,6 +172,7 @@ const GUIDE_CONFIG_LINES = [
 
 const GUIDE_REMINDERS = [
   "如果你在设置页改过服务端口，记得同步修改 `base_url`，否则 CLI 会连到旧端口。",
+  "如果你在 Web 端想手动替换本地 Codex 缓存，优先用模型管理页右上角的导出按钮；它会下载同名 `models_cache.json` 供你手动放入本地 `.codex` 目录。",
   "如果 CLI 已经有其它 `model_providers` 配置，不需要全删，只要保证 `cm` 这一段完整且名字一致即可。",
   "只有勾选“下次不再显示这份引导”并点击确认后，软件才会把这个状态写入数据库；否则下次进入仍会再次提醒。",
 ] as const;
