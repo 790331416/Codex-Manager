@@ -5,6 +5,20 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-12
+
+### Added
+- 主页面导航新增后台 keep-alive 缓存与更显眼的整区加载遮罩，桌面端、Web 版与 Docker 部署在页面切换和空闲后回访时的体感更稳定。
+- 请求链路排查补齐针对 `service_tier`、Cloudflare challenge 与兼容转发的专项回归测试，覆盖原生 Codex、Claude Code 与 Gemini CLI 关键路径。
+
+### Fixed
+- 收敛 Codex 原生直通路径，默认保持官方请求形状，只保留账号选择、认证替换、路由、会话亲和与必要的内部字段处理；Claude / Gemini 继续走协议适配。
+- 对齐官方 Codex 出站行为：发往 `chatgpt.com/backend-api/codex/responses` 的 `service_tier=fast` 现会正确映射为上游 `priority`，`/responses/compact` 不再错误携带 `service_tier`。
+- 修复 Claude 兼容链路里 `fast` 服务等级映射与错误流模型回显不稳定的问题，减少 `403` 排查时的误导信息。
+
+### Changed
+- 发布版本提升到 `0.2.0`，同步更新 workspace、前端包、Tauri 桌面端与对外版本说明。
+
 ## [0.1.19] - 2026-04-08
 
 ### Added
@@ -216,7 +230,8 @@
 ### Changed
 - 账号管理页操作区整合为单一“账号操作”下拉菜单，替代右侧多按钮堆叠，界面更简洁。
 
-[Unreleased]: https://github.com/qxcnm/Codex-Manager/compare/v0.1.19...HEAD
+[Unreleased]: https://github.com/qxcnm/Codex-Manager/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/qxcnm/Codex-Manager/releases/tag/v0.2.0
 [0.1.19]: https://github.com/qxcnm/Codex-Manager/releases/tag/v0.1.19
 [0.1.17]: https://github.com/qxcnm/Codex-Manager/releases/tag/v0.1.17
 [0.1.16]: https://github.com/qxcnm/Codex-Manager/releases/tag/v0.1.16

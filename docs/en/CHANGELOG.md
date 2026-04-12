@@ -5,6 +5,20 @@ It follows Keep a Changelog with a lightweight adaptation for this repository.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-12
+
+### Added
+- Top-level pages now use background keep-alive caching with a more visible full-area loading overlay, improving revisit latency across desktop, web, and Docker deployments.
+- Added targeted regression coverage for `service_tier`, Cloudflare challenge handling, and compatibility forwarding across native Codex, Claude Code, and Gemini CLI request paths.
+
+### Fixed
+- Tightened the native Codex passthrough path so the default behavior stays close to the official request shape, keeping only account selection, auth replacement, routing, session affinity, and required internal-field cleanup; Claude and Gemini still use protocol adapters.
+- Aligned upstream Codex behavior with the official client: requests sent to `chatgpt.com/backend-api/codex/responses` now map `service_tier=fast` to upstream `priority`, while `/responses/compact` no longer carries `service_tier`.
+- Fixed the Claude compatibility path so `fast` service-tier mapping and error-stream model echoing are stable, reducing misleading diagnostics during `403` investigations.
+
+### Changed
+- The release version is now `0.2.0`, with workspace, frontend package, Tauri desktop, and external version notes updated together.
+
 ## [0.1.19] - 2026-04-08
 
 ### Added
@@ -216,7 +230,8 @@ It follows Keep a Changelog with a lightweight adaptation for this repository.
 ### Changed
 - The operation area of ​​the account management page is integrated into a single "Account Operation" drop-down menu, replacing the stack of multiple buttons on the right, making the interface more concise.
 
-[Unreleased]: https://github.com/qxcnm/Codex-Manager/compare/v0.1.19...HEAD
+[Unreleased]: https://github.com/qxcnm/Codex-Manager/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/qxcnm/Codex-Manager/releases/tag/v0.2.0
 [0.1.19]: https://github.com/qxcnm/Codex-Manager/releases/tag/v0.1.19
 [0.1.17]: https://github.com/qxcnm/Codex-Manager/releases/tag/v0.1.17
 [0.1.16]: https://github.com/qxcnm/Codex-Manager/releases/tag/v0.1.16

@@ -16,11 +16,11 @@ CodexManager is a local desktop + service-process account pool manager and gatew
 
 ## Latest Changes
 
-- Current latest release: `v0.1.19` (released on 2026-04-08).
-- Aggregate API now supports multiple auth modes and custom `action` routing for more stable third-party forwarding.
-- Gateway now filters unsupported Responses `service_tier` values before upstream forwarding to reduce rejection caused by incompatible parameters.
-- i18n coverage continues to expand across dashboard, modals, sidebar, and usage labels.
-- Documentation structure and release notes are aligned on the `0.1.19` baseline.
+- Current latest release: `v0.2.0` (released on 2026-04-12).
+- Top-level page switching now uses background keep-alive caching with a full-area loading overlay, improving revisit responsiveness across desktop, web, and Docker builds.
+- The native Codex gateway path now defaults to a transparent passthrough shape close to the official client, while Claude Code and Gemini CLI continue to use compatibility adapters.
+- `service_tier` forwarding is now aligned with official Codex behavior: upstream `/responses` requests map `fast` to `priority`, and `/responses/compact` omits the field.
+- This release also adds focused regression coverage for Cloudflare challenge handling, compatibility forwarding, and native Responses flows.
 
 ## Feature Overview
 
