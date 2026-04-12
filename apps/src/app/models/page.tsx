@@ -268,7 +268,9 @@ export default function ModelsPage() {
                       <TableHead>{t("可见性")}</TableHead>
                       <TableHead>{t("推理等级")}</TableHead>
                       <TableHead>{t("更新时间")}</TableHead>
-                      <TableHead className="w-[60px] text-right">{t("操作")}</TableHead>
+                      <TableHead className="table-sticky-action-head w-[88px] text-right">
+                        {t("操作")}
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -325,7 +327,7 @@ export default function ModelsPage() {
                         <TableCell className="text-sm text-muted-foreground">
                           {formatTsFromSeconds(model.updatedAt, t("未同步"))}
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="table-sticky-action-cell text-right">
                           <DropdownMenu>
                             <DropdownMenuTrigger render={<span />} nativeButton={false}>
                               <Button variant="ghost" size="icon" aria-label={t("模型操作")}>

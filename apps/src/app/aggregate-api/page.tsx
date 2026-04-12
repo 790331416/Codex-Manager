@@ -601,7 +601,9 @@ export default function AggregateApiPage() {
                   <TableHead className="w-[64px] text-center">{t("顺序")}</TableHead>
                   <TableHead className="w-[130px]">{t("测试连通性")}</TableHead>
                   <TableHead className="w-[112px] text-right pr-4">{t("状态")}</TableHead>
-                  <TableHead className="text-center">{t("操作")}</TableHead>
+                  <TableHead className="table-sticky-action-head w-[112px] text-center">
+                    {t("操作")}
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -626,7 +628,7 @@ export default function AggregateApiPage() {
                       <TableCell>
                         <Skeleton className="h-6 w-16 rounded-full" />
                       </TableCell>
-                      <TableCell className="text-center">
+                      <TableCell className="table-sticky-action-cell text-center">
                         <Skeleton className="mx-auto h-8 w-8" />
                       </TableCell>
                     </TableRow>
@@ -845,7 +847,7 @@ export default function AggregateApiPage() {
                             </span>
                           </div>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="table-sticky-action-cell">
                           <div className="table-action-cell gap-1">
                             <Button
                               variant="ghost"

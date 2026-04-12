@@ -366,6 +366,32 @@ tr {
   height: 100%;
 }
 
+.table-sticky-action-head,
+.table-sticky-action-cell {
+  position: sticky;
+  right: 0;
+  border-left: 1px solid var(--border);
+  box-shadow: -10px 0 16px -14px rgb(15 23 42 / 0.18);
+}
+
+.table-sticky-action-head {
+  z-index: 4;
+  background: rgb(var(--surface-rgb) / 0.98);
+}
+
+.table-sticky-action-cell {
+  z-index: 3;
+  background: rgb(var(--surface-rgb) / 0.96);
+}
+
+[data-slot="table-body"] [data-slot="table-row"]:hover .table-sticky-action-cell {
+  background: var(--table-row-hover-bg);
+}
+
+[data-slot="table-body"] [data-slot="table-row"][data-state="selected"] .table-sticky-action-cell {
+  background: var(--table-row-selected-bg);
+}
+
 /* 🚀 Performance Mode Logic (Fixed Selectors) */
 body.low-transparency {
   background-image: none !important;

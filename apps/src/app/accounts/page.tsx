@@ -1627,7 +1627,9 @@ export default function AccountsPage() {
                 <TableHead className="min-w-[250px] text-center">{t("额度详情")}</TableHead>
                 <TableHead className="w-[156px]">{t("顺序")}</TableHead>
                 <TableHead>{t("状态")}</TableHead>
-                <TableHead className="text-center">{t("操作")}</TableHead>
+                <TableHead className="table-sticky-action-head w-[112px] text-center">
+                  {t("操作")}
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1653,7 +1655,7 @@ export default function AccountsPage() {
                     <TableCell>
                       <Skeleton className="h-6 w-16 rounded-full" />
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="table-sticky-action-cell">
                       <Skeleton className="mx-auto h-8 w-24" />
                     </TableCell>
                   </TableRow>
@@ -1810,7 +1812,7 @@ export default function AccountsPage() {
                           </span>
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="table-sticky-action-cell">
                         <div className="table-action-cell gap-1">
                           <Button
                             variant="ghost"

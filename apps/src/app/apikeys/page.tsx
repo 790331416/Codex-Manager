@@ -404,7 +404,9 @@ export default function ApiKeysPage() {
                 <TableHead>{t("绑定模型")}</TableHead>
                 <TableHead>{t("总使用 Token")}</TableHead>
                 <TableHead>{t("状态")}</TableHead>
-                <TableHead className="text-center">{t("操作")}</TableHead>
+                <TableHead className="table-sticky-action-head w-[108px] text-center">
+                  {t("操作")}
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -418,7 +420,9 @@ export default function ApiKeysPage() {
                       <TableCell><Skeleton className="h-4 w-28" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                       <TableCell><Skeleton className="h-6 w-16 rounded-full" /></TableCell>
-                      <TableCell className="text-center"><Skeleton className="mx-auto h-8 w-8" /></TableCell>
+                      <TableCell className="table-sticky-action-cell text-center">
+                        <Skeleton className="mx-auto h-8 w-8" />
+                      </TableCell>
                     </TableRow>
                 ))
               ) : apiKeys.length === 0 ? (
@@ -514,7 +518,7 @@ export default function ApiKeysPage() {
                           </span>
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="table-sticky-action-cell">
                         <div className="table-action-cell gap-1">
                           <Button
                             variant="ghost"
