@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Copy, FileCog, Link2, Rocket } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  FileCog,
+  Link2,
+  Rocket,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -51,8 +58,8 @@ const GUIDE_STEPS = [
     description:
       "最后只检查两件关键事：provider 名称一致，和 `base_url` 指向本软件的本地网关。只要这两项错一个，CLI 就不会走 CodexManager。",
     details: [
-      "`model_provider = \"cm\"` 必须和 `[model_providers.cm]` 完全一致。",
-      "`base_url` 默认应指向 `https://localhost:48760/v1`。",
+      '`model_provider = "cm"` 必须和 `[model_providers.cm]` 完全一致。',
+      "`base_url` 默认应指向 `http://localhost:48760/v1`。",
       "如果你在 Web 端部署并访问，可以去模型管理页点击“导出到本地 Codex 缓存”；浏览器会下载同名 `models_cache.json`，你再手动放入本地 `~/.codex/models_cache.json`。",
       "如果你在设置里换过端口，把这里同步改掉后再重新打开 CLI 测试。",
     ],
@@ -141,7 +148,8 @@ const GUIDE_CONFIG_LINES = [
     line: "",
   },
   {
-    comment: "定义名为 cm 的模型提供方，这个名字必须和上面的 model_provider 保持一致",
+    comment:
+      "定义名为 cm 的模型提供方，这个名字必须和上面的 model_provider 保持一致",
     line: "[model_providers.cm]",
   },
   {
@@ -162,7 +170,7 @@ const GUIDE_CONFIG_LINES = [
   },
   {
     comment: "本地网关地址，默认走 CodexManager 暴露出来的 48760 端口",
-    line: 'base_url = "https://localhost:48760/v1"',
+    line: 'base_url = "http://localhost:48760/v1"',
   },
   {
     comment: "与本软件网关对接时使用 responses 协议",
@@ -209,7 +217,11 @@ export function CodexCliOnboardingDialog({
 
     setCurrentStep(0);
     const resetScroll = () => {
-      scrollContainerRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+      scrollContainerRef.current?.scrollTo({
+        top: 0,
+        left: 0,
+        behavior: "auto",
+      });
       codeBlockRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
     };
 
@@ -377,7 +389,9 @@ export function CodexCliOnboardingDialog({
                     {t("推荐配置示例")}
                   </h3>
                   <p className="text-sm leading-6 text-muted-foreground">
-                    {t("已为每一行补充中文注释，可以直接复制后再按你的环境微调。")}
+                    {t(
+                      "已为每一行补充中文注释，可以直接复制后再按你的环境微调。",
+                    )}
                   </p>
                 </div>
                 <Button
@@ -406,7 +420,9 @@ export function CodexCliOnboardingDialog({
             <label className="flex items-center gap-3 pr-4 text-sm text-muted-foreground">
               <Checkbox
                 checked={dismissPermanently}
-                onCheckedChange={(checked) => setDismissPermanently(Boolean(checked))}
+                onCheckedChange={(checked) =>
+                  setDismissPermanently(Boolean(checked))
+                }
                 disabled={isSaving}
                 aria-label={t("下次不再显示这份引导")}
               />
@@ -420,7 +436,9 @@ export function CodexCliOnboardingDialog({
                       type="button"
                       variant="outline"
                       className="gap-2"
-                      onClick={() => setCurrentStep((step) => Math.max(0, step - 1))}
+                      onClick={() =>
+                        setCurrentStep((step) => Math.max(0, step - 1))
+                      }
                       disabled={isSaving}
                     >
                       <ChevronLeft className="h-4 w-4" />
@@ -451,7 +469,11 @@ export function CodexCliOnboardingDialog({
                 {t("本次关闭")}
               </Button>
               {isLastStep ? (
-                <Button type="button" onClick={() => void handleAcknowledge()} disabled={isSaving}>
+                <Button
+                  type="button"
+                  onClick={() => void handleAcknowledge()}
+                  disabled={isSaving}
+                >
                   {isSaving
                     ? t("保存中...")
                     : dismissPermanently
