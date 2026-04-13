@@ -23,9 +23,10 @@ export const STARTUP_SNAPSHOT_WARMUP_TIMEOUT_MS = 45_000;
  */
 export function buildStartupSnapshotQueryKey(
   addr: string | null | undefined,
-  requestLogLimit = STARTUP_SNAPSHOT_REQUEST_LOG_LIMIT
+  requestLogLimit = STARTUP_SNAPSHOT_REQUEST_LOG_LIMIT,
+  dayStartTs?: number | null,
 ) {
-  return ["startup-snapshot", addr || null, requestLogLimit] as const;
+  return ["startup-snapshot", addr || null, requestLogLimit, dayStartTs || null] as const;
 }
 
 /**

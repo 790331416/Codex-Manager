@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { CodexCliOnboardingDialog } from "@/components/layout/codex-cli-onboarding-dialog";
 import { applyAppearancePreset } from "@/lib/appearance";
 import { useRuntimeCapabilities } from "@/hooks/useRuntimeCapabilities";
+import { useLocalDayRange } from "@/hooks/useLocalDayRange";
 import {
   formatServiceError,
   isExpectedInitializeResult,
@@ -73,6 +74,7 @@ export function AppBootstrap({ children }: { children: React.ReactNode }) {
   } = useAppStore();
   const { setTheme } = useTheme();
   const { t } = useI18n();
+  const localDayRange = useLocalDayRange();
   const queryClient = useQueryClient();
   const pathname = usePathname();
   const { canManageService, isDesktopRuntime, isUnsupportedWebRuntime } =
@@ -149,16 +151,19 @@ export function AppBootstrap({ children }: { children: React.ReactNode }) {
       await queryClient.prefetchQuery({
         queryKey: buildStartupSnapshotQueryKey(
           addr,
-          STARTUP_SNAPSHOT_REQUEST_LOG_LIMIT
+          STARTUP_SNAPSHOT_REQUEST_LOG_LIMIT,
+          localDayRange.dayStartTs,
         ),
         queryFn: () =>
           serviceClient.getStartupSnapshot({
             requestLogLimit: STARTUP_SNAPSHOT_REQUEST_LOG_LIMIT,
+            dayStartTs: localDayRange.dayStartTs,
+            dayEndTs: localDayRange.dayEndTs,
           }),
         staleTime: STARTUP_SNAPSHOT_STALE_TIME,
       });
     },
-    [queryClient]
+    [localDayRange.dayEndTs, localDayRange.dayStartTs, queryClient]
   );
 
   const shouldBlockOnInitialDashboardSnapshot = useCallback(

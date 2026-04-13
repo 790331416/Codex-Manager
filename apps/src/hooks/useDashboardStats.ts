@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useDeferredDesktopActivation } from "@/hooks/useDeferredDesktopActivation";
 import { useDesktopPageActive } from "@/hooks/useDesktopPageActive";
+import { useLocalDayRange } from "@/hooks/useLocalDayRange";
 import {
   buildStartupSnapshotQueryKey,
   hasStartupSnapshotSignal,
@@ -31,6 +32,7 @@ import { pickBestRecommendations, pickCurrentAccount } from "@/lib/utils/usage";
  */
 export function useDashboardStats() {
   const serviceStatus = useAppStore((state) => state.serviceStatus);
+  const localDayRange = useLocalDayRange();
   const isServiceReady = serviceStatus.connected;
   const isPageActive = useDesktopPageActive("/");
   const isSnapshotQueryEnabled = useDeferredDesktopActivation(
@@ -49,11 +51,14 @@ export function useDashboardStats() {
   const snapshotQuery = useQuery({
     queryKey: buildStartupSnapshotQueryKey(
       serviceStatus.addr,
-      STARTUP_SNAPSHOT_REQUEST_LOG_LIMIT
+      STARTUP_SNAPSHOT_REQUEST_LOG_LIMIT,
+      localDayRange.dayStartTs,
     ),
     queryFn: () =>
       serviceClient.getStartupSnapshot({
         requestLogLimit: STARTUP_SNAPSHOT_REQUEST_LOG_LIMIT,
+        dayStartTs: localDayRange.dayStartTs,
+        dayEndTs: localDayRange.dayEndTs,
       }),
     enabled: isSnapshotQueryEnabled,
     retry: 1,

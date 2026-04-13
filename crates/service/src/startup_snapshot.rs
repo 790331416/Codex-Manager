@@ -18,6 +18,8 @@ use crate::{
 /// 返回函数执行结果
 pub(crate) fn read_startup_snapshot(
     request_log_limit: Option<i64>,
+    day_start_ts: Option<i64>,
+    day_end_ts: Option<i64>,
 ) -> Result<StartupSnapshotResult, String> {
     let accounts = account_list::read_accounts(AccountListParams::default(), false)?.items;
     let usage_snapshots = usage_list::read_usage_snapshots()?;
@@ -25,7 +27,8 @@ pub(crate) fn read_startup_snapshot(
     let api_keys = apikey_list::read_api_keys()?;
     let api_models = apikey_models::read_model_options(false)?;
     let manual_preferred_account_id = gateway::manual_preferred_account();
-    let request_log_today_summary = requestlog_today_summary::read_requestlog_today_summary()?;
+    let request_log_today_summary =
+        requestlog_today_summary::read_requestlog_today_summary(day_start_ts, day_end_ts)?;
     let request_logs = requestlog_list::read_request_logs(None, request_log_limit)?;
 
     Ok(StartupSnapshotResult {

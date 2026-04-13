@@ -43,7 +43,11 @@ export const serviceClient = {
     return readInitializeResult(result);
   },
   async getStartupSnapshot(
-    params?: Record<string, unknown>
+    params?: {
+      requestLogLimit?: number;
+      dayStartTs?: number;
+      dayEndTs?: number;
+    }
   ): Promise<StartupSnapshot> {
     const result = await invoke<unknown>(
       "service_startup_snapshot",
@@ -175,10 +179,13 @@ export const serviceClient = {
   clearGatewayErrorLogs: () =>
     invoke("service_requestlog_error_clear", withAddr()),
   clearRequestLogs: () => invoke("service_requestlog_clear", withAddr()),
-  async getTodaySummary(): Promise<RequestLogTodaySummary> {
+  async getTodaySummary(params?: {
+    dayStartTs?: number;
+    dayEndTs?: number;
+  }): Promise<RequestLogTodaySummary> {
     const result = await invoke<unknown>(
       "service_requestlog_today_summary",
-      withAddr()
+      withAddr(params)
     );
     return normalizeTodaySummary(result);
   },

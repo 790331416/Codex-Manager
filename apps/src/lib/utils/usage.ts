@@ -1,16 +1,7 @@
 "use client";
 
+import { formatLocalDateTimeFromSeconds } from "@/lib/utils/time";
 import { Account, AccountUsage, AvailabilityLevel, RequestLog } from "@/types";
-
-const dateTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-  second: "2-digit",
-  hour12: false,
-});
 
 const COMPACT_NUMBER_UNITS = [
   { value: 1e18, suffix: "E" },
@@ -82,10 +73,7 @@ export function formatTsFromSeconds(
   timestamp: number | null | undefined,
   emptyLabel = "未知"
 ): string {
-  if (!timestamp) return emptyLabel;
-  const date = new Date(timestamp * 1000);
-  if (Number.isNaN(date.getTime())) return emptyLabel;
-  return dateTimeFormatter.format(date);
+  return formatLocalDateTimeFromSeconds(timestamp, emptyLabel);
 }
 
 /**

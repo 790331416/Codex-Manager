@@ -55,7 +55,12 @@ pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
             super::value_or_error(params.and_then(requestlog_error_list::read_gateway_error_logs))
         }
         "requestlog/today_summary" => {
-            super::value_or_error(requestlog_today_summary::read_requestlog_today_summary())
+            let day_start_ts = super::i64_param(req, "dayStartTs");
+            let day_end_ts = super::i64_param(req, "dayEndTs");
+            super::value_or_error(requestlog_today_summary::read_requestlog_today_summary(
+                day_start_ts,
+                day_end_ts,
+            ))
         }
         _ => return None,
     };

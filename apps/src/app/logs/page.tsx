@@ -50,6 +50,7 @@ import {
 import { serviceClient } from "@/lib/api/service-client";
 import { useDesktopPageActive } from "@/hooks/useDesktopPageActive";
 import { useDeferredDesktopActivation } from "@/hooks/useDeferredDesktopActivation";
+import { useLocalDayRange } from "@/hooks/useLocalDayRange";
 import { usePageTransitionReady } from "@/hooks/usePageTransitionReady";
 import { useI18n } from "@/lib/i18n/provider";
 import { useAppStore } from "@/lib/store/useAppStore";
@@ -1190,6 +1191,7 @@ function buildSummaryPlaceholder(logs: RequestLog[]): RequestLogFilterSummary {
  */
 function LogsPageContent() {
   const { t } = useI18n();
+  const localDayRange = useLocalDayRange();
   const searchParams = useSearchParams();
   const { serviceStatus } = useAppStore();
   const isPageActive = useDesktopPageActive("/logs/");
@@ -1211,7 +1213,8 @@ function LogsPageContent() {
   const startupSnapshot = queryClient.getQueryData<StartupSnapshot>(
     buildStartupSnapshotQueryKey(
       serviceStatus.addr,
-      STARTUP_SNAPSHOT_REQUEST_LOG_LIMIT
+      STARTUP_SNAPSHOT_REQUEST_LOG_LIMIT,
+      localDayRange.dayStartTs,
     )
   );
   const startupAccounts = startupSnapshot?.accounts || [];

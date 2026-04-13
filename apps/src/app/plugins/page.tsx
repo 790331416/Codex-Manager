@@ -43,6 +43,7 @@ import { pluginClient } from "@/lib/api/plugin-client";
 import { useI18n } from "@/lib/i18n/provider";
 import { useAppStore } from "@/lib/store/useAppStore";
 import { cn } from "@/lib/utils";
+import { formatLocalDateTimeFromSeconds } from "@/lib/utils/time";
 import {
   InstalledPluginSummary,
   PluginCatalogEntry,
@@ -302,18 +303,7 @@ function formatDuration(value: number | null): string {
  * 返回函数执行结果
  */
 function formatTimestamp(value: number | null): string {
-  if (value == null) return "-";
-  const date = new Date(value * 1000);
-  if (Number.isNaN(date.getTime())) return "-";
-  return new Intl.DateTimeFormat("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).format(date);
+  return formatLocalDateTimeFromSeconds(value, "-");
 }
 
 /**

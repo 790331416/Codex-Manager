@@ -3,6 +3,8 @@ use codexmanager_core::rpc::types::RequestLogTodaySummaryResult;
 
 use crate::storage_helpers::open_storage;
 
+const MAX_REQUESTED_DAY_RANGE_SECS: i64 = 48 * 60 * 60;
+
 /// 函数 `local_day_bounds_ts`
 ///
 /// 作者: gaohongshun
@@ -37,6 +39,37 @@ fn local_day_bounds_ts() -> Result<(i64, i64), String> {
     Ok((start, end.max(start)))
 }
 
+/// 函数 `resolve_day_bounds_ts`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-13
+///
+/// # 参数
+/// - day_start_ts: 参数 day_start_ts
+/// - day_end_ts: 参数 day_end_ts
+///
+/// # 返回
+/// 返回函数执行结果
+fn resolve_day_bounds_ts(
+    day_start_ts: Option<i64>,
+    day_end_ts: Option<i64>,
+) -> Result<(i64, i64), String> {
+    match (day_start_ts, day_end_ts) {
+        (Some(start), Some(end)) => {
+            if end <= start {
+                return Err("dayEndTs must be greater than dayStartTs".to_string());
+            }
+            if end - start > MAX_REQUESTED_DAY_RANGE_SECS {
+                return Err("requested day range is too large".to_string());
+            }
+            Ok((start, end))
+        }
+        (None, None) => local_day_bounds_ts(),
+        _ => Err("dayStartTs and dayEndTs must be provided together".to_string()),
+    }
+}
+
 /// 函数 `read_requestlog_today_summary`
 ///
 /// 作者: gaohongshun
@@ -44,13 +77,17 @@ fn local_day_bounds_ts() -> Result<(i64, i64), String> {
 /// 时间: 2026-04-02
 ///
 /// # 参数
-/// - crate: 参数 crate
+/// - day_start_ts: 参数 day_start_ts
+/// - day_end_ts: 参数 day_end_ts
 ///
 /// # 返回
 /// 返回函数执行结果
-pub(crate) fn read_requestlog_today_summary() -> Result<RequestLogTodaySummaryResult, String> {
+pub(crate) fn read_requestlog_today_summary(
+    day_start_ts: Option<i64>,
+    day_end_ts: Option<i64>,
+) -> Result<RequestLogTodaySummaryResult, String> {
     let storage = open_storage().ok_or_else(|| "open storage failed".to_string())?;
-    let (start_ts, end_ts) = local_day_bounds_ts()?;
+    let (start_ts, end_ts) = resolve_day_bounds_ts(day_start_ts, day_end_ts)?;
     let summary = storage
         .summarize_request_logs_between(start_ts, end_ts)
         .map_err(|err| format!("summarize request logs failed: {err}"))?;
@@ -67,4 +104,30 @@ pub(crate) fn read_requestlog_today_summary() -> Result<RequestLogTodaySummaryRe
         today_tokens: non_cached_input_tokens.saturating_add(output_tokens),
         estimated_cost: summary.estimated_cost_usd.max(0.0),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_day_bounds_ts, MAX_REQUESTED_DAY_RANGE_SECS};
+
+    #[test]
+    fn resolve_day_bounds_uses_requested_range_when_complete() {
+        assert_eq!(
+            resolve_day_bounds_ts(Some(1_700_000_000), Some(1_700_086_400)).unwrap(),
+            (1_700_000_000, 1_700_086_400)
+        );
+    }
+
+    #[test]
+    fn resolve_day_bounds_rejects_partial_range() {
+        let error = resolve_day_bounds_ts(Some(1_700_000_000), None).unwrap_err();
+        assert!(error.contains("provided together"));
+    }
+
+    #[test]
+    fn resolve_day_bounds_rejects_oversized_range() {
+        let error =
+            resolve_day_bounds_ts(Some(0), Some(MAX_REQUESTED_DAY_RANGE_SECS + 1)).unwrap_err();
+        assert!(error.contains("too large"));
+    }
 }

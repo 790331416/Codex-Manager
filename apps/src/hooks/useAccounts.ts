@@ -12,6 +12,7 @@ import {
 import { getAppErrorMessage } from "@/lib/api/transport";
 import { useDesktopPageActive } from "@/hooks/useDesktopPageActive";
 import { useDeferredDesktopActivation } from "@/hooks/useDeferredDesktopActivation";
+import { useLocalDayRange } from "@/hooks/useLocalDayRange";
 import { useRuntimeCapabilities } from "@/hooks/useRuntimeCapabilities";
 import { useI18n } from "@/lib/i18n/provider";
 import { useAppStore } from "@/lib/store/useAppStore";
@@ -107,6 +108,7 @@ function formatUsageRefreshErrorMessage(
 export function useAccounts() {
   const queryClient = useQueryClient();
   const { t } = useI18n();
+  const localDayRange = useLocalDayRange();
   const serviceStatus = useAppStore((state) => state.serviceStatus);
   const { canAccessManagementRpc } = useRuntimeCapabilities();
   const isServiceReady = canAccessManagementRpc && serviceStatus.connected;
@@ -117,7 +119,8 @@ export function useAccounts() {
   const startupSnapshot = queryClient.getQueryData<StartupSnapshot>(
     buildStartupSnapshotQueryKey(
       serviceStatus.addr,
-      STARTUP_SNAPSHOT_REQUEST_LOG_LIMIT
+      STARTUP_SNAPSHOT_REQUEST_LOG_LIMIT,
+      localDayRange.dayStartTs,
     )
   );
   const startupAccounts = startupSnapshot?.accounts || [];
