@@ -55,11 +55,6 @@ export default function AuthorPage() {
         </div>
         <div>
           <h2 className="text-xl font-bold tracking-tight">{t("关于作者")}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t(
-              "这里集中放项目赞助方式和作者联系方式，方便直接支持或联系反馈。",
-            )}
-          </p>
         </div>
       </div>
 
@@ -72,9 +67,6 @@ export default function AuthorPage() {
             </div>
             <Badge variant="secondary">{t("Support")}</Badge>
           </div>
-          <CardDescription>
-            {t("这里直接复用项目里已有的支付宝与微信赞助码资源。")}
-          </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2">
           {AUTHOR_SUPPORT_IMAGES.map((item) => (
