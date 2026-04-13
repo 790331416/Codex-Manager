@@ -18,6 +18,7 @@ import {
 export { getAppErrorMessage, isCommandMissingError } from "./transport-errors";
 import { createWebCommandMap } from "./transport-web-commands";
 import type { InvokeParams, WebCommandDescriptor } from "./transport-web-commands";
+import { postJsonRpc } from "./rpc-http";
 
 const DEFAULT_WEB_RPC_BASE_URL = "/api/rpc";
 const DEFAULT_RUNTIME_PROBE_URL = "/api/runtime";
@@ -250,37 +251,13 @@ async function postWebRpc<T>(
     );
   }
 
-  const response = await fetchWithRetry(
+  return postJsonRpc<T>(
+    fetchWithRetry,
     runtimeCapabilities.rpcBaseUrl,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: Date.now(),
-        method: rpcMethod,
-        params: params ?? {},
-      }),
-    },
+    rpcMethod,
+    params ?? {},
     options
   );
-
-  if (!response.ok) throw new Error(`RPC 请求失败（HTTP ${response.status}）`);
-
-  /**
-   * 函数 `payload`
-   *
-   * 作者: gaohongshun
-   *
-   * 时间: 2026-04-02
-   *
-   * # 参数
-   * - await response.json(): 参数 await response.json()
-   *
-   * # 返回
-   * 返回函数执行结果
-   */
-  return unwrapRpcPayload<T>((await response.json()) as unknown);
 }
 
 /**
@@ -442,42 +419,16 @@ export async function requestlogListViaHttpRpc<T>(
   }
 
   // Fallback for web mode if needed (though not primary for this app)
-  const body = JSON.stringify({
-    jsonrpc: "2.0",
-    id: Date.now(),
-    method: "requestlog/list",
-    params: {
+  return postJsonRpc<T>(
+    fetchWithRetry,
+    `http://${addr}/rpc`,
+    "requestlog/list",
+    {
       query: params.query || "",
       statusFilter: params.statusFilter || "all",
       page: params.page ?? 1,
       pageSize: params.pageSize ?? 20,
     },
-  });
-
-  const response = await fetchWithRetry(
-    `http://${addr}/rpc`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body,
-    },
     options
   );
-
-  if (!response.ok) throw new Error(`RPC 请求失败（HTTP ${response.status}）`);
-  /**
-   * 函数 `payload`
-   *
-   * 作者: gaohongshun
-   *
-   * 时间: 2026-04-02
-   *
-   * # 参数
-   * - await response.json(): 参数 await response.json()
-   *
-   * # 返回
-   * 返回函数执行结果
-   */
-  const payload = (await response.json()) as Record<string, unknown>;
-  return ((payload.result ?? payload) as T);
 }
