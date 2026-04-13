@@ -892,6 +892,37 @@ pub(crate) fn gateway_collect_routed_candidates(
     Ok(candidates)
 }
 
+/// 函数 `gateway_record_failover_attempt`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-13
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+pub(crate) fn gateway_record_failover_attempt() {
+    record_gateway_failover_attempt();
+}
+
+/// 函数 `gateway_mark_account_cooldown_for_status`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-13
+///
+/// # 参数
+/// - account_id: 参数 account_id
+/// - status: 参数 status
+///
+/// # 返回
+/// 无
+pub(crate) fn gateway_mark_account_cooldown_for_status(account_id: &str, status: u16) {
+    mark_account_cooldown_for_status(account_id, status);
+}
+
 /// 函数 `gateway_resolve_openai_bearer_token`
 ///
 /// 作者: gaohongshun

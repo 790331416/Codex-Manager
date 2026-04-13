@@ -338,17 +338,25 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
         match upstream_result {
                     Ok(UpstreamMessage::Text(text)) => {
                         if let Some(terminal) = inspect_ws_terminal_event(text.as_str()) {
+                            let terminal_status = terminal.status_code;
                             if let Some(pending) = pending_request.take() {
                                 finalize_ws_request_log(
                                     &context,
                                     &pending,
                                     Some(upstream.account_id.as_str()),
                                     Some(upstream.upstream_url.as_str()),
-                                    terminal.status_code,
+                                    terminal_status,
                                     terminal.usage,
                                     terminal.error,
                                 );
                             }
+                            try_rotate_ws_upstream_after_terminal(
+                                &context,
+                                &mut upstream,
+                                prepared_first.model.as_deref(),
+                                terminal_status,
+                            )
+                            .await;
                         }
                         if socket
                             .send(Message::Text(text.to_string().into()))
@@ -909,6 +917,109 @@ struct WsTerminalEvent {
     status_code: u16,
     usage: crate::gateway::RequestLogUsage,
     error: Option<String>,
+}
+
+fn should_rotate_ws_upstream(status_code: u16) -> bool {
+    matches!(status_code, 401 | 403 | 404 | 408 | 409 | 429)
+}
+
+async fn try_rotate_ws_upstream_after_terminal(
+    context: &WsRequestContext,
+    upstream: &mut ConnectedUpstreamWebsocket,
+    model: Option<&str>,
+    status_code: u16,
+) {
+    if !should_rotate_ws_upstream(status_code) {
+        return;
+    }
+
+    let current_account_id = upstream.account_id.clone();
+    crate::gateway::gateway_mark_account_cooldown_for_status(
+        current_account_id.as_str(),
+        status_code,
+    );
+    if status_code == 429 {
+        let _ = crate::usage_refresh::enqueue_usage_refresh_for_account(
+            current_account_id.as_str(),
+        );
+    }
+
+    let storage = match open_storage() {
+        Some(storage) => storage,
+        None => return,
+    };
+    let candidates = match crate::gateway::gateway_collect_routed_candidates(
+        &storage,
+        &context.api_key.id,
+        model,
+    ) {
+        Ok(candidates) => candidates,
+        Err(err) => {
+            log::warn!(
+                "event=responses_ws_failover_candidates_failed account_id={} status={} err={}",
+                current_account_id,
+                status_code,
+                err
+            );
+            return;
+        }
+    };
+    let replacement_candidate = candidates
+        .into_iter()
+        .find(|(account, _)| account.id != current_account_id);
+    let Some((account, token)) = replacement_candidate else {
+        return;
+    };
+
+    let ws_url = upstream.upstream_url.clone();
+    let bearer = match resolve_bearer_token_for_websocket(account.clone(), token).await {
+        Ok(token) => token,
+        Err(err) => {
+            log::warn!(
+                "event=responses_ws_failover_bearer_failed account_id={} next_account_id={} status={} err={}",
+                current_account_id,
+                account.id,
+                status_code,
+                err
+            );
+            return;
+        }
+    };
+    let request = match build_upstream_websocket_request(ws_url.as_str(), &account, bearer.as_str(), context) {
+        Ok(request) => request,
+        Err(err) => {
+            log::warn!(
+                "event=responses_ws_failover_request_failed account_id={} next_account_id={} status={} err={}",
+                current_account_id,
+                account.id,
+                status_code,
+                err.message
+            );
+            return;
+        }
+    };
+
+    ensure_rustls_crypto_provider();
+    let replacement = match connect_async_tls_with_config(request, None, false, None).await {
+        Ok((stream, _)) => ConnectedUpstreamWebsocket {
+            stream,
+            account_id: account.id,
+            upstream_url: ws_url,
+        },
+        Err(err) => {
+            log::warn!(
+                "event=responses_ws_failover_connect_failed account_id={} status={} err={}",
+                current_account_id,
+                status_code,
+                err
+            );
+            return;
+        }
+    };
+
+    crate::gateway::gateway_record_failover_attempt();
+    let _ = upstream.stream.close(None).await;
+    *upstream = replacement;
 }
 
 fn inspect_ws_terminal_event(text: &str) -> Option<WsTerminalEvent> {

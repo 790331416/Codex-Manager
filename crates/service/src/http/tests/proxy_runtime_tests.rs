@@ -291,6 +291,54 @@ fn insert_account_and_token(storage: &Storage) {
         .expect("insert usage snapshot");
 }
 
+fn insert_account_and_token_with_id(
+    storage: &Storage,
+    account_id: &str,
+    label: &str,
+    chatgpt_account_id: &str,
+    access_token: &str,
+    sort: i64,
+) {
+    let now = chrono::Utc::now().timestamp();
+    storage
+        .insert_account(&Account {
+            id: account_id.to_string(),
+            label: label.to_string(),
+            issuer: "https://auth.openai.com".to_string(),
+            chatgpt_account_id: Some(chatgpt_account_id.to_string()),
+            workspace_id: None,
+            group_name: None,
+            sort,
+            status: "active".to_string(),
+            created_at: now,
+            updated_at: now,
+        })
+        .expect("insert account");
+    storage
+        .insert_token(&Token {
+            account_id: account_id.to_string(),
+            id_token: format!("id_token_{account_id}"),
+            access_token: access_token.to_string(),
+            refresh_token: format!("refresh_token_{account_id}"),
+            api_key_access_token: Some(access_token.to_string()),
+            last_refresh: now,
+        })
+        .expect("insert token");
+    storage
+        .insert_usage_snapshot(&UsageSnapshotRecord {
+            account_id: account_id.to_string(),
+            used_percent: Some(8.0),
+            window_minutes: Some(180),
+            resets_at: None,
+            secondary_used_percent: None,
+            secondary_window_minutes: None,
+            secondary_resets_at: None,
+            credits_json: None,
+            captured_at: now,
+        })
+        .expect("insert usage snapshot");
+}
+
 async fn start_front_proxy_test_server(
     state: ProxyState,
 ) -> (String, oneshot::Sender<()>, tokio::task::JoinHandle<()>) {
@@ -386,6 +434,84 @@ async fn start_mock_upstream_ws() -> (
             headers,
             frames,
         });
+    });
+    (addr.to_string(), event_rx, capture_rx, handle)
+}
+
+async fn start_mock_upstream_ws_fail_then_success() -> (
+    String,
+    tokio::sync::mpsc::UnboundedReceiver<String>,
+    oneshot::Receiver<Vec<UpstreamWsCapture>>,
+    tokio::task::JoinHandle<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mock upstream");
+    let addr = listener.local_addr().expect("mock upstream addr");
+    let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (capture_tx, capture_rx) = oneshot::channel();
+    let handle = tokio::spawn(async move {
+        let mut captures = Vec::new();
+
+        for round in 0..2 {
+            let (stream, _) = listener.accept().await.expect("accept mock upstream");
+            let captured_headers = std::sync::Arc::new(std::sync::Mutex::new(
+                None::<(String, HashMap<String, String>)>,
+            ));
+            let captured_headers_clone = captured_headers.clone();
+            let mut websocket =
+                accept_hdr_async(stream, move |request: &Request, response: Response| {
+                    let mut headers = HashMap::new();
+                    for (name, value) in request.headers() {
+                        if let Ok(text) = value.to_str() {
+                            headers.insert(name.as_str().to_ascii_lowercase(), text.to_string());
+                        }
+                    }
+                    let mut guard = captured_headers_clone
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    *guard = Some((request.uri().path().to_string(), headers));
+                    Ok(response)
+                })
+                .await
+                .expect("accept websocket handshake");
+
+            let mut frames = Vec::new();
+            if let Some(Ok(Message::Text(text))) = websocket.next().await {
+                frames.push(text.to_string());
+                let _ = event_tx.send(text.to_string());
+                let response_payload = if round == 0 {
+                    serde_json::json!({
+                        "type": "response.failed",
+                        "status": 429,
+                        "error": {
+                            "message": "rate limited on first account"
+                        }
+                    })
+                } else {
+                    serde_json::json!({
+                        "type": "response.completed",
+                        "response": { "id": "resp_ws_failover_ok" }
+                    })
+                };
+                websocket
+                    .send(Message::Text(response_payload.to_string().into()))
+                    .await
+                    .expect("send upstream response");
+            }
+            let (path, headers) = captured_headers
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .take()
+                .expect("captured handshake");
+            captures.push(UpstreamWsCapture {
+                path,
+                headers,
+                frames,
+            });
+        }
+
+        let _ = capture_tx.send(captures);
     });
     (addr.to_string(), event_rx, capture_rx, handle)
 }
@@ -529,8 +655,8 @@ async fn official_responses_websocket_proxies_frames_and_headers() {
         serde_json::from_str(&first_upstream_frame).expect("parse first upstream frame");
     assert_eq!(first_payload["type"], "response.create");
     assert_eq!(first_payload["model"], "gpt-5.4-mini");
-    assert_eq!(first_payload["stream"], false);
-    assert_eq!(first_payload["store"], true);
+    assert_eq!(first_payload["stream"], true);
+    assert_eq!(first_payload["store"], false);
     assert_eq!(first_payload["service_tier"], "priority");
     assert_eq!(first_payload["generate"], false);
 
@@ -727,6 +853,165 @@ async fn official_responses_websocket_proxies_frames_and_headers() {
             .filter(|item| item.service_tier.is_none())
             .any(|item| item.effective_service_tier.as_deref() == Some("fast")),
         "expected follow-up websocket request to keep effective fast service tier"
+    );
+
+    client_ws.close(None).await.expect("close client websocket");
+    let _ = shutdown_tx.send(());
+    tokio::time::timeout(Duration::from_secs(5), server_handle)
+        .await
+        .expect("front proxy shutdown timeout")
+        .expect("join front proxy");
+    tokio::time::timeout(Duration::from_secs(5), upstream_handle)
+        .await
+        .expect("mock upstream shutdown timeout")
+        .expect("join mock upstream");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn official_responses_websocket_rotates_account_after_terminal_failure() {
+    let _guard = crate::test_env_guard();
+    let db_path = new_test_db_path("codexmanager-proxy-runtime-ws-failover");
+    let _db_guard = EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
+    let storage = init_test_storage(&db_path);
+    let (upstream_addr, mut upstream_events, capture_rx, upstream_handle) =
+        start_mock_upstream_ws_fail_then_success().await;
+    insert_api_key_record(
+        &storage,
+        "platform_key_ws_failover",
+        crate::apikey_profile::ROTATION_ACCOUNT,
+        Some(format!(
+            "http://{upstream_addr}/chatgpt.com/backend-api/codex"
+        )),
+    );
+    insert_account_and_token_with_id(
+        &storage,
+        "acc_proxy_runtime_ws_a",
+        "proxy-runtime-ws-a",
+        "chatgpt_proxy_runtime_ws_a",
+        "access_token_ws_a",
+        0,
+    );
+    insert_account_and_token_with_id(
+        &storage,
+        "acc_proxy_runtime_ws_b",
+        "proxy-runtime-ws-b",
+        "chatgpt_proxy_runtime_ws_b",
+        "access_token_ws_b",
+        1,
+    );
+    tokio::task::spawn_blocking(|| {
+        crate::gateway::reload_runtime_config_from_env();
+        let _ = crate::gateway::front_proxy_max_body_bytes();
+    })
+    .await
+    .expect("reload runtime config");
+
+    let state = ProxyState {
+        backend_base_url: "http://127.0.0.1:1".to_string(),
+        client: Client::new(),
+    };
+    let (front_addr, shutdown_tx, server_handle) = start_front_proxy_test_server(state).await;
+    let request = build_ws_request(
+        &format!("ws://{front_addr}/v1/responses"),
+        "platform_key_ws_failover",
+        &[("OpenAI-Beta", "responses_websockets=2026-02-06")],
+    );
+    let (mut client_ws, response) = connect_async(request).await.expect("websocket connects");
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    client_ws
+        .send(Message::Text(
+            serde_json::json!({
+                "type": "response.create",
+                "model": "gpt-4.1",
+                "input": "first request"
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .expect("send first frame");
+
+    let first_upstream_frame = tokio::time::timeout(Duration::from_secs(5), upstream_events.recv())
+        .await
+        .expect("first upstream frame timeout")
+        .expect("first upstream frame channel");
+    let first_payload: serde_json::Value =
+        serde_json::from_str(&first_upstream_frame).expect("parse first upstream frame");
+    assert_eq!(first_payload["type"], "response.create");
+
+    let first_client_event = tokio::time::timeout(Duration::from_secs(5), client_ws.next())
+        .await
+        .expect("first client event timeout")
+        .expect("first client event")
+        .expect("first client event result");
+    match first_client_event {
+        Message::Text(text) => {
+            assert!(
+                text.contains("\"response.failed\""),
+                "unexpected first event: {text}"
+            );
+        }
+        other => panic!("unexpected first client event: {other:?}"),
+    }
+
+    client_ws
+        .send(Message::Text(
+            serde_json::json!({
+                "type": "response.create",
+                "model": "gpt-4.1",
+                "input": "second request after failover"
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .expect("send second frame");
+
+    let second_upstream_frame =
+        tokio::time::timeout(Duration::from_secs(5), upstream_events.recv())
+            .await
+            .expect("second upstream frame timeout")
+            .expect("second upstream frame channel");
+    let second_payload: serde_json::Value =
+        serde_json::from_str(&second_upstream_frame).expect("parse second upstream frame");
+    assert_eq!(second_payload["type"], "response.create");
+
+    let second_client_event = tokio::time::timeout(Duration::from_secs(5), client_ws.next())
+        .await
+        .expect("second client event timeout")
+        .expect("second client event")
+        .expect("second client event result");
+    match second_client_event {
+        Message::Text(text) => {
+            assert!(
+                text.contains("\"response.completed\""),
+                "unexpected second event: {text}"
+            );
+        }
+        other => panic!("unexpected second client event: {other:?}"),
+    }
+
+    let captures = tokio::time::timeout(Duration::from_secs(5), capture_rx)
+        .await
+        .expect("capture timeout")
+        .expect("capture result");
+    assert_eq!(captures.len(), 2, "expected two upstream websocket sessions");
+    assert_eq!(
+        captures[0].headers.get("authorization").map(String::as_str),
+        Some("Bearer access_token_ws_a")
+    );
+    assert_eq!(
+        captures[1].headers.get("authorization").map(String::as_str),
+        Some("Bearer access_token_ws_b")
+    );
+    assert_eq!(
+        captures[0].headers.get("chatgpt-account-id").map(String::as_str),
+        Some("chatgpt_proxy_runtime_ws_a")
+    );
+    assert_eq!(
+        captures[1].headers.get("chatgpt-account-id").map(String::as_str),
+        Some("chatgpt_proxy_runtime_ws_b")
     );
 
     client_ws.close(None).await.expect("close client websocket");
