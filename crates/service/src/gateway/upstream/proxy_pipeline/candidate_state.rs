@@ -14,6 +14,19 @@ pub(in super::super) struct CandidateExecutionState {
 }
 
 impl CandidateExecutionState {
+    fn existing_prompt_cache_key(body: &Bytes) -> Option<String> {
+        serde_json::from_slice::<serde_json::Value>(body.as_ref())
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("prompt_cache_key")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(|value| value.to_string())
+            })
+    }
+
     /// 函数 `rewrite_cache_key`
     ///
     /// 作者: gaohongshun
@@ -112,7 +125,10 @@ impl CandidateExecutionState {
         model_override: Option<&str>,
         prompt_cache_key: Option<&str>,
     ) -> Bytes {
-        let Some(cache_key) = Self::rewrite_cache_key(model_override, prompt_cache_key) else {
+        let existing_prompt_cache_key = Self::existing_prompt_cache_key(body);
+        let effective_prompt_cache_key = existing_prompt_cache_key.as_deref().or(prompt_cache_key);
+        let Some(cache_key) = Self::rewrite_cache_key(model_override, effective_prompt_cache_key)
+        else {
             return body.clone();
         };
 
@@ -120,13 +136,13 @@ impl CandidateExecutionState {
             .entry(cache_key)
             .or_insert_with(|| {
                 Bytes::from(
-                    super::super::super::apply_request_overrides_with_forced_prompt_cache_key(
+                    super::super::super::apply_request_overrides_with_prompt_cache_key(
                         path,
                         body.to_vec(),
                         model_override,
                         None,
                         Some(setup.upstream_base.as_str()),
-                        prompt_cache_key,
+                        effective_prompt_cache_key,
                     ),
                 )
             })
@@ -283,6 +299,45 @@ mod tests {
                 .get("prompt_cache_key")
                 .and_then(serde_json::Value::as_str),
             Some("thread-2")
+        );
+    }
+
+    #[test]
+    fn body_for_attempt_preserves_existing_prompt_cache_key() {
+        let mut state = CandidateExecutionState::default();
+        let body = Bytes::from_static(
+            br#"{"model":"gpt-5.4","input":"hello","prompt_cache_key":"client-thread"}"#,
+        );
+        let setup = super::super::request_setup::UpstreamRequestSetup {
+            upstream_base: "https://chatgpt.com/backend-api/codex".to_string(),
+            upstream_fallback_base: None,
+            url: "https://chatgpt.com/backend-api/codex/responses".to_string(),
+            url_alt: None,
+            candidate_count: 1,
+            account_max_inflight: 1,
+            anthropic_has_prompt_cache_key: false,
+            has_sticky_fallback_session: false,
+            has_sticky_fallback_conversation: false,
+            has_body_encrypted_content: false,
+            conversation_routing: None,
+        };
+
+        let actual = state.body_for_attempt(
+            "/v1/responses",
+            &body,
+            false,
+            &setup,
+            None,
+            Some("thread-from-conversation"),
+        );
+        let value: serde_json::Value =
+            serde_json::from_slice(actual.as_ref()).expect("parse rewritten body");
+
+        assert_eq!(
+            value
+                .get("prompt_cache_key")
+                .and_then(serde_json::Value::as_str),
+            Some("client-thread")
         );
     }
 }

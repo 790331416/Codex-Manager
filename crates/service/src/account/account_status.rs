@@ -344,7 +344,7 @@ pub(crate) fn mark_account_unavailable_for_usage_http_error(
         return false;
     };
     match status_code {
-        401 | 403 | 429 => {
+        401 | 403 => {
             let status_reason = format!("usage_http_{status_code}");
             set_account_unavailable_with_reason(storage, account_id, &status_reason)
         }

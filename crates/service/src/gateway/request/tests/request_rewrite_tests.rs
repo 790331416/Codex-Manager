@@ -440,7 +440,7 @@ fn responses_transparent_mode_preserves_native_codex_body_shape() {
 }
 
 #[test]
-fn responses_transparent_mode_skips_inferred_prompt_cache_key() {
+fn responses_transparent_mode_skips_request_rewrite_layer_prompt_cache_inference() {
     let _guard = crate::test_env_guard();
     let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "transparent");
     let body = json!({

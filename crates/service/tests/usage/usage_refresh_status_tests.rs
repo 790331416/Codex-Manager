@@ -157,7 +157,7 @@ fn apply_status_skips_db_and_event_when_status_unchanged() {
     assert_eq!(storage.event_count().expect("count events"), 1);
 }
 
-/// 函数 `mark_usage_unreachable_marks_401_403_429_as_unavailable`
+/// 函数 `mark_usage_unreachable_marks_401_403_as_unavailable_but_ignores_429`
 ///
 /// 作者: gaohongshun
 ///
@@ -169,7 +169,7 @@ fn apply_status_skips_db_and_event_when_status_unchanged() {
 /// # 返回
 /// 无
 #[test]
-fn mark_usage_unreachable_marks_401_403_429_as_unavailable() {
+fn mark_usage_unreachable_marks_401_403_as_unavailable_but_ignores_429() {
     let storage = Storage::open_in_memory().expect("open");
     storage.init().expect("init");
     let account = Account {
@@ -258,20 +258,44 @@ fn mark_usage_unreachable_marks_401_403_429_as_unavailable() {
         "acc-2",
         "usage endpoint status 429 Too Many Requests",
     );
-    let unavailable_after_429 = storage
+    let still_unavailable_after_429 = storage
         .list_accounts()
         .expect("list")
         .into_iter()
         .find(|acc| acc.id == "acc-2")
         .expect("exists");
-    assert_eq!(unavailable_after_429.status, "unavailable");
+    assert_eq!(still_unavailable_after_429.status, "unavailable");
 
     let reasons = storage
         .latest_account_status_reasons(&["acc-2".to_string()])
         .expect("load reasons");
     assert_eq!(
         reasons.get("acc-2").map(String::as_str),
-        Some("usage_http_429")
+        Some("usage_http_403")
+    );
+
+    storage
+        .update_account_status_if_changed("acc-2", "active")
+        .expect("reset account status after 429");
+    mark_usage_unreachable_if_needed(
+        &storage,
+        "acc-2",
+        "usage endpoint status 429 Too Many Requests",
+    );
+    let active_after_429 = storage
+        .list_accounts()
+        .expect("list")
+        .into_iter()
+        .find(|acc| acc.id == "acc-2")
+        .expect("exists");
+    assert_eq!(active_after_429.status, "active");
+
+    let reasons = storage
+        .latest_account_status_reasons(&["acc-2".to_string()])
+        .expect("load reasons");
+    assert_eq!(
+        reasons.get("acc-2").map(String::as_str),
+        Some("usage_http_403")
     );
 
     mark_usage_unreachable_if_needed(
@@ -279,20 +303,20 @@ fn mark_usage_unreachable_marks_401_403_429_as_unavailable() {
         "acc-2",
         "usage endpoint status 500 Internal Server Error",
     );
-    let unavailable_after_500 = storage
+    let active_after_500 = storage
         .list_accounts()
         .expect("list")
         .into_iter()
         .find(|acc| acc.id == "acc-2")
         .expect("exists");
-    assert_eq!(unavailable_after_500.status, "unavailable");
+    assert_eq!(active_after_500.status, "active");
 
     let reasons = storage
         .latest_account_status_reasons(&["acc-2".to_string()])
         .expect("load reasons");
     assert_eq!(
         reasons.get("acc-2").map(String::as_str),
-        Some("usage_http_429")
+        Some("usage_http_403")
     );
 }
 

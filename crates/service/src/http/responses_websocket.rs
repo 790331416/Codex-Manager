@@ -23,6 +23,7 @@ const OPENAI_PROJECT_ENV: &str = "OPENAI_PROJECT";
 struct WsRequestContext {
     api_key: codexmanager_core::storage::ApiKey,
     incoming_headers: crate::gateway::IncomingHeaderSnapshot,
+    prompt_cache_key: Option<String>,
     effective_upstream_base: String,
     include_timing_metrics: bool,
     prefer_raw_errors: bool,
@@ -582,11 +583,23 @@ fn authorize_websocket_request(headers: &HeaderMap) -> Result<WsRequestContext, 
             ),
         ));
     }
+    let (incoming_headers, prompt_cache_key) =
+        crate::gateway::gateway_resolve_ws_prompt_cache_key(&storage, &api_key, &incoming_headers)
+            .map_err(|err| {
+                text_error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    crate::gateway::error_message_for_client(
+                        prefer_raw_errors,
+                        crate::gateway::bilingual_error("读取会话绑定失败", err),
+                    ),
+                )
+            })?;
 
     Ok(WsRequestContext {
         effective_upstream_base: crate::gateway::gateway_resolve_effective_upstream_base(&api_key),
         api_key,
         incoming_headers,
+        prompt_cache_key,
         include_timing_metrics: parse_bool_header(
             headers.get("x-responsesapi-include-timing-metrics"),
         ),
@@ -672,6 +685,7 @@ fn rewrite_client_frame(
             )
         })?,
         &context.api_key,
+        context.prompt_cache_key.as_deref(),
     );
     let rewritten_value = serde_json::from_slice::<Value>(&rewritten_body).map_err(|err| {
         WsSessionError::bad_request_bilingual(

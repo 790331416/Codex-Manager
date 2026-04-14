@@ -114,3 +114,53 @@ fn fallback_to_access_token_uses_runtime_access_token_when_exchange_fails() {
         fallback_to_access_token(&token, "api key exchange failed").expect("fallback bearer");
     assert_eq!(bearer, "runtime-access-token");
 }
+
+/// 函数 `valid_access_token_skips_unavailable_mark_for_bearer_exchange_refresh_failure`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-14
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn valid_access_token_skips_unavailable_mark_for_bearer_exchange_refresh_failure() {
+    let token = Token {
+        account_id: "acc-valid-access".to_string(),
+        id_token: "runtime-id-token".to_string(),
+        access_token: "a.eyJleHAiOjQxMDI0NDQ4MDB9.s".to_string(),
+        refresh_token: "refresh-token".to_string(),
+        api_key_access_token: None,
+        last_refresh: now_ts(),
+    };
+
+    assert!(!should_mark_account_unavailable_after_refresh_failure_for_bearer_exchange(&token));
+}
+
+/// 函数 `expired_access_token_keeps_unavailable_mark_for_bearer_exchange_refresh_failure`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-14
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn expired_access_token_keeps_unavailable_mark_for_bearer_exchange_refresh_failure() {
+    let token = Token {
+        account_id: "acc-expired-access".to_string(),
+        id_token: "runtime-id-token".to_string(),
+        access_token: "a.eyJleHAiOjE3MDAwMDAwMDB9.s".to_string(),
+        refresh_token: "refresh-token".to_string(),
+        api_key_access_token: None,
+        last_refresh: now_ts(),
+    };
+
+    assert!(should_mark_account_unavailable_after_refresh_failure_for_bearer_exchange(&token));
+}

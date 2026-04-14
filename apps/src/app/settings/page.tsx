@@ -126,8 +126,10 @@ const GATEWAY_MODE_LABELS: Record<GatewayMode, string> = {
 };
 
 const GATEWAY_MODE_HINTS: Record<GatewayMode, string> = {
-  transparent: "尽量保持原始 Codex 请求与响应形态，适合标准代理链路。",
-  enhanced: "对请求参数与响应结构做更多兼容处理，适合兼容性优先场景。",
+  transparent:
+    "尽量保持原始 Codex 请求与响应形态；不做额外兼容改写，但仍会保留显式或会话层稳定线程锚点。",
+  enhanced:
+    "对请求参数与响应结构做更多兼容处理，并在兼容链路中补齐稳定线程锚点，适合兼容性优先场景。",
 };
 
 const RESIDENCY_REQUIREMENT_LABELS: Record<string, string> = {

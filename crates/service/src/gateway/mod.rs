@@ -142,7 +142,7 @@ pub(super) use request_helpers::{
 use request_helpers::{should_drop_incoming_header, should_drop_incoming_header_for_failover};
 pub(crate) use request_log::{RequestLogTraceContext, RequestLogUsage};
 use request_rewrite::{
-    apply_request_overrides_with_forced_prompt_cache_key,
+    apply_request_overrides_with_prompt_cache_key,
     apply_request_overrides_with_service_tier_and_forced_prompt_cache_key,
     apply_request_overrides_with_service_tier_and_prompt_cache_key, compute_upstream_url,
 };
@@ -1006,6 +1006,33 @@ pub(crate) fn gateway_resolve_openai_bearer_token(
     resolve_openai_bearer_token(storage, account, token)
 }
 
+pub(crate) fn gateway_resolve_ws_prompt_cache_key(
+    storage: &codexmanager_core::storage::Storage,
+    api_key: &codexmanager_core::storage::ApiKey,
+    incoming_headers: &IncomingHeaderSnapshot,
+) -> Result<(IncomingHeaderSnapshot, Option<String>), String> {
+    let local_conversation_id = incoming_headers
+        .conversation_id()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            upstream::header_profile::derive_sticky_conversation_id_from_headers(incoming_headers)
+        });
+    let conversation_binding = conversation_binding::load_conversation_binding(
+        storage,
+        api_key.key_hash.as_str(),
+        local_conversation_id.as_deref(),
+    )?;
+    let incoming_headers =
+        incoming_headers.with_conversation_id_override(local_conversation_id.as_deref());
+    let prompt_cache_key = conversation_binding::effective_thread_anchor(
+        local_conversation_id.as_deref(),
+        conversation_binding.as_ref(),
+    );
+    Ok((incoming_headers, prompt_cache_key))
+}
+
 /// 函数 `gateway_rewrite_ws_responses_body`
 ///
 /// 作者: gaohongshun
@@ -1023,6 +1050,7 @@ pub(crate) fn gateway_rewrite_ws_responses_body(
     path: &str,
     body: Vec<u8>,
     api_key: &codexmanager_core::storage::ApiKey,
+    prompt_cache_key: Option<&str>,
 ) -> Vec<u8> {
     let normalized_model = api_key
         .model_slug
@@ -1044,7 +1072,7 @@ pub(crate) fn gateway_rewrite_ws_responses_body(
         normalized_reasoning,
         normalized_service_tier,
         api_key.upstream_base_url.as_deref(),
-        None,
+        prompt_cache_key,
     )
 }
 

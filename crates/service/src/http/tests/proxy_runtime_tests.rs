@@ -659,6 +659,11 @@ async fn official_responses_websocket_proxies_frames_and_headers() {
     assert_eq!(first_payload["store"], false);
     assert_eq!(first_payload["service_tier"], "priority");
     assert_eq!(first_payload["generate"], false);
+    let first_prompt_cache_key = first_payload
+        .get("prompt_cache_key")
+        .and_then(serde_json::Value::as_str)
+        .expect("first prompt_cache_key")
+        .to_string();
 
     let first_client_event = tokio::time::timeout(Duration::from_secs(5), client_ws.next())
         .await
@@ -707,6 +712,12 @@ async fn official_responses_websocket_proxies_frames_and_headers() {
     assert_eq!(
         second_payload["client_metadata"]["x-codex-turn-metadata"],
         "turn_meta_ws_1"
+    );
+    assert_eq!(
+        second_payload["prompt_cache_key"]
+            .as_str()
+            .expect("second prompt_cache_key"),
+        first_prompt_cache_key
     );
 
     let second_client_event = tokio::time::timeout(Duration::from_secs(5), client_ws.next())
@@ -862,6 +873,95 @@ async fn official_responses_websocket_proxies_frames_and_headers() {
         .await
         .expect("mock upstream shutdown timeout")
         .expect("join mock upstream");
+}
+
+#[tokio::test]
+async fn official_responses_websocket_preserves_explicit_prompt_cache_key() {
+    let _guard = crate::test_env_guard();
+    let db_path = new_test_db_path("codexmanager-proxy-runtime-ws-explicit-prompt-cache-key");
+    let _db_guard = EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
+    let storage = init_test_storage(&db_path);
+    let (upstream_addr, mut upstream_events, capture_rx, upstream_handle) =
+        start_mock_upstream_ws().await;
+    insert_api_key_record(
+        &storage,
+        "platform_key_ws_explicit_prompt_cache_key",
+        crate::apikey_profile::ROTATION_ACCOUNT,
+        Some(format!(
+            "http://{upstream_addr}/chatgpt.com/backend-api/codex"
+        )),
+    );
+    insert_account_and_token(&storage);
+    tokio::task::spawn_blocking(|| {
+        crate::gateway::reload_runtime_config_from_env();
+        let _ = crate::gateway::front_proxy_max_body_bytes();
+    })
+    .await
+    .expect("reload runtime config");
+
+    let state = ProxyState {
+        backend_base_url: "http://127.0.0.1:1".to_string(),
+        client: Client::new(),
+    };
+    let (front_addr, shutdown_tx, server_handle) = start_front_proxy_test_server(state).await;
+    let request = build_ws_request(
+        &format!("ws://{front_addr}/v1/responses"),
+        "platform_key_ws_explicit_prompt_cache_key",
+        &[
+            ("OpenAI-Beta", "responses_websockets=2026-02-06"),
+            ("session_id", "session_ws_explicit_prompt_cache_key"),
+            (
+                "x-client-request-id",
+                "client_req_ws_explicit_prompt_cache_key",
+            ),
+        ],
+    );
+    let (mut client_ws, response) = connect_async(request).await.expect("websocket connects");
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    client_ws
+        .send(Message::Text(
+            serde_json::json!({
+                "type": "response.create",
+                "model": "gpt-4.1",
+                "input": "hello",
+                "prompt_cache_key": "client_ws_thread_123"
+            })
+            .to_string()
+            .into(),
+        ))
+        .await
+        .expect("send frame");
+
+    let upstream_frame = tokio::time::timeout(Duration::from_secs(5), upstream_events.recv())
+        .await
+        .expect("upstream frame timeout")
+        .expect("upstream frame channel");
+    let payload: serde_json::Value =
+        serde_json::from_str(&upstream_frame).expect("parse upstream frame");
+    assert_eq!(payload["type"], "response.create");
+    assert_eq!(payload["prompt_cache_key"], "client_ws_thread_123");
+
+    let client_event = tokio::time::timeout(Duration::from_secs(5), client_ws.next())
+        .await
+        .expect("client event timeout")
+        .expect("client event")
+        .expect("client event result");
+    match client_event {
+        Message::Text(text) => {
+            assert!(
+                text.contains("\"response.created\""),
+                "unexpected event: {text}"
+            );
+        }
+        other => panic!("unexpected client event: {other:?}"),
+    }
+
+    let _ = client_ws.close(None).await;
+    shutdown_tx.send(()).ok();
+    server_handle.await.expect("front proxy join");
+    upstream_handle.abort();
+    let _ = capture_rx.await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

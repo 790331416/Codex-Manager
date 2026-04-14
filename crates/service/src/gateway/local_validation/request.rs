@@ -406,6 +406,13 @@ pub(super) fn build_local_validation_result(
     let client_request_meta = super::super::parse_request_metadata(&body);
     let (effective_model, effective_reasoning, effective_service_tier) =
         resolve_effective_request_overrides(&api_key);
+    let preferred_prompt_cache_key = initial_request_meta.prompt_cache_key.clone().or_else(|| {
+        if client_request_meta.has_prompt_cache_key {
+            client_request_meta.prompt_cache_key.clone()
+        } else {
+            None
+        }
+    });
     let local_conversation_id = initial_local_conversation_id.clone();
     let conversation_binding = super::super::conversation_binding::load_conversation_binding(
         &storage,
@@ -427,7 +434,17 @@ pub(super) fn build_local_validation_result(
             normalized_path.as_str(),
             path.as_str(),
         );
-    body = if effective_thread_anchor.is_some() {
+    body = if preferred_prompt_cache_key.is_some() {
+        super::super::apply_request_overrides_with_service_tier_and_prompt_cache_key(
+            &path,
+            body,
+            effective_model.as_deref(),
+            effective_reasoning.as_deref(),
+            effective_service_tier.as_deref(),
+            api_key.upstream_base_url.as_deref(),
+            preferred_prompt_cache_key.as_deref(),
+        )
+    } else if effective_thread_anchor.is_some() {
         super::super::apply_request_overrides_with_service_tier_and_forced_prompt_cache_key(
             &path,
             body,
@@ -460,7 +477,7 @@ pub(super) fn build_local_validation_result(
     let service_tier_for_log = client_request_meta.service_tier;
     let effective_service_tier_for_log = request_meta.service_tier;
     let is_stream = client_request_meta.is_stream;
-    let has_prompt_cache_key = client_request_meta.has_prompt_cache_key;
+    let has_prompt_cache_key = request_meta.has_prompt_cache_key;
     let request_shape = client_request_meta.request_shape;
 
     ensure_anthropic_model_is_listed(&storage, effective_protocol_type, model_for_log.as_deref())?;

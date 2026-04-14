@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
+use codexmanager_core::auth::extract_token_exp;
 use codexmanager_core::storage::{now_ts, Account, Storage, Token};
 
 use crate::account_status::mark_account_unavailable_for_auth_error;
@@ -149,6 +150,20 @@ fn fallback_to_access_token(token: &Token, exchange_error: &str) -> Result<Strin
     Ok(fallback.to_string())
 }
 
+fn should_mark_account_unavailable_after_refresh_failure_for_bearer_exchange(
+    token: &Token,
+) -> bool {
+    let fallback = token.access_token.trim();
+    if fallback.is_empty() {
+        return true;
+    }
+
+    match extract_token_exp(fallback) {
+        Some(exp) => exp <= now_ts(),
+        None => false,
+    }
+}
+
 /// 函数 `resolve_openai_bearer_token`
 ///
 /// 作者: gaohongshun
@@ -225,7 +240,9 @@ pub(super) fn resolve_openai_bearer_token(
                         }
                     }
                     Err(refresh_err) => {
-                        if mark_account_unavailable_for_auth_error(
+                        if should_mark_account_unavailable_after_refresh_failure_for_bearer_exchange(
+                            token,
+                        ) && mark_account_unavailable_for_auth_error(
                             storage,
                             &account.id,
                             &refresh_err,

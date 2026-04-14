@@ -522,6 +522,7 @@ pub(super) fn apply_request_overrides_with_service_tier_and_prompt_cache_key(
 ///
 /// # 返回
 /// 返回函数执行结果
+#[cfg(test)]
 pub(super) fn apply_request_overrides_with_forced_prompt_cache_key(
     path: &str,
     body: Vec<u8>,
