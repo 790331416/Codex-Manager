@@ -70,16 +70,28 @@ fn ensure_anthropic_model_is_listed(
     }
 
     let Some(model) = model.map(str::trim).filter(|value| !value.is_empty()) else {
-        return Err(LocalValidationError::new(400, "claude model is required"));
+        return Err(LocalValidationError::new(
+            400,
+            crate::gateway::bilingual_error("Claude 模型必填", "claude model is required"),
+        ));
     };
 
     let models = crate::apikey_models::read_model_options_from_storage(storage).map_err(|err| {
-        LocalValidationError::new(500, format!("model options cache read failed: {err}"))
+        LocalValidationError::new(
+            500,
+            crate::gateway::bilingual_error(
+                "读取模型缓存失败",
+                format!("model options cache read failed: {err}"),
+            ),
+        )
     })?;
     if models.is_empty() {
         return Err(LocalValidationError::new(
             400,
-            format!("claude model not found in model list: {model}"),
+            crate::gateway::bilingual_error(
+                "Claude 模型不在模型列表中",
+                format!("claude model not found in model list: {model}"),
+            ),
         ));
     }
     let found = models
@@ -91,7 +103,10 @@ fn ensure_anthropic_model_is_listed(
     } else {
         Err(LocalValidationError::new(
             400,
-            format!("claude model not found in model list: {model}"),
+            crate::gateway::bilingual_error(
+                "Claude 模型不在模型列表中",
+                format!("claude model not found in model list: {model}"),
+            ),
         ))
     }
 }
@@ -282,7 +297,12 @@ pub(super) fn build_local_validation_result(
         resolve_gateway_protocol_type(api_key.protocol_type.as_str(), normalized_path.as_str());
     let request_method = request.method().as_str().to_string();
     let method = Method::from_bytes(request_method.as_bytes())
-        .map_err(|_| LocalValidationError::new(405, "unsupported method"))?;
+        .map_err(|_| {
+            LocalValidationError::new(
+                405,
+                crate::gateway::bilingual_error("不支持的请求方法", "unsupported method"),
+            )
+        })?;
     let initial_service_tier_diagnostic = super::super::inspect_service_tier_for_log(&body);
     super::super::log_client_service_tier(
         trace_id.as_str(),
@@ -352,7 +372,12 @@ pub(super) fn build_local_validation_result(
     let original_body = body.clone();
     let adapted =
         super::super::adapt_request_for_protocol(effective_protocol_type, &normalized_path, body)
-            .map_err(|err| LocalValidationError::new(400, err))?;
+            .map_err(|err| {
+                LocalValidationError::new(
+                    400,
+                    crate::gateway::bilingual_error("请求协议适配失败", err),
+                )
+            })?;
     let mut path = adapted.path;
     let mut response_adapter = adapted.response_adapter;
     let mut gemini_stream_output_mode = adapted.gemini_stream_output_mode;

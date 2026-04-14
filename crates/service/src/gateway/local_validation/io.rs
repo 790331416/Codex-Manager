@@ -30,7 +30,10 @@ pub(super) fn read_request_body(
         if max_body_bytes > 0 && body.len() > max_body_bytes {
             return Err(super::LocalValidationError::new(
                 413,
-                format!("request body too large: content-length>{max_body_bytes}"),
+                crate::gateway::bilingual_error(
+                    "请求体过大",
+                    format!("request body too large: content-length>{max_body_bytes}"),
+                ),
             ));
         }
     }
@@ -86,5 +89,8 @@ pub(super) fn extract_platform_key_or_error(
         );
     }
 
-    Err(super::LocalValidationError::new(401, "missing api key"))
+    Err(super::LocalValidationError::new(
+        401,
+        crate::gateway::bilingual_error("缺少 API Key", "missing api key"),
+    ))
 }

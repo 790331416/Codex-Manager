@@ -41,7 +41,10 @@ pub(in super::super) fn prepare_candidates_for_proxy(
     ) {
         Ok(v) => v,
         Err(err) => {
-            let err_text = format!("candidate resolve failed: {err}");
+            let err_text = super::super::super::bilingual_error(
+                "候选账号解析失败",
+                format!("candidate resolve failed: {err}"),
+            );
             super::super::super::write_request_log(
                 storage,
                 super::super::super::request_log::RequestLogTraceContext {
@@ -100,12 +103,12 @@ pub(in super::super) fn prepare_candidates_for_proxy(
             None,
             Some(503),
             super::super::super::request_log::RequestLogUsage::default(),
-            Some("no available account"),
+            Some("无可用账号(no available account)"),
             None,
         );
         let response = super::super::super::error_response::terminal_text_response(
             503,
-            "no available account",
+            "无可用账号(no available account)",
             Some(trace_id),
         );
         let _ = request.respond(response);
@@ -114,7 +117,7 @@ pub(in super::super) fn prepare_candidates_for_proxy(
             503,
             None,
             None,
-            Some("no available account"),
+            Some("无可用账号(no available account)"),
             0,
         );
         return CandidatePrecheckResult::Responded;

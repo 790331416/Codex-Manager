@@ -62,105 +62,123 @@ impl ErrorCode {
 /// 返回函数执行结果
 pub(crate) fn classify_message(message: &str) -> ErrorCode {
     let normalized = message.trim().to_ascii_lowercase();
+    let normalized_english_tail = message
+        .trim()
+        .rsplit_once('(')
+        .and_then(|(_, tail)| tail.strip_suffix(')'))
+        .map(str::trim)
+        .filter(|tail| !tail.is_empty())
+        .map(|tail| tail.to_ascii_lowercase());
+    let eq = |expected: &str| {
+        normalized == expected || normalized_english_tail.as_deref() == Some(expected)
+    };
+    let starts_with = |prefix: &str| {
+        normalized.starts_with(prefix)
+            || normalized_english_tail
+                .as_deref()
+                .is_some_and(|tail| tail.starts_with(prefix))
+    };
+    let contains = |needle: &str| {
+        normalized.contains(needle)
+            || normalized_english_tail
+                .as_deref()
+                .is_some_and(|tail| tail.contains(needle))
+    };
     if normalized.is_empty() {
         return ErrorCode::UnknownError;
     }
 
-    if normalized == "unknown_method" {
+    if eq("unknown_method") {
         return ErrorCode::UnknownMethod;
     }
-    if normalized.starts_with("invalid app settings payload:") {
+    if starts_with("invalid app settings payload:") {
         return ErrorCode::InvalidSettingsPayload;
     }
-    if normalized.starts_with("request body too large") {
+    if starts_with("request body too large") {
         return ErrorCode::RequestBodyTooLarge;
     }
-    if normalized.starts_with("backend proxy error:") {
+    if starts_with("backend proxy error:") {
         return ErrorCode::BackendProxyError;
     }
-    if normalized.starts_with("build response failed:") {
+    if starts_with("build response failed:") {
         return ErrorCode::BuildResponseFailed;
     }
-    if normalized == "upstream total timeout exceeded" || normalized == "upstream request timed out"
-    {
+    if eq("upstream total timeout exceeded") || eq("upstream request timed out") {
         return ErrorCode::UpstreamTimeout;
     }
-    if normalized == "上游请求超时" || normalized.contains("连接超时") {
+    if eq("上游请求超时") || contains("连接超时") {
         return ErrorCode::UpstreamTimeout;
     }
-    if normalized.starts_with("upstream blocked by cloudflare/waf")
-        || normalized == "upstream challenge blocked"
-    {
+    if starts_with("upstream blocked by cloudflare/waf") || eq("upstream challenge blocked") {
         return ErrorCode::UpstreamChallengeBlocked;
     }
-    if normalized.contains("cloudflare/waf")
-        || normalized.contains("安全验证拦截")
-        || normalized.contains("验证/拦截页面")
-    {
+    if contains("cloudflare/waf") || contains("安全验证拦截") || contains("验证/拦截页面") {
         return ErrorCode::UpstreamChallengeBlocked;
     }
-    if normalized == "upstream rate-limited" {
+    if eq("upstream rate-limited") {
         return ErrorCode::UpstreamRateLimited;
     }
-    if normalized == "upstream not-found failover" {
+    if eq("upstream not-found failover") {
         return ErrorCode::UpstreamNotFound;
     }
-    if normalized == "upstream non-success" {
+    if eq("upstream non-success") {
         return ErrorCode::UpstreamNonSuccess;
     }
-    if normalized == "no available account" {
+    if eq("no available account") {
         return ErrorCode::NoAvailableAccount;
     }
-    if normalized.starts_with("candidate resolve failed:") {
+    if starts_with("candidate resolve failed:") {
         return ErrorCode::CandidateResolveFailed;
     }
-    if normalized.starts_with("response write failed:") {
+    if starts_with("response write failed:") {
         return ErrorCode::ResponseWriteFailed;
     }
-    if normalized == "stream disconnected before completion"
-        || normalized == "网络抖动"
-        || normalized == "连接中断（可能是网络波动或客户端主动取消）"
+    if eq("stream disconnected before completion")
+        || eq("网络抖动")
+        || eq("连接中断（可能是网络波动或客户端主动取消）")
     {
         return ErrorCode::StreamInterrupted;
     }
-    if normalized.starts_with("upstream stream terminated unexpectedly")
-        || normalized.starts_with("upstream stream read failed: connection interrupted")
+    if starts_with("upstream stream terminated unexpectedly")
+        || starts_with("upstream stream read failed: connection interrupted")
     {
         return ErrorCode::StreamInterrupted;
     }
-    if normalized.starts_with("上游流中途中断")
-        || normalized.starts_with("上游流读取失败（连接中断）")
-        || normalized.contains("上游连接中断")
+    if starts_with("上游流中途中断")
+        || starts_with("上游流读取失败（连接中断）")
+        || contains("上游连接中断")
     {
         return ErrorCode::StreamInterrupted;
     }
-    if normalized.starts_with("upstream returned non-api content") {
+    if starts_with("upstream returned non-api content") {
         return ErrorCode::UpstreamNonSuccess;
     }
-    if normalized.starts_with("上游返回的不是正常接口数据")
-        || normalized.starts_with("上游返回了网页内容而不是接口数据")
+    if starts_with("上游返回的不是正常接口数据")
+        || starts_with("上游返回了网页内容而不是接口数据")
     {
         return ErrorCode::UpstreamNonSuccess;
     }
-    if normalized.contains("model_not_found")
-        || normalized.contains("model not found")
-        || normalized.contains("unsupported model")
-        || normalized.contains("not supported")
-        || normalized.contains("does not exist")
+    if contains("model_not_found")
+        || contains("model not found")
+        || contains("unsupported model")
+        || contains("not supported")
+        || contains("does not exist")
     {
         return ErrorCode::UpstreamNonSuccess;
     }
-    if normalized.starts_with("模型不支持") {
+    if starts_with("模型不支持") {
         return ErrorCode::UpstreamNonSuccess;
     }
-    if normalized.starts_with("invalid upstream ")
-        || (normalized.contains("serialize") && normalized.contains("json"))
-        || normalized.contains("sse bytes")
+    if starts_with("invalid upstream ")
+        || ((contains("serialize") || contains("serialized")) && contains("json"))
+        || contains("sse bytes")
     {
         return ErrorCode::ProtocolMappingError;
     }
-    if normalized == "invalid claude request json"
-        || normalized == "claude request body must be an object"
+    if eq("invalid claude request json")
+        || eq("claude request body must be an object")
+        || eq("invalid gemini request json")
+        || eq("gemini request body must be an object")
     {
         return ErrorCode::InvalidRequestPayload;
     }
@@ -285,6 +303,10 @@ mod tests {
             classify_message("claude request body must be an object"),
             ErrorCode::InvalidRequestPayload
         );
+        assert_eq!(
+            classify_message("Claude 请求体必须是对象(claude request body must be an object)"),
+            ErrorCode::InvalidRequestPayload
+        );
         assert_eq!(classify_message("上游请求超时"), ErrorCode::UpstreamTimeout);
         assert_eq!(
             classify_message("upstream request timed out"),
@@ -302,6 +324,10 @@ mod tests {
         assert_eq!(
             classify_message("连接中断（可能是网络波动或客户端主动取消）"),
             ErrorCode::StreamInterrupted
+        );
+        assert_eq!(
+            classify_message("无可用账号(no available account)"),
+            ErrorCode::NoAvailableAccount
         );
         assert_eq!(
             classify_message("code=model_not_found type=invalid_request_error The model 'gpt-5.4' does not exist"),

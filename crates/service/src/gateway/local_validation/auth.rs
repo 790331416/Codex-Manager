@@ -14,7 +14,12 @@ use crate::storage_helpers::{hash_platform_key, open_storage, StorageHandle};
 /// # 返回
 /// 返回函数执行结果
 pub(super) fn open_storage_or_error() -> Result<StorageHandle, super::LocalValidationError> {
-    open_storage().ok_or_else(|| super::LocalValidationError::new(500, "storage unavailable"))
+    open_storage().ok_or_else(|| {
+        super::LocalValidationError::new(
+            500,
+            crate::gateway::bilingual_error("存储不可用", "storage unavailable"),
+        )
+    })
 }
 
 /// 函数 `load_active_api_key`
@@ -36,7 +41,13 @@ pub(super) fn load_active_api_key(
 ) -> Result<ApiKey, super::LocalValidationError> {
     let key_hash = hash_platform_key(platform_key);
     let api_key = storage.find_api_key_by_hash(&key_hash).map_err(|err| {
-        super::LocalValidationError::new(500, format!("storage read failed: {err}"))
+        super::LocalValidationError::new(
+            500,
+            crate::gateway::bilingual_error(
+                "读取存储失败",
+                format!("storage read failed: {err}"),
+            ),
+        )
     })?;
 
     let Some(api_key) = api_key else {
@@ -61,7 +72,10 @@ pub(super) fn load_active_api_key(
                 api_key.id
             );
         }
-        return Err(super::LocalValidationError::new(403, "api key disabled"));
+        return Err(super::LocalValidationError::new(
+            403,
+            crate::gateway::bilingual_error("API Key 已禁用", "api key disabled"),
+        ));
     }
 
     Ok(api_key)

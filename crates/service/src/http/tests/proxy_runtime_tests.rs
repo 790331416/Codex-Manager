@@ -133,7 +133,7 @@ fn request_without_content_length_over_limit_returns_413() {
         .block_on(to_bytes(response.into_body(), usize::MAX))
         .expect("read body");
     let text = String::from_utf8(body.to_vec()).expect("utf8");
-    assert!(text.contains("request body too large: content-length>8"));
+    assert!(text.contains("请求体过大(request body too large: content-length>8)"));
 }
 
 #[test]

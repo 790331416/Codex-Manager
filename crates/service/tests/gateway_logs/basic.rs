@@ -1,6 +1,7 @@
 use super::*;
 
-const MISSING_AUTH_JSON_OPENAI_API_KEY_ERROR: &str = "配置错误：未配置auth.json的OPENAI_API_KEY";
+const MISSING_AUTH_JSON_OPENAI_API_KEY_ERROR: &str =
+    "配置错误：未配置auth.json的OPENAI_API_KEY(invalid api key)";
 
 /// 函数 `gateway_logs_invalid_api_key_error`
 ///

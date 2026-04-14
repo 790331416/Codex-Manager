@@ -40,7 +40,7 @@ fn estimate_input_tokens_uses_messages_and_system_text() {
 fn estimate_input_tokens_rejects_invalid_json() {
     let err = estimate_input_tokens_from_anthropic_messages(br#"{"messages":["#)
         .expect_err("should reject invalid json");
-    assert_eq!(err, "invalid claude request json");
+    assert_eq!(err, "Claude 请求 JSON 无效(invalid claude request json)");
 }
 
 /// 函数 `estimate_input_tokens_rejects_non_object_payload`
@@ -58,7 +58,10 @@ fn estimate_input_tokens_rejects_invalid_json() {
 fn estimate_input_tokens_rejects_non_object_payload() {
     let err = estimate_input_tokens_from_anthropic_messages(br#"["bad"]"#)
         .expect_err("should reject non-object payload");
-    assert_eq!(err, "claude request body must be an object");
+    assert_eq!(
+        err,
+        "Claude 请求体必须是对象(claude request body must be an object)"
+    );
 }
 
 #[test]
@@ -78,7 +81,7 @@ fn estimate_gemini_input_tokens_uses_contents_and_system_instruction() {
 fn estimate_gemini_input_tokens_rejects_invalid_json() {
     let err = estimate_input_tokens_from_gemini_request(br#"{"contents":["#)
         .expect_err("should reject invalid json");
-    assert_eq!(err, "invalid gemini request json");
+    assert_eq!(err, "Gemini 请求 JSON 无效(invalid gemini request json)");
 }
 
 #[test]

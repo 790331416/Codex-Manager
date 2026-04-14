@@ -14,7 +14,11 @@ use tiny_http::Response;
 /// 无
 #[test]
 fn terminal_text_response_sets_error_code_header() {
-    let response = terminal_text_response(503, "no available account", Some("trc_test_1"));
+    let response = terminal_text_response(
+        503,
+        "无可用账号(no available account)",
+        Some("trc_test_1"),
+    );
     let content_type = response
         .headers()
         .iter()

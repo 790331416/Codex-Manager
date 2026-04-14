@@ -43,10 +43,15 @@ fn should_retry_models_with_openai_fallback(err: &str) -> bool {
 /// # 返回
 /// 返回函数执行结果
 pub(crate) fn fetch_models_for_picker() -> Result<ModelsResponse, String> {
-    let storage = super::open_storage().ok_or_else(|| "storage unavailable".to_string())?;
+    let storage = super::open_storage().ok_or_else(|| {
+        crate::gateway::bilingual_error("存储不可用", "storage unavailable")
+    })?;
     let mut candidates = super::collect_gateway_candidates(&storage)?;
     if candidates.is_empty() {
-        return Err("no available account".to_string());
+        return Err(crate::gateway::bilingual_error(
+            "无可用账号",
+            "no available account",
+        ));
     }
 
     let upstream_base = super::resolve_upstream_base_url();

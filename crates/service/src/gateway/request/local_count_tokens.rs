@@ -46,10 +46,14 @@ fn accumulate_text_len(value: &Value) -> usize {
 /// # 返回
 /// 返回函数执行结果
 fn estimate_input_tokens_from_anthropic_messages(body: &[u8]) -> Result<u64, String> {
-    let payload: Value =
-        serde_json::from_slice(body).map_err(|_| "invalid claude request json".to_string())?;
+    let payload: Value = serde_json::from_slice(body).map_err(|_| {
+        crate::gateway::bilingual_error("Claude 请求 JSON 无效", "invalid claude request json")
+    })?;
     let Some(object) = payload.as_object() else {
-        return Err("claude request body must be an object".to_string());
+        return Err(crate::gateway::bilingual_error(
+            "Claude 请求体必须是对象",
+            "claude request body must be an object",
+        ));
     };
 
     let mut char_count = 0usize;
@@ -70,10 +74,14 @@ fn estimate_input_tokens_from_anthropic_messages(body: &[u8]) -> Result<u64, Str
 }
 
 fn estimate_input_tokens_from_gemini_request(body: &[u8]) -> Result<u64, String> {
-    let payload: Value =
-        serde_json::from_slice(body).map_err(|_| "invalid gemini request json".to_string())?;
+    let payload: Value = serde_json::from_slice(body).map_err(|_| {
+        crate::gateway::bilingual_error("Gemini 请求 JSON 无效", "invalid gemini request json")
+    })?;
     let Some(root) = payload.as_object() else {
-        return Err("gemini request body must be an object".to_string());
+        return Err(crate::gateway::bilingual_error(
+            "Gemini 请求体必须是对象",
+            "gemini request body must be an object",
+        ));
     };
     let object = root
         .get("request")

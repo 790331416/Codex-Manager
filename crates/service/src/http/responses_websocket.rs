@@ -80,6 +80,36 @@ impl WsSessionError {
     fn service_unavailable(message: impl Into<String>) -> Self {
         Self::new(503, RESPONSES_WS_ERROR_CODE, message)
     }
+
+    fn bad_request_bilingual(
+        chinese_description: impl AsRef<str>,
+        english_raw_message: impl AsRef<str>,
+    ) -> Self {
+        Self::bad_request(crate::gateway::bilingual_error(
+            chinese_description,
+            english_raw_message,
+        ))
+    }
+
+    fn bad_gateway_bilingual(
+        chinese_description: impl AsRef<str>,
+        english_raw_message: impl AsRef<str>,
+    ) -> Self {
+        Self::bad_gateway(crate::gateway::bilingual_error(
+            chinese_description,
+            english_raw_message,
+        ))
+    }
+
+    fn service_unavailable_bilingual(
+        chinese_description: impl AsRef<str>,
+        english_raw_message: impl AsRef<str>,
+    ) -> Self {
+        Self::service_unavailable(crate::gateway::bilingual_error(
+            chinese_description,
+            english_raw_message,
+        ))
+    }
 }
 
 /// 函数 `is_websocket_upgrade_request`
@@ -133,7 +163,10 @@ pub(super) async fn upgrade_responses_websocket(request: HttpRequest<Body>) -> R
         Err(err) => {
             return text_error_response(
                 StatusCode::BAD_REQUEST,
-                format!("websocket upgrade rejected: {err}"),
+                crate::gateway::bilingual_error(
+                    "WebSocket 升级失败",
+                    format!("websocket upgrade rejected: {err}"),
+                ),
             );
         }
     };
@@ -183,13 +216,17 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
             Some(upstream.upstream_url.as_str()),
             502,
             crate::gateway::RequestLogUsage::default(),
-            Some(format!("send first upstream websocket frame failed: {err}")),
+            Some(crate::gateway::bilingual_error(
+                "发送上游 WebSocket 首帧失败",
+                format!("send first upstream websocket frame failed: {err}"),
+            )),
         );
         send_ws_error_and_close(
             &mut socket,
-            WsSessionError::bad_gateway(format!(
-                "send first upstream websocket frame failed: {err}"
-            )),
+            WsSessionError::bad_gateway_bilingual(
+                "发送上游 WebSocket 首帧失败",
+                format!("send first upstream websocket frame failed: {err}"),
+            ),
         )
         .await;
         return;
@@ -208,7 +245,10 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                             Some(upstream.upstream_url.as_str()),
                             499,
                             crate::gateway::RequestLogUsage::default(),
-                            Some("client websocket closed before completion".to_string()),
+                            Some(crate::gateway::bilingual_error(
+                                "客户端 WebSocket 在完成前关闭",
+                                "client websocket closed before completion",
+                            )),
                         );
                     }
                     let _ = upstream.stream.close(None).await;
@@ -226,7 +266,10 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                                         Some(upstream.upstream_url.as_str()),
                                         499,
                                         crate::gateway::RequestLogUsage::default(),
-                                        Some("websocket request superseded before completion".to_string()),
+                                        Some(crate::gateway::bilingual_error(
+                                            "WebSocket 请求在完成前被覆盖",
+                                            "websocket request superseded before completion",
+                                        )),
                                     );
                                 }
                                 let current_pending = begin_ws_request_log(&context, &prepared);
@@ -238,11 +281,17 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                                         Some(upstream.upstream_url.as_str()),
                                         502,
                                         crate::gateway::RequestLogUsage::default(),
-                                        Some(format!("send upstream websocket frame failed: {err}")),
+                                        Some(crate::gateway::bilingual_error(
+                                            "发送上游 WebSocket 帧失败",
+                                            format!("send upstream websocket frame failed: {err}"),
+                                        )),
                                     );
                                     send_ws_error_and_close(
                                         &mut socket,
-                                        WsSessionError::bad_gateway(format!("send upstream websocket frame failed: {err}")),
+                                        WsSessionError::bad_gateway_bilingual(
+                                            "发送上游 WebSocket 帧失败",
+                                            format!("send upstream websocket frame failed: {err}"),
+                                        ),
                                     ).await;
                                     let _ = upstream.stream.close(None).await;
                                     break;
@@ -260,7 +309,10 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                         if let Err(err) = upstream.stream.send(UpstreamMessage::Binary(bytes)).await {
                             send_ws_error_and_close(
                                 &mut socket,
-                                WsSessionError::bad_gateway(format!("send upstream websocket binary failed: {err}")),
+                                WsSessionError::bad_gateway_bilingual(
+                                    "发送上游 WebSocket 二进制消息失败",
+                                    format!("send upstream websocket binary failed: {err}"),
+                                ),
                             ).await;
                             break;
                         }
@@ -269,7 +321,10 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                         if let Err(err) = upstream.stream.send(UpstreamMessage::Ping(payload)).await {
                             send_ws_error_and_close(
                                 &mut socket,
-                                WsSessionError::bad_gateway(format!("forward websocket ping failed: {err}")),
+                                WsSessionError::bad_gateway_bilingual(
+                                    "转发 WebSocket Ping 失败",
+                                    format!("forward websocket ping failed: {err}"),
+                                ),
                             ).await;
                             break;
                         }
@@ -278,7 +333,10 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                         if let Err(err) = upstream.stream.send(UpstreamMessage::Pong(payload)).await {
                             send_ws_error_and_close(
                                 &mut socket,
-                                WsSessionError::bad_gateway(format!("forward websocket pong failed: {err}")),
+                                WsSessionError::bad_gateway_bilingual(
+                                    "转发 WebSocket Pong 失败",
+                                    format!("forward websocket pong failed: {err}"),
+                                ),
                             ).await;
                             break;
                         }
@@ -292,7 +350,10 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                                 Some(upstream.upstream_url.as_str()),
                                 499,
                                 crate::gateway::RequestLogUsage::default(),
-                                Some("client websocket closed before completion".to_string()),
+                                Some(crate::gateway::bilingual_error(
+                                    "客户端 WebSocket 在完成前关闭",
+                                    "client websocket closed before completion",
+                                )),
                             );
                         }
                         let _ = upstream.stream.close(None).await;
@@ -307,12 +368,18 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                                 Some(upstream.upstream_url.as_str()),
                                 400,
                                 crate::gateway::RequestLogUsage::default(),
-                                Some(format!("receive client websocket frame failed: {err}")),
+                                Some(crate::gateway::bilingual_error(
+                                    "接收客户端 WebSocket 帧失败",
+                                    format!("receive client websocket frame failed: {err}"),
+                                )),
                             );
                         }
                         send_ws_error_and_close(
                             &mut socket,
-                            WsSessionError::bad_request(format!("receive client websocket frame failed: {err}")),
+                            WsSessionError::bad_request_bilingual(
+                                "接收客户端 WebSocket 帧失败",
+                                format!("receive client websocket frame failed: {err}"),
+                            ),
                         ).await;
                         let _ = upstream.stream.close(None).await;
                         break;
@@ -329,7 +396,10 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                             Some(upstream.upstream_url.as_str()),
                             502,
                             crate::gateway::RequestLogUsage::default(),
-                            Some("upstream websocket closed before completion".to_string()),
+                            Some(crate::gateway::bilingual_error(
+                                "上游 WebSocket 在完成前关闭",
+                                "upstream websocket closed before completion",
+                            )),
                         );
                     }
                     let _ = socket.close().await;
@@ -394,7 +464,10 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                                 Some(upstream.upstream_url.as_str()),
                                 502,
                                 crate::gateway::RequestLogUsage::default(),
-                                Some("upstream websocket closed before completion".to_string()),
+                                Some(crate::gateway::bilingual_error(
+                                    "上游 WebSocket 在完成前关闭",
+                                    "upstream websocket closed before completion",
+                                )),
                             );
                         }
                         let _ = socket.close().await;
@@ -410,12 +483,18 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                                 Some(upstream.upstream_url.as_str()),
                                 502,
                                 crate::gateway::RequestLogUsage::default(),
-                                Some(format!("receive upstream websocket frame failed: {err}")),
+                                Some(crate::gateway::bilingual_error(
+                                    "接收上游 WebSocket 帧失败",
+                                    format!("receive upstream websocket frame failed: {err}"),
+                                )),
                             );
                         }
                         send_ws_error_and_close(
                             &mut socket,
-                            WsSessionError::bad_gateway(format!("receive upstream websocket frame failed: {err}")),
+                            WsSessionError::bad_gateway_bilingual(
+                                "接收上游 WebSocket 帧失败",
+                                format!("receive upstream websocket frame failed: {err}"),
+                            ),
                         ).await;
                         break;
                     }
@@ -430,12 +509,15 @@ fn authorize_websocket_request(headers: &HeaderMap) -> Result<WsRequestContext, 
     let Some(platform_key) = incoming_headers.platform_key() else {
         return Err(text_error_response(
             StatusCode::UNAUTHORIZED,
-            "missing platform api key",
+            crate::gateway::bilingual_error("缺少平台 API Key", "missing platform api key"),
         ));
     };
 
     let storage = open_storage().ok_or_else(|| {
-        text_error_response(StatusCode::INTERNAL_SERVER_ERROR, "storage unavailable")
+        text_error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            crate::gateway::bilingual_error("存储不可用", "storage unavailable"),
+        )
     })?;
     let key_hash = hash_platform_key(platform_key);
     let api_key = storage
@@ -443,7 +525,10 @@ fn authorize_websocket_request(headers: &HeaderMap) -> Result<WsRequestContext, 
         .map_err(|err| {
             text_error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("storage read failed: {err}"),
+                crate::gateway::bilingual_error(
+                    "读取存储失败",
+                    format!("storage read failed: {err}"),
+                ),
             )
         })?
         .ok_or_else(|| {
@@ -456,12 +541,15 @@ fn authorize_websocket_request(headers: &HeaderMap) -> Result<WsRequestContext, 
     if api_key.status != "active" {
         return Err(text_error_response(
             StatusCode::FORBIDDEN,
-            "api key disabled",
+            crate::gateway::bilingual_error("API Key 已禁用", "api key disabled"),
         ));
     }
     if !crate::gateway::gateway_supports_official_responses_websocket(&api_key) {
         return Err(upgrade_required_response(
-            "responses websocket is only available for official Codex upstream",
+            crate::gateway::bilingual_error(
+                "Responses WebSocket 仅支持官方 Codex 上游",
+                "responses websocket is only available for official Codex upstream",
+            ),
         ));
     }
 
@@ -488,14 +576,16 @@ async fn receive_initial_request(socket: &mut WebSocket) -> Result<Option<String
             Ok(Message::Pong(_)) => {}
             Ok(Message::Close(_)) => return Ok(None),
             Ok(Message::Binary(_)) => {
-                return Err(WsSessionError::bad_request(
+                return Err(WsSessionError::bad_request_bilingual(
+                    "首个 WebSocket 帧必须是 response.create 文本帧",
                     "initial websocket frame must be a response.create text frame",
                 ));
             }
             Err(err) => {
-                return Err(WsSessionError::bad_request(format!(
-                    "receive initial websocket frame failed: {err}"
-                )));
+                return Err(WsSessionError::bad_request_bilingual(
+                    "接收首个 WebSocket 帧失败",
+                    format!("receive initial websocket frame failed: {err}"),
+                ));
             }
         }
     }
@@ -506,10 +596,14 @@ fn rewrite_client_frame(
     context: &WsRequestContext,
 ) -> Result<PreparedClientFrame, WsSessionError> {
     let mut payload = serde_json::from_str::<Value>(text).map_err(|err| {
-        WsSessionError::bad_request(format!("invalid websocket json payload: {err}"))
+        WsSessionError::bad_request_bilingual(
+            "WebSocket JSON 载荷无效",
+            format!("invalid websocket json payload: {err}"),
+        )
     })?;
     let Some(mut object) = payload.as_object_mut().cloned() else {
-        return Err(WsSessionError::bad_request(
+        return Err(WsSessionError::bad_request_bilingual(
+            "WebSocket 载荷必须是 JSON 对象",
             "websocket payload must be a JSON object",
         ));
     };
@@ -517,14 +611,16 @@ fn rewrite_client_frame(
         .remove("type")
         .and_then(|value| value.as_str().map(str::to_string))
     else {
-        return Err(WsSessionError::bad_request(
+        return Err(WsSessionError::bad_request_bilingual(
+            "WebSocket 载荷缺少 type=response.create",
             "websocket payload missing type=response.create",
         ));
     };
     if message_type != "response.create" {
-        return Err(WsSessionError::bad_request(format!(
-            "unsupported websocket message type: {message_type}"
-        )));
+        return Err(WsSessionError::bad_request_bilingual(
+            "不支持的 WebSocket 消息类型",
+            format!("unsupported websocket message type: {message_type}"),
+        ));
     }
     let service_tier_diagnostic =
         crate::gateway::inspect_service_tier_value(object.get("service_tier"));
@@ -539,15 +635,22 @@ fn rewrite_client_frame(
     let rewritten_body = crate::gateway::gateway_rewrite_ws_responses_body(
         RESPONSES_PATH,
         serde_json::to_vec(&Value::Object(object)).map_err(|err| {
-            WsSessionError::bad_request(format!("serialize websocket request failed: {err}"))
+            WsSessionError::bad_request_bilingual(
+                "序列化 WebSocket 请求失败",
+                format!("serialize websocket request failed: {err}"),
+            )
         })?,
         &context.api_key,
     );
     let rewritten_value = serde_json::from_slice::<Value>(&rewritten_body).map_err(|err| {
-        WsSessionError::bad_request(format!("parse rewritten websocket request failed: {err}"))
+        WsSessionError::bad_request_bilingual(
+            "解析改写后的 WebSocket 请求失败",
+            format!("parse rewritten websocket request failed: {err}"),
+        )
     })?;
     let Some(mut rewritten_object) = rewritten_value.as_object().cloned() else {
-        return Err(WsSessionError::bad_request(
+        return Err(WsSessionError::bad_request_bilingual(
+            "改写后的 WebSocket 载荷必须仍为 JSON 对象",
             "rewritten websocket payload must stay a JSON object",
         ));
     };
@@ -586,7 +689,10 @@ fn rewrite_client_frame(
         raw_service_tier: service_tier_diagnostic.raw_value,
         has_service_tier_field: service_tier_diagnostic.has_field,
         text: serde_json::to_string(&Value::Object(rewritten_object)).map_err(|err| {
-            WsSessionError::bad_request(format!("serialize websocket request failed: {err}"))
+            WsSessionError::bad_request_bilingual(
+                "序列化 WebSocket 请求失败",
+                format!("serialize websocket request failed: {err}"),
+            )
         })?,
     })
 }
@@ -624,12 +730,14 @@ async fn connect_upstream_websocket(
     context: &WsRequestContext,
     model: Option<&str>,
 ) -> Result<ConnectedUpstreamWebsocket, WsSessionError> {
-    let storage =
-        open_storage().ok_or_else(|| WsSessionError::service_unavailable("storage unavailable"))?;
+    let storage = open_storage().ok_or_else(|| {
+        WsSessionError::service_unavailable_bilingual("存储不可用", "storage unavailable")
+    })?;
     let candidates =
         crate::gateway::gateway_collect_routed_candidates(&storage, &context.api_key.id, model)?;
     if candidates.is_empty() {
-        return Err(WsSessionError::service_unavailable(
+        return Err(WsSessionError::service_unavailable_bilingual(
+            "没有可用的上游账号",
             "no available upstream accounts",
         ));
     }
@@ -676,9 +784,10 @@ async fn connect_upstream_websocket(
         }
     }
 
-    Err(WsSessionError::bad_gateway(last_error.unwrap_or_else(
-        || "connect upstream websocket failed".to_string(),
-    )))
+    Err(WsSessionError::bad_gateway_bilingual(
+        "连接上游 WebSocket 失败",
+        last_error.unwrap_or_else(|| "connect upstream websocket failed".to_string()),
+    ))
 }
 
 async fn resolve_bearer_token_for_websocket(
@@ -686,7 +795,9 @@ async fn resolve_bearer_token_for_websocket(
     token: codexmanager_core::storage::Token,
 ) -> Result<String, String> {
     let join_result = tokio::task::spawn_blocking(move || {
-        let storage = open_storage().ok_or_else(|| "storage unavailable".to_string())?;
+        let storage = open_storage().ok_or_else(|| {
+            crate::gateway::bilingual_error("存储不可用", "storage unavailable")
+        })?;
         let mut token = token;
         crate::gateway::gateway_resolve_openai_bearer_token(&storage, &account, &mut token)
     })
@@ -694,7 +805,10 @@ async fn resolve_bearer_token_for_websocket(
 
     match join_result {
         Ok(result) => result,
-        Err(err) => Err(format!("bearer token task join failed: {err}")),
+        Err(err) => Err(crate::gateway::bilingual_error(
+            "Bearer Token 任务合并失败",
+            format!("bearer token task join failed: {err}"),
+        )),
     }
 }
 
@@ -702,7 +816,10 @@ fn build_upstream_websocket_url(upstream_base: &str) -> Result<String, WsSession
     let (target_url, _) =
         crate::gateway::gateway_compute_upstream_url(upstream_base, RESPONSES_PATH);
     let mut url = url::Url::parse(target_url.as_str()).map_err(|err| {
-        WsSessionError::bad_gateway(format!("invalid upstream websocket url: {err}"))
+        WsSessionError::bad_gateway_bilingual(
+            "上游 WebSocket URL 无效",
+            format!("invalid upstream websocket url: {err}"),
+        )
     })?;
     match url.scheme() {
         "http" => {
@@ -713,9 +830,10 @@ fn build_upstream_websocket_url(upstream_base: &str) -> Result<String, WsSession
         }
         "ws" | "wss" => {}
         other => {
-            return Err(WsSessionError::bad_gateway(format!(
-                "unsupported upstream websocket scheme: {other}"
-            )));
+            return Err(WsSessionError::bad_gateway_bilingual(
+                "不支持的上游 WebSocket 协议",
+                format!("unsupported upstream websocket scheme: {other}"),
+            ));
         }
     }
     Ok(url.to_string())
@@ -728,7 +846,10 @@ fn build_upstream_websocket_request(
     context: &WsRequestContext,
 ) -> Result<tokio_tungstenite::tungstenite::handshake::client::Request, WsSessionError> {
     let mut request = ws_url.into_client_request().map_err(|err| {
-        WsSessionError::bad_gateway(format!("build upstream websocket request failed: {err}"))
+        WsSessionError::bad_gateway_bilingual(
+            "构建上游 WebSocket 请求失败",
+            format!("build upstream websocket request failed: {err}"),
+        )
     })?;
     let headers = request.headers_mut();
     insert_header(headers, "Authorization", &format!("Bearer {bearer_token}"))?;
@@ -1130,12 +1251,16 @@ fn extract_ws_error_message(value: &Value) -> Option<String> {
 
 fn insert_header(headers: &mut HeaderMap, name: &str, value: &str) -> Result<(), WsSessionError> {
     let header_name = header::HeaderName::from_bytes(name.as_bytes()).map_err(|err| {
-        WsSessionError::bad_gateway(format!(
-            "invalid upstream websocket header name {name}: {err}"
-        ))
+        WsSessionError::bad_gateway_bilingual(
+            "上游 WebSocket 请求头名称无效",
+            format!("invalid upstream websocket header name {name}: {err}"),
+        )
     })?;
     let header_value = HeaderValue::from_str(value).map_err(|err| {
-        WsSessionError::bad_gateway(format!("invalid upstream websocket header {name}: {err}"))
+        WsSessionError::bad_gateway_bilingual(
+            "上游 WebSocket 请求头值无效",
+            format!("invalid upstream websocket header {name}: {err}"),
+        )
     })?;
     headers.insert(header_name, header_value);
     Ok(())

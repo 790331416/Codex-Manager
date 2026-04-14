@@ -1,7 +1,18 @@
 use crate::storage_helpers::open_storage;
 
 pub(crate) const MISSING_AUTH_JSON_OPENAI_API_KEY_ERROR: &str =
-    "配置错误：未配置auth.json的OPENAI_API_KEY";
+    "配置错误：未配置auth.json的OPENAI_API_KEY(invalid api key)";
+
+pub(crate) fn bilingual_error(
+    chinese_description: impl AsRef<str>,
+    english_raw_message: impl AsRef<str>,
+) -> String {
+    format!(
+        "{}({})",
+        chinese_description.as_ref(),
+        english_raw_message.as_ref()
+    )
+}
 
 mod anchor_fingerprint;
 mod concurrency;

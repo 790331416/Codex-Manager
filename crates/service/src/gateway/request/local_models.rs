@@ -102,7 +102,10 @@ pub(super) fn maybe_respond_local_models(
     let cached = match read_cached_models_response(storage) {
         Ok(models) => models,
         Err(err) => {
-            let message = format!("model options cache read failed: {err}");
+            let message = crate::gateway::bilingual_error(
+                "读取模型缓存失败",
+                format!("model options cache read failed: {err}"),
+            );
             super::local_response::respond_local_terminal_error(request, &context, 503, message)?;
             return Ok(None);
         }
@@ -126,12 +129,18 @@ pub(super) fn maybe_respond_local_models(
                 merged
             }
             Ok(_) => {
-                let message = "models refresh returned empty catalog".to_string();
+                let message = crate::gateway::bilingual_error(
+                    "模型刷新后返回空目录",
+                    "models refresh returned empty catalog",
+                );
                 super::local_response::respond_local_terminal_error(request, &context, 503, message)?;
                 return Ok(None);
             }
             Err(err) => {
-                let message = format!("models refresh failed: {err}");
+                let message = crate::gateway::bilingual_error(
+                    "模型刷新失败",
+                    format!("models refresh failed: {err}"),
+                );
                 super::local_response::respond_local_terminal_error(request, &context, 503, message)?;
                 return Ok(None);
             }
