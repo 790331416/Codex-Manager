@@ -5,6 +5,15 @@ It follows Keep a Changelog with a lightweight adaptation for this repository.
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-04-15
+
+### Fixed
+- Restored the native Codex thread-anchor priority for resume flows: when a request already carries `conversation_id` or `x-codex-turn-state`, the gateway no longer lets request-body `prompt_cache_key` take over, reducing compatibility-mode regressions in native Codex context continuation.
+- Added targeted regression coverage for native anchors, explicit `prompt_cache_key`, conflicting anchors, and Anthropic-native paths so compatibility fields cannot silently outrank native Codex semantics again.
+
+### Changed
+- Bumped the release version to `0.2.3` and synchronized the workspace, frontend package, Tauri desktop metadata, and lockfiles.
+
 ## [0.2.0] - 2026-04-12
 
 ### Added
@@ -230,7 +239,8 @@ It follows Keep a Changelog with a lightweight adaptation for this repository.
 ### Changed
 - The operation area of ​​the account management page is integrated into a single "Account Operation" drop-down menu, replacing the stack of multiple buttons on the right, making the interface more concise.
 
-[Unreleased]: https://github.com/qxcnm/Codex-Manager/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/qxcnm/Codex-Manager/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/qxcnm/Codex-Manager/compare/v0.2.0...v0.2.3
 [0.2.0]: https://github.com/qxcnm/Codex-Manager/releases/tag/v0.2.0
 [0.1.19]: https://github.com/qxcnm/Codex-Manager/releases/tag/v0.1.19
 [0.1.17]: https://github.com/qxcnm/Codex-Manager/releases/tag/v0.1.17

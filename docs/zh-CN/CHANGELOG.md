@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-04-15
+
+### Fixed
+- 修复原生 Codex 在线程续接场景下的锚点优先级回归：当请求已携带 `conversation_id` 或 `x-codex-turn-state` 时，不再让请求体里的 `prompt_cache_key` 抢占主导权，减少兼容模式下 resume / 上下文续接异常。
+- 补齐原生锚点、显式 `prompt_cache_key`、冲突锚点与 Anthropic 原生链路的专项回归测试，避免后续再次把兼容层字段提升到高于原生 Codex 语义的优先级。
+
+### Changed
+- 发布版本提升到 `0.2.3`，同步更新 workspace、前端包、Tauri 桌面端与版本锁文件。
+
 ## [0.2.0] - 2026-04-12
 
 ### Added
@@ -230,7 +239,8 @@
 ### Changed
 - 账号管理页操作区整合为单一“账号操作”下拉菜单，替代右侧多按钮堆叠，界面更简洁。
 
-[Unreleased]: https://github.com/qxcnm/Codex-Manager/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/qxcnm/Codex-Manager/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/qxcnm/Codex-Manager/compare/v0.2.0...v0.2.3
 [0.2.0]: https://github.com/qxcnm/Codex-Manager/releases/tag/v0.2.0
 [0.1.19]: https://github.com/qxcnm/Codex-Manager/releases/tag/v0.1.19
 [0.1.17]: https://github.com/qxcnm/Codex-Manager/releases/tag/v0.1.17
