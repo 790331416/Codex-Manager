@@ -257,7 +257,7 @@ fn persist_warmup_observability(
         transparent_mode: Some(false),
         enhanced_mode: Some(false),
         model: Some(model_slug.to_string()),
-        upstream_url: Some(append_client_version_query(WARMUP_UPSTREAM_URL)),
+        upstream_url: Some(WARMUP_UPSTREAM_URL.to_string()),
         status_code: Some(status_code),
         duration_ms: Some(duration_ms.max(0)),
         error: error.map(str::to_string),
@@ -364,9 +364,8 @@ fn send_warmup_request(
     });
 
     let headers = build_warmup_headers(account, token.access_token.as_str())?;
-    let target_url = append_client_version_query(WARMUP_UPSTREAM_URL);
     let response = client
-        .post(target_url)
+        .post(WARMUP_UPSTREAM_URL)
         .headers(headers)
         .json(&body)
         .send()
@@ -389,8 +388,8 @@ fn send_warmup_request(
 #[cfg(test)]
 mod tests {
     use super::{
-        resolve_target_accounts, resolve_warmup_model_slug, should_retry_warmup_with_refresh,
-        DEFAULT_WARMUP_MODEL,
+        build_warmup_headers, resolve_target_accounts, resolve_warmup_model_slug,
+        should_retry_warmup_with_refresh, DEFAULT_WARMUP_MODEL,
     };
     use crate::apikey_models::save_managed_model_catalog_with_storage;
     use codexmanager_core::rpc::types::{
@@ -520,6 +519,32 @@ mod tests {
         assert_eq!(selected_targets.len(), 1);
         assert_eq!(selected_targets[0].id, "acc-active");
     }
+
+    #[test]
+    fn build_warmup_headers_keeps_version_in_header_only() {
+        let account = Account {
+            id: "acc-1".to_string(),
+            label: "acc-1".to_string(),
+            issuer: "issuer".to_string(),
+            chatgpt_account_id: None,
+            workspace_id: None,
+            group_name: None,
+            sort: 0,
+            status: "active".to_string(),
+            created_at: 0,
+            updated_at: 0,
+        };
+
+        let headers = build_warmup_headers(&account, "bearer-token").expect("build warmup headers");
+
+        assert_eq!(
+            headers
+                .get("version")
+                .and_then(|value| value.to_str().ok()),
+            Some(crate::gateway::current_codex_user_agent_version().as_str())
+        );
+        assert!(headers.get("client_version").is_none());
+    }
 }
 
 fn build_warmup_headers(account: &Account, bearer: &str) -> Result<HeaderMap, String> {
@@ -583,17 +608,6 @@ fn build_warmup_headers(account: &Account, bearer: &str) -> Result<HeaderMap, St
     }
 
     Ok(headers)
-}
-
-fn append_client_version_query(url: &str) -> String {
-    if url.contains("client_version=") {
-        return url.to_string();
-    }
-    let separator = if url.contains('?') { '&' } else { '?' };
-    format!(
-        "{url}{separator}client_version={}",
-        crate::gateway::current_codex_user_agent_version()
-    )
 }
 
 fn header_value(value: &str) -> Result<HeaderValue, String> {
