@@ -135,7 +135,23 @@ impl CandidateExecutionState {
         self.rewritten_bodies
             .entry(cache_key)
             .or_insert_with(|| {
-                Bytes::from(
+                let has_local_thread_anchor = setup.has_sticky_fallback_session
+                    || setup.has_sticky_fallback_conversation
+                    || setup.conversation_routing.is_some();
+                let should_force_prompt_cache_key =
+                    effective_prompt_cache_key.is_some() && has_local_thread_anchor;
+                let rewritten = if should_force_prompt_cache_key {
+                    super::super::super::apply_request_overrides_with_service_tier_and_forced_prompt_cache_key_scope(
+                        path,
+                        body.to_vec(),
+                        model_override,
+                        None,
+                        None,
+                        Some(setup.upstream_base.as_str()),
+                        effective_prompt_cache_key,
+                        false,
+                    )
+                } else {
                     super::super::super::apply_request_overrides_with_service_tier_and_prompt_cache_key_scope(
                         path,
                         body.to_vec(),
@@ -145,8 +161,9 @@ impl CandidateExecutionState {
                         Some(setup.upstream_base.as_str()),
                         effective_prompt_cache_key,
                         false,
-                    ),
-                )
+                    )
+                };
+                Bytes::from(rewritten)
             })
             .clone()
     }
@@ -253,33 +270,6 @@ mod tests {
     use bytes::Bytes;
     use codexmanager_core::storage::Account;
 
-    struct RuntimeEnvGuard {
-        name: &'static str,
-        previous_value: Option<String>,
-    }
-
-    impl RuntimeEnvGuard {
-        fn set(name: &'static str, value: &str) -> Self {
-            let previous_value = std::env::var(name).ok();
-            std::env::set_var(name, value);
-            crate::gateway::reload_runtime_config_from_env();
-            Self {
-                name,
-                previous_value,
-            }
-        }
-    }
-
-    impl Drop for RuntimeEnvGuard {
-        fn drop(&mut self) {
-            match self.previous_value.as_deref() {
-                Some(value) => std::env::set_var(self.name, value),
-                None => std::env::remove_var(self.name),
-            }
-            crate::gateway::reload_runtime_config_from_env();
-        }
-    }
-
     fn sample_setup() -> super::super::request_setup::UpstreamRequestSetup {
         super::super::request_setup::UpstreamRequestSetup {
             upstream_base: "https://chatgpt.com/backend-api/codex".to_string(),
@@ -337,9 +327,8 @@ mod tests {
     }
 
     #[test]
-    fn body_for_attempt_does_not_apply_enhanced_rewrite_to_native_codex_retry() {
+    fn body_for_attempt_keeps_native_codex_retry_shape() {
         let _guard = crate::test_env_guard();
-        let _mode_guard = RuntimeEnvGuard::set("CODEXMANAGER_GATEWAY_MODE", "enhanced");
         let mut state = CandidateExecutionState::default();
         let body = Bytes::from_static(
             br#"{"model":"gpt-5.4","input":"hello","stream":false,"store":true}"#,
@@ -370,6 +359,49 @@ mod tests {
             Some(true)
         );
         assert!(value.get("prompt_cache_key").is_none());
+        assert!(value.get("instructions").is_none());
+        assert!(value.get("tool_choice").is_none());
+        assert!(value.get("include").is_none());
+    }
+
+    #[test]
+    fn body_for_attempt_injects_local_thread_anchor_without_compat_shape() {
+        let mut state = CandidateExecutionState::default();
+        let body = Bytes::from_static(
+            br#"{"model":"gpt-5.4","input":"hello","stream":false,"store":true}"#,
+        );
+        let mut setup = sample_setup();
+        setup.has_sticky_fallback_conversation = true;
+
+        let actual = state.body_for_attempt(
+            "/v1/responses",
+            &body,
+            false,
+            &setup,
+            Some("gpt-5.2"),
+            Some("thread-2"),
+        );
+        let value: serde_json::Value =
+            serde_json::from_slice(actual.as_ref()).expect("parse rewritten body");
+
+        assert_eq!(
+            value.get("model").and_then(serde_json::Value::as_str),
+            Some("gpt-5.2")
+        );
+        assert_eq!(
+            value
+                .get("prompt_cache_key")
+                .and_then(serde_json::Value::as_str),
+            Some("thread-2")
+        );
+        assert_eq!(
+            value.get("stream").and_then(serde_json::Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(
+            value.get("store").and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
         assert!(value.get("instructions").is_none());
         assert!(value.get("tool_choice").is_none());
         assert!(value.get("include").is_none());

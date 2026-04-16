@@ -1,5 +1,4 @@
 import type { UpdateCheckResult } from "@/lib/api/app-updates";
-import type { GatewayMode } from "@/lib/gateway-mode";
 import type {
   AppSettings,
   BackgroundTaskSettings,
@@ -84,18 +83,6 @@ export const ROUTE_STRATEGY_LABELS: Record<string, string> = {
 export const SERVICE_LISTEN_MODE_LABELS: Record<string, string> = {
   loopback: "仅本机 (localhost)",
   all_interfaces: "全部网卡 (0.0.0.0)",
-};
-
-export const GATEWAY_MODE_LABELS: Record<GatewayMode, string> = {
-  transparent: "透传模式",
-  enhanced: "强兼容模式",
-};
-
-export const GATEWAY_MODE_HINTS: Record<GatewayMode, string> = {
-  transparent:
-    "尽量保持原始 Codex 请求与响应形态；原生 /v1/responses 只走最小改写主链，兼容协议也只做必要适配。",
-  enhanced:
-    "仅在非原生兼容协议进入前置适配层时启用额外兼容处理；不会再改写原生 /v1/responses 请求。",
 };
 
 export const RESIDENCY_REQUIREMENT_LABELS: Record<string, string> = {

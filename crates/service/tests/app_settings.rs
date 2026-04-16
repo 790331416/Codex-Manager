@@ -279,6 +279,29 @@ fn sync_runtime_settings_from_storage_preserves_explicit_process_env_over_persis
     });
 }
 
+#[test]
+fn app_settings_gateway_mode_is_no_longer_a_persisted_runtime_setting() {
+    with_temp_db(|db_path| {
+        let storage = Storage::open(db_path).expect("open storage");
+        storage
+            .set_app_setting("gateway.mode", "enhanced", now_ts())
+            .expect("save legacy gateway mode");
+        drop(storage);
+
+        codexmanager_service::sync_runtime_settings_from_storage();
+
+        let snapshot = codexmanager_service::app_settings_set(Some(&json!({
+            "gatewayMode": "enhanced"
+        })))
+        .expect("legacy gatewayMode patch should be ignored");
+
+        assert!(
+            snapshot.get("gatewayMode").is_none(),
+            "app settings snapshot must not expose gatewayMode as a product setting"
+        );
+    });
+}
+
 /// 函数 `app_settings_set_persists_snapshot_and_password_hash`
 ///
 /// 作者: gaohongshun

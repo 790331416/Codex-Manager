@@ -38,9 +38,6 @@ export interface AppSettings {
   serviceListenModeOptions: string[];
   routeStrategy: string;
   routeStrategyOptions: string[];
-  gatewayMode: string;
-  gatewayModeDefault: string;
-  gatewayModeSource: string;
   freeAccountMaxModel: string;
   freeAccountMaxModelOptions: string[];
   modelForwardRules: string;

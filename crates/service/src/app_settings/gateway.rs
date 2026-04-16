@@ -28,8 +28,7 @@ use super::{
     normalize_optional_text, save_persisted_app_setting, save_persisted_bool_setting,
     APP_SETTING_GATEWAY_ACCOUNT_MAX_INFLIGHT_KEY, APP_SETTING_GATEWAY_BACKGROUND_TASKS_KEY,
     APP_SETTING_GATEWAY_FREE_ACCOUNT_MAX_MODEL_KEY, APP_SETTING_GATEWAY_MODEL_FORWARD_RULES_KEY,
-    APP_SETTING_GATEWAY_MODE_KEY, APP_SETTING_GATEWAY_ORIGINATOR_KEY,
-    APP_SETTING_GATEWAY_REQUEST_COMPRESSION_ENABLED_KEY,
+    APP_SETTING_GATEWAY_ORIGINATOR_KEY, APP_SETTING_GATEWAY_REQUEST_COMPRESSION_ENABLED_KEY,
     APP_SETTING_GATEWAY_RESIDENCY_REQUIREMENT_KEY, APP_SETTING_GATEWAY_ROUTE_STRATEGY_KEY,
     APP_SETTING_GATEWAY_SSE_KEEPALIVE_INTERVAL_MS_KEY, APP_SETTING_GATEWAY_UPSTREAM_PROXY_URL_KEY,
     APP_SETTING_GATEWAY_UPSTREAM_STREAM_TIMEOUT_MS_KEY, APP_SETTING_GATEWAY_USER_AGENT_VERSION_KEY,
@@ -95,20 +94,6 @@ pub fn set_gateway_route_strategy(strategy: &str) -> Result<String, String> {
     let applied = gateway::set_route_strategy(strategy)?.to_string();
     save_persisted_app_setting(APP_SETTING_GATEWAY_ROUTE_STRATEGY_KEY, Some(&applied))?;
     Ok(applied)
-}
-
-pub fn set_gateway_mode(mode: &str) -> Result<String, String> {
-    let applied = gateway::set_gateway_mode(mode)?;
-    save_persisted_app_setting(APP_SETTING_GATEWAY_MODE_KEY, Some(&applied))?;
-    Ok(applied)
-}
-
-pub fn current_gateway_mode() -> String {
-    gateway::current_gateway_mode()
-}
-
-pub fn default_gateway_mode() -> &'static str {
-    gateway::default_gateway_mode()
 }
 
 /// 函数 `set_gateway_free_account_max_model`

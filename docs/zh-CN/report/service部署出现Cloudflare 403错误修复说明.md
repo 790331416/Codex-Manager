@@ -141,9 +141,6 @@ CODEXMANAGER_WEB_NO_OPEN=1
 # 关键：让 CodexManager 把上游改到本地 curl_cffi 代理
 CODEXMANAGER_UPSTREAM_BASE_URL=http://127.0.0.1:8787/backend-api/codex
 
-# 关键：让 /v1/responses 对 chatgpt.com/backend-api/codex 走兼容增强改写，
-# 避免上游因非流式 responses 形态返回 400。
-CODEXMANAGER_GATEWAY_MODE=enhanced
 ```
 
 建议把这项清掉，避免双重代理：
@@ -202,7 +199,6 @@ curl http://127.0.0.1:5010/v1/responses \
 
 1. `CODEXMANAGER_UPSTREAM_BASE_URL` 是否真的改成了 `http://127.0.0.1:8787/backend-api/codex`
 2. `CODEXMANAGER_UPSTREAM_PROXY_URL` 是否已经清掉，避免 CodexManager 仍然走旧链路
-3. `CODEXMANAGER_GATEWAY_MODE` 是否设成了 `enhanced`；对 `chatgpt.com/backend-api/codex/responses` 而言，这一项会影响 `stream/store` 等兼容改写
 
 ### 7.2 代理脚本启动了，但请求没有打过来
 

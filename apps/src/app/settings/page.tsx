@@ -24,11 +24,6 @@ import {
   applyAppearancePreset,
   normalizeAppearancePreset,
 } from "@/lib/appearance";
-import {
-  DEFAULT_GATEWAY_MODE,
-  GATEWAY_MODE_ENV_KEY,
-  normalizeGatewayMode,
-} from "@/lib/gateway-mode";
 import { AppSettings, BackgroundTaskSettings } from "@/types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -87,8 +82,6 @@ import {
   ENV_EFFECT_SCOPE_LABELS,
   ENV_RISK_BADGE_CLASSES,
   ENV_RISK_LABELS,
-  GATEWAY_MODE_HINTS,
-  GATEWAY_MODE_LABELS,
   RESIDENCY_REQUIREMENT_LABELS,
   ROUTE_STRATEGY_LABELS,
   SERVICE_LISTEN_MODE_LABELS,
@@ -604,9 +597,6 @@ export default function SettingsPage() {
   const gatewayUserAgentVersionInput =
     gatewayUserAgentVersionDraft ??
     (snapshot?.gatewayUserAgentVersion || gatewayUserAgentVersionDefault);
-  const gatewayModeValue = normalizeGatewayMode(
-    snapshot?.gatewayMode ?? DEFAULT_GATEWAY_MODE,
-  );
   const transportInputValues = {
     sseKeepaliveIntervalMs:
       transportDraft.sseKeepaliveIntervalMs ??
@@ -1111,72 +1101,6 @@ export default function SettingsPage() {
         </TabsList>
 
         <TabsContent value="general" className="space-y-6">
-          <Card className="glass-card border-none shadow-md">
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <Globe className="h-4 w-4 text-primary" />
-                <CardTitle className="text-base">{t("Gateway 模式")}</CardTitle>
-              </div>
-              <CardDescription>
-                {t("控制 Gateway 仅在非原生兼容链路中是否启用额外适配；原生 /v1/responses 默认始终优先保持最小改写。")}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-5">
-              <div className="grid gap-2">
-                <Label>{t("请求兼容模式")}</Label>
-                <Select
-                  value={gatewayModeValue}
-                  onValueChange={(value) => {
-                    const nextMode = normalizeGatewayMode(value);
-                    if (nextMode === gatewayModeValue) {
-                      return;
-                    }
-                    updateSettings.mutate({
-                      gatewayMode: nextMode,
-                    });
-                  }}
-                >
-                  <SelectTrigger className="w-full md:w-[320px]">
-                    <SelectValue placeholder={t("选择 Gateway 模式")}>
-                      {(value) => {
-                        const nextMode = normalizeGatewayMode(value);
-                        return t(GATEWAY_MODE_LABELS[nextMode]);
-                      }}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="transparent">
-                      {t(GATEWAY_MODE_LABELS.transparent)}
-                    </SelectItem>
-                    <SelectItem value="enhanced">
-                      {t(GATEWAY_MODE_LABELS.enhanced)}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="rounded-2xl border border-border/50 bg-background/45 p-4 text-sm">
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-muted-foreground">{t("当前模式")}</span>
-                  <code className="text-xs text-primary">
-                    {gatewayModeValue}
-                  </code>
-                </div>
-                <p className="mt-3 text-xs text-muted-foreground">
-                  {t(GATEWAY_MODE_HINTS[gatewayModeValue])}
-                </p>
-                <p className="mt-2 text-[10px] text-muted-foreground">
-                  {t("当前来源：")} <code>{snapshot?.gatewayModeSource || "default"}</code>
-                </p>
-              </div>
-
-              <p className="text-[10px] text-muted-foreground">
-                {t("透传模式为默认值。应用内优先使用结构化设置；")} <code>{GATEWAY_MODE_ENV_KEY}</code>{" "}
-                {t("仍可作为外部部署覆盖，但不再是设置页的主写入通道。")}
-              </p>
-            </CardContent>
-          </Card>
-
           <Card className="glass-card border-none shadow-md">
             <CardHeader>
               <div className="flex items-center gap-2">

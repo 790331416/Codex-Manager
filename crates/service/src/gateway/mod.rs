@@ -487,22 +487,6 @@ pub(crate) fn current_model_forward_rules() -> String {
     runtime_config::current_model_forward_rules()
 }
 
-pub(crate) fn current_gateway_mode() -> String {
-    runtime_config::current_gateway_mode()
-}
-
-pub(crate) fn default_gateway_mode() -> &'static str {
-    runtime_config::default_gateway_mode()
-}
-
-pub(crate) fn transparent_gateway_mode_enabled() -> bool {
-    runtime_config::transparent_gateway_mode_enabled()
-}
-
-pub(crate) fn set_gateway_mode(mode: &str) -> Result<String, String> {
-    runtime_config::set_gateway_mode(mode)
-}
-
 /// 函数 `request_compression_enabled`
 ///
 /// 作者: gaohongshun

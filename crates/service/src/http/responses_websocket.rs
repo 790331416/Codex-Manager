@@ -1497,33 +1497,6 @@ mod tests {
     use codexmanager_core::storage::ApiKey;
     use serde_json::json;
 
-    struct RuntimeEnvGuard {
-        name: &'static str,
-        previous_value: Option<String>,
-    }
-
-    impl RuntimeEnvGuard {
-        fn set(name: &'static str, value: &str) -> Self {
-            let previous_value = std::env::var(name).ok();
-            std::env::set_var(name, value);
-            crate::gateway::reload_runtime_config_from_env();
-            Self {
-                name,
-                previous_value,
-            }
-        }
-    }
-
-    impl Drop for RuntimeEnvGuard {
-        fn drop(&mut self) {
-            match self.previous_value.as_deref() {
-                Some(value) => std::env::set_var(self.name, value),
-                None => std::env::remove_var(self.name),
-            }
-            crate::gateway::reload_runtime_config_from_env();
-        }
-    }
-
     fn sample_api_key() -> ApiKey {
         ApiKey {
             id: "gk_test".to_string(),
@@ -1598,9 +1571,8 @@ mod tests {
     }
 
     #[test]
-    fn gateway_ws_rewrite_keeps_native_responses_shape_in_enhanced_mode() {
+    fn gateway_ws_rewrite_keeps_native_responses_shape() {
         let _guard = crate::test_env_guard();
-        let _mode_guard = RuntimeEnvGuard::set("CODEXMANAGER_GATEWAY_MODE", "enhanced");
         let body = json!({
             "model": "gpt-5.3-codex",
             "input": "hello",

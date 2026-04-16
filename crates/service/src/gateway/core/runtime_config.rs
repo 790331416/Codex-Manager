@@ -26,7 +26,6 @@ static ENABLE_REQUEST_COMPRESSION: AtomicBool = AtomicBool::new(DEFAULT_ENABLE_R
 static UPSTREAM_PROXY_URL: OnceLock<RwLock<Option<String>>> = OnceLock::new();
 static FREE_ACCOUNT_MAX_MODEL: OnceLock<RwLock<String>> = OnceLock::new();
 static MODEL_FORWARD_RULES: OnceLock<RwLock<Vec<ModelForwardRule>>> = OnceLock::new();
-static GATEWAY_MODE: OnceLock<RwLock<GatewayMode>> = OnceLock::new();
 static ORIGINATOR: OnceLock<RwLock<String>> = OnceLock::new();
 static CODEX_USER_AGENT_VERSION: OnceLock<RwLock<String>> = OnceLock::new();
 static RESIDENCY_REQUIREMENT: OnceLock<RwLock<Option<String>>> = OnceLock::new();
@@ -61,7 +60,6 @@ const ENV_TOKEN_EXCHANGE_CLIENT_ID: &str = "CODEXMANAGER_CLIENT_ID";
 const ENV_TOKEN_EXCHANGE_ISSUER: &str = "CODEXMANAGER_ISSUER";
 const ENV_PROXY_LIST: &str = "CODEXMANAGER_PROXY_LIST";
 const ENV_UPSTREAM_PROXY_URL: &str = "CODEXMANAGER_UPSTREAM_PROXY_URL";
-const ENV_GATEWAY_MODE: &str = "CODEXMANAGER_GATEWAY_MODE";
 const ENV_FREE_ACCOUNT_MAX_MODEL: &str = "CODEXMANAGER_FREE_ACCOUNT_MAX_MODEL";
 const ENV_MODEL_FORWARD_RULES: &str = "CODEXMANAGER_MODEL_FORWARD_RULES";
 const ENV_ORIGINATOR: &str = "CODEXMANAGER_ORIGINATOR";
@@ -78,21 +76,6 @@ struct UpstreamClientPool {
 pub(crate) struct ModelForwardRule {
     pub from_pattern: String,
     pub to_model: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum GatewayMode {
-    Transparent,
-    Enhanced,
-}
-
-impl GatewayMode {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Transparent => "transparent",
-            Self::Enhanced => "enhanced",
-        }
-    }
 }
 
 impl UpstreamClientPool {
@@ -500,33 +483,6 @@ pub(crate) fn current_model_forward_rules() -> String {
         model_forward_rules_cell(),
         "model_forward_rules",
     ))
-}
-
-pub(crate) fn current_gateway_mode() -> String {
-    ensure_runtime_config_loaded();
-    crate::lock_utils::read_recover(gateway_mode_cell(), "gateway_mode")
-        .as_str()
-        .to_string()
-}
-
-pub(crate) fn default_gateway_mode() -> &'static str {
-    GatewayMode::Transparent.as_str()
-}
-
-pub(crate) fn transparent_gateway_mode_enabled() -> bool {
-    ensure_runtime_config_loaded();
-    *crate::lock_utils::read_recover(gateway_mode_cell(), "gateway_mode")
-        == GatewayMode::Transparent
-}
-
-pub(crate) fn set_gateway_mode(mode: &str) -> Result<String, String> {
-    ensure_runtime_config_loaded();
-    let normalized = parse_gateway_mode(mode)
-        .ok_or_else(|| "gatewayMode must be transparent or enhanced".to_string())?;
-    std::env::set_var(ENV_GATEWAY_MODE, normalized.as_str());
-    let mut cached = crate::lock_utils::write_recover(gateway_mode_cell(), "gateway_mode");
-    *cached = normalized;
-    Ok(normalized.as_str().to_string())
 }
 
 /// 函数 `resolve_forwarded_model`
@@ -1017,14 +973,6 @@ pub(super) fn reload_from_env() {
     *cached_model_forward_rules = model_forward_rules;
     drop(cached_model_forward_rules);
 
-    let gateway_mode = env_non_empty(ENV_GATEWAY_MODE)
-        .and_then(|value| parse_gateway_mode(value.as_str()))
-        .unwrap_or(GatewayMode::Transparent);
-    let mut cached_gateway_mode =
-        crate::lock_utils::write_recover(gateway_mode_cell(), "gateway_mode");
-    *cached_gateway_mode = gateway_mode;
-    drop(cached_gateway_mode);
-
     let originator = env_non_empty(ENV_ORIGINATOR)
         .and_then(|value| normalize_originator(value.as_str()).ok())
         .unwrap_or_else(|| DEFAULT_ORIGINATOR.to_string());
@@ -1210,10 +1158,6 @@ fn model_forward_rules_cell() -> &'static RwLock<Vec<ModelForwardRule>> {
         let initial = parse_model_forward_rules(DEFAULT_MODEL_FORWARD_RULES).unwrap_or_default();
         RwLock::new(initial)
     })
-}
-
-fn gateway_mode_cell() -> &'static RwLock<GatewayMode> {
-    GATEWAY_MODE.get_or_init(|| RwLock::new(GatewayMode::Transparent))
 }
 
 /// 函数 `originator_cell`
@@ -1620,14 +1564,6 @@ fn normalize_model_slug(raw: &str) -> Result<String, String> {
         return Err("freeAccountMaxModel contains unsupported characters".to_string());
     }
     Ok(normalized)
-}
-
-fn parse_gateway_mode(raw: &str) -> Option<GatewayMode> {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "transparent" => Some(GatewayMode::Transparent),
-        "enhanced" => Some(GatewayMode::Enhanced),
-        _ => None,
-    }
 }
 
 /// 函数 `normalize_originator`

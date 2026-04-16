@@ -437,7 +437,7 @@ pub(super) fn build_local_validation_result(
         &client_request_meta,
     );
     let local_conversation_id = initial_local_conversation_id.clone();
-    let allow_codex_enhanced_rewrite =
+    let allow_codex_compat_rewrite =
         allow_compat_responses_path_rewrite(effective_protocol_type, normalized_path.as_str());
     let conversation_binding = super::super::conversation_binding::load_conversation_binding(
         &storage,
@@ -469,7 +469,7 @@ pub(super) fn build_local_validation_result(
             effective_service_tier.as_deref(),
             api_key.upstream_base_url.as_deref(),
             preferred_prompt_cache_key.as_deref(),
-            allow_codex_enhanced_rewrite,
+            allow_codex_compat_rewrite,
         )
     } else if effective_thread_anchor.is_some() {
         super::super::apply_request_overrides_with_service_tier_and_forced_prompt_cache_key_scope(
@@ -480,7 +480,7 @@ pub(super) fn build_local_validation_result(
             effective_service_tier.as_deref(),
             api_key.upstream_base_url.as_deref(),
             effective_thread_anchor.as_deref(),
-            allow_codex_enhanced_rewrite,
+            allow_codex_compat_rewrite,
         )
     } else {
         super::super::apply_request_overrides_with_service_tier_and_prompt_cache_key_scope(
@@ -491,7 +491,7 @@ pub(super) fn build_local_validation_result(
             effective_service_tier.as_deref(),
             api_key.upstream_base_url.as_deref(),
             None,
-            allow_codex_enhanced_rewrite,
+            allow_codex_compat_rewrite,
         )
     };
     if should_normalize_compat_service_tier {

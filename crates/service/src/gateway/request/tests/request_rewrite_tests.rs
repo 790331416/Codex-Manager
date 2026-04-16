@@ -7,7 +7,6 @@ use super::{
 use serde_json::json;
 
 const STRICT_REQUEST_PARAM_ALLOWLIST_ENV: &str = "CODEXMANAGER_STRICT_REQUEST_PARAM_ALLOWLIST";
-const GATEWAY_MODE_ENV: &str = "CODEXMANAGER_GATEWAY_MODE";
 
 struct RuntimeEnvGuard {
     name: &'static str,
@@ -34,6 +33,45 @@ impl Drop for RuntimeEnvGuard {
         }
         crate::gateway::reload_runtime_config_from_env();
     }
+}
+
+fn apply_codex_compat_request_overrides(
+    path: &str,
+    body: Vec<u8>,
+    model_slug: Option<&str>,
+    reasoning_effort: Option<&str>,
+    upstream_base_url: Option<&str>,
+) -> Vec<u8> {
+    apply_request_overrides_with_service_tier_and_prompt_cache_key_scope(
+        path,
+        body,
+        model_slug,
+        reasoning_effort,
+        None,
+        upstream_base_url,
+        None,
+        true,
+    )
+}
+
+fn apply_codex_compat_request_overrides_with_prompt_cache_key(
+    path: &str,
+    body: Vec<u8>,
+    model_slug: Option<&str>,
+    reasoning_effort: Option<&str>,
+    upstream_base_url: Option<&str>,
+    prompt_cache_key: Option<&str>,
+) -> Vec<u8> {
+    apply_request_overrides_with_service_tier_and_prompt_cache_key_scope(
+        path,
+        body,
+        model_slug,
+        reasoning_effort,
+        None,
+        upstream_base_url,
+        prompt_cache_key,
+        true,
+    )
 }
 
 /// 函数 `chat_completions_stream_enforces_include_usage`
@@ -295,13 +333,12 @@ fn chat_completions_normalizes_responses_function_tools() {
 #[test]
 fn responses_overrides_model_and_reasoning_effort() {
     let _guard = crate::test_env_guard();
-    let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "enhanced");
     let body = json!({
         "model": "gpt-5.3-codex",
         "reasoning": { "effort": "high" },
         "input": [{ "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "hi" }] }]
     });
-    let out = apply_request_overrides(
+    let out = apply_codex_compat_request_overrides(
         "/v1/responses",
         serde_json::to_vec(&body).expect("serialize request body"),
         Some("gpt-5.3-codex"),
@@ -342,12 +379,11 @@ fn responses_overrides_model_and_reasoning_effort() {
 #[test]
 fn responses_input_string_normalized_to_list() {
     let _guard = crate::test_env_guard();
-    let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "enhanced");
     let body = json!({
         "model": "gpt-5.3-codex",
         "input": "hello"
     });
-    let out = apply_request_overrides(
+    let out = apply_codex_compat_request_overrides(
         "/v1/responses",
         serde_json::to_vec(&body).expect("serialize request body"),
         None,
@@ -379,14 +415,13 @@ fn responses_input_string_normalized_to_list() {
 #[test]
 fn responses_stream_and_store_are_forced_for_codex_backend() {
     let _guard = crate::test_env_guard();
-    let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "enhanced");
     let body = json!({
         "model": "gpt-5.3-codex",
         "input": "hello",
         "stream": false,
         "store": true
     });
-    let out = apply_request_overrides(
+    let out = apply_codex_compat_request_overrides(
         "/v1/responses",
         serde_json::to_vec(&body).expect("serialize request body"),
         None,
@@ -405,9 +440,8 @@ fn responses_stream_and_store_are_forced_for_codex_backend() {
 }
 
 #[test]
-fn responses_transparent_mode_preserves_native_codex_body_shape() {
+fn responses_default_path_preserves_native_codex_body_shape() {
     let _guard = crate::test_env_guard();
-    let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "transparent");
     let body = json!({
         "model": "gpt-5.3-codex",
         "input": "hello",
@@ -442,9 +476,8 @@ fn responses_transparent_mode_preserves_native_codex_body_shape() {
 }
 
 #[test]
-fn responses_transparent_mode_skips_request_rewrite_layer_prompt_cache_inference() {
+fn responses_default_path_skips_request_rewrite_layer_prompt_cache_inference() {
     let _guard = crate::test_env_guard();
-    let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "transparent");
     let body = json!({
         "model": "gpt-5.3-codex",
         "input": "hello"
@@ -462,9 +495,8 @@ fn responses_transparent_mode_skips_request_rewrite_layer_prompt_cache_inference
 }
 
 #[test]
-fn responses_enhanced_scope_disabled_preserves_native_codex_body_shape() {
+fn responses_compat_scope_disabled_preserves_native_codex_body_shape() {
     let _guard = crate::test_env_guard();
-    let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "enhanced");
     let body = json!({
         "model": "gpt-5.3-codex",
         "input": "hello",
@@ -502,9 +534,8 @@ fn responses_enhanced_scope_disabled_preserves_native_codex_body_shape() {
 }
 
 #[test]
-fn responses_forced_prompt_cache_scope_disabled_does_not_apply_enhanced_body_rewrite() {
+fn responses_forced_prompt_cache_scope_disabled_does_not_apply_compat_body_rewrite() {
     let _guard = crate::test_env_guard();
-    let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "enhanced");
     let body = json!({
         "model": "gpt-5.3-codex",
         "input": "hello",
@@ -556,12 +587,11 @@ fn responses_forced_prompt_cache_scope_disabled_does_not_apply_enhanced_body_rew
 #[test]
 fn responses_infers_prompt_cache_key_from_conversation_id_for_codex_backend() {
     let _guard = crate::test_env_guard();
-    let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "enhanced");
     let body = json!({
         "model": "gpt-5.3-codex",
         "input": "hello"
     });
-    let out = apply_request_overrides_with_prompt_cache_key(
+    let out = apply_codex_compat_request_overrides_with_prompt_cache_key(
         "/v1/responses",
         serde_json::to_vec(&body).expect("serialize request body"),
         None,
@@ -592,7 +622,6 @@ fn responses_infers_prompt_cache_key_from_conversation_id_for_codex_backend() {
 #[test]
 fn responses_forced_prompt_cache_key_overrides_existing_value_for_codex_backend() {
     let _guard = crate::test_env_guard();
-    let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "enhanced");
     let body = json!({
         "model": "gpt-5.3-codex",
         "input": "hello",
@@ -629,7 +658,6 @@ fn responses_forced_prompt_cache_key_overrides_existing_value_for_codex_backend(
 #[test]
 fn responses_stream_passthrough_keeps_client_stream_flag_when_enabled() {
     let _guard = crate::test_env_guard();
-    let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "enhanced");
     let body = json!({
         "model": "gpt-5.3-codex",
         "input": "hello",
@@ -637,7 +665,7 @@ fn responses_stream_passthrough_keeps_client_stream_flag_when_enabled() {
         "stream_passthrough": true,
         "store": true
     });
-    let out = apply_request_overrides(
+    let out = apply_codex_compat_request_overrides(
         "/v1/responses",
         serde_json::to_vec(&body).expect("serialize request body"),
         None,
@@ -670,7 +698,6 @@ fn responses_stream_passthrough_keeps_client_stream_flag_when_enabled() {
 #[test]
 fn responses_dynamic_tools_are_mapped_to_tools_for_codex_backend() {
     let _guard = crate::test_env_guard();
-    let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "enhanced");
     let body = json!({
         "model": "gpt-5.3-codex",
         "input": "hello",
@@ -691,7 +718,7 @@ fn responses_dynamic_tools_are_mapped_to_tools_for_codex_backend() {
             }
         }]
     });
-    let out = apply_request_overrides(
+    let out = apply_codex_compat_request_overrides(
         "/v1/responses",
         serde_json::to_vec(&body).expect("serialize request body"),
         None,
@@ -740,7 +767,6 @@ fn responses_dynamic_tools_are_mapped_to_tools_for_codex_backend() {
 #[test]
 fn responses_preserves_priority_service_tier_for_codex_backend() {
     let _guard = crate::test_env_guard();
-    let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "enhanced");
     let body = json!({
         "model": "gpt-5.3-codex",
         "instructions": "stay",
@@ -804,13 +830,12 @@ fn responses_preserves_priority_service_tier_for_codex_backend() {
 #[test]
 fn responses_defaults_tool_choice_and_reasoning_include_for_codex_backend() {
     let _guard = crate::test_env_guard();
-    let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "enhanced");
     let body = json!({
         "model": "gpt-5.3-codex",
         "input": "hello",
         "reasoning": { "effort": "medium" }
     });
-    let out = apply_request_overrides(
+    let out = apply_codex_compat_request_overrides(
         "/v1/responses",
         serde_json::to_vec(&body).expect("serialize request body"),
         None,
@@ -846,7 +871,6 @@ fn responses_defaults_tool_choice_and_reasoning_include_for_codex_backend() {
 #[test]
 fn responses_preserve_specific_function_tool_choice_object() {
     let _guard = crate::test_env_guard();
-    let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "enhanced");
     let body = json!({
         "model": "gpt-5.3-codex",
         "input": [{ "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "hello" }] }],
@@ -885,12 +909,11 @@ fn responses_preserve_specific_function_tool_choice_object() {
 #[test]
 fn responses_defaults_empty_include_without_reasoning_for_codex_backend() {
     let _guard = crate::test_env_guard();
-    let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "enhanced");
     let body = json!({
         "model": "gpt-5.3-codex",
         "input": "hello"
     });
-    let out = apply_request_overrides(
+    let out = apply_codex_compat_request_overrides(
         "/v1/responses",
         serde_json::to_vec(&body).expect("serialize request body"),
         None,
@@ -919,7 +942,6 @@ fn responses_defaults_empty_include_without_reasoning_for_codex_backend() {
 #[test]
 fn responses_normalizes_fast_service_tier_to_priority_for_codex_backend() {
     let _guard = crate::test_env_guard();
-    let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "enhanced");
     let body = json!({
         "model": "gpt-5.3-codex",
         "input": "hello",
@@ -955,7 +977,6 @@ fn responses_normalizes_fast_service_tier_to_priority_for_codex_backend() {
 #[test]
 fn responses_applies_fast_service_tier_override_as_priority_for_codex_backend() {
     let _guard = crate::test_env_guard();
-    let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "enhanced");
     let body = json!({
         "model": "gpt-5.3-codex",
         "input": "hello"
@@ -978,9 +999,8 @@ fn responses_applies_fast_service_tier_override_as_priority_for_codex_backend() 
 }
 
 #[test]
-fn responses_transparent_mode_still_maps_fast_service_tier_to_priority_for_codex_backend() {
+fn responses_default_path_still_maps_fast_service_tier_to_priority_for_codex_backend() {
     let _guard = crate::test_env_guard();
-    let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "transparent");
     let body = json!({
         "model": "gpt-5.4",
         "input": "hello",
@@ -1016,7 +1036,6 @@ fn responses_transparent_mode_still_maps_fast_service_tier_to_priority_for_codex
 #[test]
 fn responses_ignores_unsupported_flex_service_tier_override_for_codex_backend() {
     let _guard = crate::test_env_guard();
-    let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "enhanced");
     let body = json!({
         "model": "gpt-5.3-codex",
         "input": "hello"
@@ -1047,7 +1066,6 @@ fn responses_ignores_unsupported_flex_service_tier_override_for_codex_backend() 
 #[test]
 fn responses_compact_uses_codex_compat_rewrite() {
     let _guard = crate::test_env_guard();
-    let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "enhanced");
     let body = json!({
         "model": "gpt-5.3-codex",
         "tools": [{ "type": "function", "name": "ping", "parameters": { "type": "object", "properties": {} } }],
@@ -1060,7 +1078,7 @@ fn responses_compact_uses_codex_compat_rewrite() {
         "service_tier": "priority",
         "user": "drop-me"
     });
-    let out = apply_request_overrides(
+    let out = apply_codex_compat_request_overrides(
         "/v1/responses/compact",
         serde_json::to_vec(&body).expect("serialize request body"),
         None,
@@ -1113,12 +1131,11 @@ fn responses_compact_uses_codex_compat_rewrite() {
 #[test]
 fn responses_compact_defaults_parallel_tool_calls_to_false_for_codex_backend() {
     let _guard = crate::test_env_guard();
-    let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "enhanced");
     let body = json!({
         "model": "gpt-5.3-codex",
         "input": "compact me"
     });
-    let out = apply_request_overrides(
+    let out = apply_codex_compat_request_overrides(
         "/v1/responses/compact",
         serde_json::to_vec(&body).expect("serialize request body"),
         None,
@@ -1140,9 +1157,8 @@ fn responses_compact_defaults_parallel_tool_calls_to_false_for_codex_backend() {
 }
 
 #[test]
-fn responses_compact_transparent_mode_omits_service_tier_for_codex_backend() {
+fn responses_compact_default_path_omits_service_tier_for_codex_backend() {
     let _guard = crate::test_env_guard();
-    let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "transparent");
     let body = json!({
         "model": "gpt-5.4",
         "input": "compact me",
@@ -1173,7 +1189,6 @@ fn responses_compact_transparent_mode_omits_service_tier_for_codex_backend() {
 #[test]
 fn responses_omits_include_when_reasoning_missing_for_codex_backend() {
     let _guard = crate::test_env_guard();
-    let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "enhanced");
     let body = json!({
         "model": "gpt-5.3-codex",
         "input": "hello"
@@ -1203,7 +1218,6 @@ fn responses_omits_include_when_reasoning_missing_for_codex_backend() {
 #[test]
 fn responses_keeps_parallel_tool_calls_missing_when_tools_are_present() {
     let _guard = crate::test_env_guard();
-    let _mode_guard = RuntimeEnvGuard::set(GATEWAY_MODE_ENV, "enhanced");
     let body = json!({
         "model": "gpt-5.3-codex",
         "input": "hello",

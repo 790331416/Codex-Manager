@@ -1548,9 +1548,6 @@ export function normalizeAppSettings(payload: unknown): AppSettings {
     routeStrategyOptions: asArray(source.routeStrategyOptions).map((item) =>
       asString(item)
     ),
-    gatewayMode: asString(source.gatewayMode) || "transparent",
-    gatewayModeDefault: asString(source.gatewayModeDefault) || "transparent",
-    gatewayModeSource: asString(source.gatewayModeSource) || "default",
     freeAccountMaxModel: asString(source.freeAccountMaxModel) || "auto",
     freeAccountMaxModelOptions: asArray(source.freeAccountMaxModelOptions).map((item) =>
       asString(item)

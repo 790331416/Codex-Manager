@@ -666,18 +666,14 @@ pub(crate) fn log_request_start(
     request_type: &str,
     protocol_type: &str,
 ) {
-    let gateway_mode = super::current_gateway_mode();
     let line = format!(
-        "ts={} event=REQUEST_START trace_id={} key_id={} method={} path={} request_type={} gateway_mode={} transparent={} enhanced={} model={} reasoning={} service_tier={} stream={} protocol={}",
+        "ts={} event=REQUEST_START trace_id={} key_id={} method={} path={} request_type={} model={} reasoning={} service_tier={} stream={} protocol={}",
         current_trace_ts(),
         sanitize_text(trace_id),
         sanitize_text(key_id),
         sanitize_text(method),
         sanitize_text(path),
         sanitize_text(request_type),
-        sanitize_text(gateway_mode.as_str()),
-        if gateway_mode == "transparent" { "true" } else { "false" },
-        if gateway_mode == "enhanced" { "true" } else { "false" },
         sanitize_text(model.unwrap_or("-")),
         sanitize_text(reasoning.unwrap_or("-")),
         sanitize_text(service_tier.unwrap_or("-")),
@@ -1200,13 +1196,12 @@ pub(crate) fn log_failed_request(params: FailedRequestLog<'_>) {
     if !status_code.is_some_and(|status| status >= 400) && !has_error_text(error) {
         return;
     }
-    let gateway_mode = super::current_gateway_mode();
     if let Some(trace_id) = trace_id {
         flush_trace_lines(trace_id);
     }
     let code = crate::error_codes::code_or_dash(error);
     let line = format!(
-        "ts={ts} event=FAILED_REQUEST trace_id={} key_id={} account_id={} method={} request_path={} original_path={} adapted_path={} request_type={} gateway_mode={} transparent={} enhanced={} model={} reasoning={} service_tier={} upstream_url={} status={} elapsed_ms={} code={} error={}",
+        "ts={ts} event=FAILED_REQUEST trace_id={} key_id={} account_id={} method={} request_path={} original_path={} adapted_path={} request_type={} model={} reasoning={} service_tier={} upstream_url={} status={} elapsed_ms={} code={} error={}",
         sanitize_text(trace_id.unwrap_or("-")),
         sanitize_text(key_id.unwrap_or("-")),
         sanitize_text(account_id.unwrap_or("-")),
@@ -1215,9 +1210,6 @@ pub(crate) fn log_failed_request(params: FailedRequestLog<'_>) {
         sanitize_text(original_path.unwrap_or("-")),
         sanitize_text(adapted_path.unwrap_or("-")),
         sanitize_text(request_type.unwrap_or("http")),
-        sanitize_text(gateway_mode.as_str()),
-        if gateway_mode == "transparent" { "true" } else { "false" },
-        if gateway_mode == "enhanced" { "true" } else { "false" },
         sanitize_text(model.unwrap_or("-")),
         sanitize_text(reasoning_effort.unwrap_or("-")),
         sanitize_text(service_tier.unwrap_or("-")),

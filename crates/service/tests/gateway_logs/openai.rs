@@ -163,13 +163,12 @@ fn gateway_openai_chat_completions_stabilizes_prompt_cache_key_without_conversat
 }
 
 #[test]
-fn gateway_openai_chat_completions_transparent_mode_keeps_session_layer_prompt_cache_anchor() {
+fn gateway_openai_chat_completions_keeps_session_layer_prompt_cache_anchor() {
     let _lock = test_env_guard();
     let dir = new_test_dir("codexmanager-gateway-openai-chat-transparent-sticky-thread-anchor");
     let db_path: PathBuf = dir.join("codexmanager.db");
 
     let _db_guard = EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
-    let _mode_guard = EnvGuard::set("CODEXMANAGER_GATEWAY_MODE", "transparent");
 
     let upstream_response = serde_json::json!({
         "id": "resp_openai_chat_transparent_sticky_anchor",
@@ -298,13 +297,12 @@ fn gateway_openai_chat_completions_transparent_mode_keeps_session_layer_prompt_c
 }
 
 #[test]
-fn gateway_openai_responses_transparent_mode_does_not_invent_prompt_cache_key_without_anchor() {
+fn gateway_openai_responses_does_not_invent_prompt_cache_key_without_anchor() {
     let _lock = test_env_guard();
     let dir = new_test_dir("codexmanager-gateway-openai-responses-transparent-no-anchor");
     let db_path: PathBuf = dir.join("codexmanager.db");
 
     let _db_guard = EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
-    let _mode_guard = EnvGuard::set("CODEXMANAGER_GATEWAY_MODE", "transparent");
 
     let upstream_response = serde_json::json!({
         "id": "resp_openai_transparent_no_anchor",
@@ -417,7 +415,6 @@ fn gateway_openai_chat_completions_keeps_conversation_anchor_over_conflicting_pr
     let db_path: PathBuf = dir.join("codexmanager.db");
 
     let _db_guard = EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
-    let _mode_guard = EnvGuard::set("CODEXMANAGER_GATEWAY_MODE", "enhanced");
 
     let upstream_response = serde_json::json!({
         "id": "resp_openai_explicit_prompt_cache_key",

@@ -78,23 +78,6 @@ export const EN_MESSAGES: MessageCatalog = {
   监听地址: "Bind address",
   当前访问地址: "Current access address",
   实际监听地址: "Actual bind address",
-  "Gateway 模式": "Gateway mode",
-  "控制 Gateway 请求采用原始透传还是更激进的兼容改写。":
-    "Control whether Gateway keeps native passthrough behavior or applies stronger compatibility rewrites.",
-  请求兼容模式: "Request compatibility mode",
-  "选择 Gateway 模式": "Select Gateway mode",
-  透传模式: "Passthrough mode",
-  强兼容模式: "Strong compatibility mode",
-  当前模式: "Current mode",
-  "尽量保持原始 Codex 请求与响应形态，适合标准代理链路。":
-    "Keep the original Codex request and response shape as much as possible, suitable for standard proxy flows.",
-  "对请求参数与响应结构做更多兼容处理，适合兼容性优先场景。":
-    "Apply more compatibility handling to request parameters and response structures, suitable when compatibility matters most.",
-  "透传模式为默认值。": "Passthrough mode is the default.",
-  "在强兼容模式下会被写成":
-    "is written as",
-  "以显式启用额外兼容改写。":
-    "to explicitly enable extra compatibility rewrites.",
   界面语言: "Interface language",
   "切换应用界面语言，设置后会立即生效并持久化保存。":
     "Switch the UI language. Changes apply immediately and persist.",

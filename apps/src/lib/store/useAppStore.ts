@@ -56,9 +56,6 @@ export const useAppStore = create<AppState>((set) => ({
     serviceListenModeOptions: ["loopback", "all_interfaces"],
     routeStrategy: "ordered",
     routeStrategyOptions: ["ordered", "balanced"],
-    gatewayMode: "transparent",
-    gatewayModeDefault: "transparent",
-    gatewayModeSource: "default",
     freeAccountMaxModel: "auto",
     freeAccountMaxModelOptions: [
       "auto",
