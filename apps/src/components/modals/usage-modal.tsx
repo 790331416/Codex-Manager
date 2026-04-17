@@ -21,6 +21,10 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import {
+  formatAccountSubscriptionPlanLabel,
+  formatAccountSubscriptionStatusLabel,
+} from "@/app/accounts/accounts-page-helpers";
+import {
   formatTsFromSeconds,
   getExtraUsageDisplayRows,
   getUsageDisplayBuckets,
@@ -145,6 +149,8 @@ export default function UsageModal({
 }: UsageModalProps) {
   const { t } = useI18n();
   if (!account) return null;
+  const subscriptionStatusLabel = formatAccountSubscriptionStatusLabel(account, t);
+  const subscriptionPlanLabel = formatAccountSubscriptionPlanLabel(account, t);
   const primaryWindowOnly = isPrimaryWindowOnlyUsage(account.usage);
   const secondaryWindowOnly = isSecondaryWindowOnlyUsage(account.usage);
   const usageBuckets = getUsageDisplayBuckets(account.usage);
@@ -166,6 +172,38 @@ export default function UsageModal({
         </DialogHeader>
 
         <div className="grid gap-4 py-4">
+          <div className="space-y-3 rounded-2xl border border-primary/5 bg-accent/10 p-4">
+            <div className="space-y-1">
+              <p className="text-sm font-semibold">{t("套餐信息")}</p>
+              <p className="text-[11px] text-muted-foreground">
+                {t("这里展示订阅接口同步回来的套餐状态与时间信息。")}
+              </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1 rounded-xl border border-primary/5 bg-background/40 px-3 py-3">
+                <div className="text-[10px] text-muted-foreground">{t("订阅状态")}</div>
+                <div className="text-sm font-semibold">{subscriptionStatusLabel}</div>
+              </div>
+              <div className="space-y-1 rounded-xl border border-primary/5 bg-background/40 px-3 py-3">
+                <div className="text-[10px] text-muted-foreground">{t("订阅方案")}</div>
+                <div className="text-sm font-semibold">{subscriptionPlanLabel}</div>
+              </div>
+              <div className="space-y-1 rounded-xl border border-primary/5 bg-background/40 px-3 py-3">
+                <div className="text-[10px] text-muted-foreground">{t("到期时间")}</div>
+                <div className="text-sm font-semibold">
+                  {formatTsFromSeconds(account.subscriptionExpiresAt, t("未知"))}
+                </div>
+              </div>
+              <div className="space-y-1 rounded-xl border border-primary/5 bg-background/40 px-3 py-3">
+                <div className="text-[10px] text-muted-foreground">{t("续费时间")}</div>
+                <div className="text-sm font-semibold">
+                  {formatTsFromSeconds(account.subscriptionRenewsAt, t("未知"))}
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div className="space-y-3 rounded-2xl border border-primary/5 bg-accent/10 p-4">
             <div className="space-y-1">
               <p className="text-sm font-semibold">{t("额度窗口")}</p>

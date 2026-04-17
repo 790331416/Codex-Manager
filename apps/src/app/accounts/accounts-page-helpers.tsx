@@ -302,6 +302,36 @@ export function formatAccountPlanLabel(
     : formatAccountPlanValueLabel(normalized, t);
 }
 
+export function formatAccountSubscriptionPlanLabel(
+  account: Account,
+  t: TranslateFn,
+): string {
+  const normalized = String(account.subscriptionPlan || account.planType || "")
+    .trim()
+    .toLowerCase();
+  return normalized
+    ? formatAccountPlanValueLabel(normalized, t)
+    : t("未知");
+}
+
+export function formatAccountSubscriptionStatusLabel(
+  account: Account,
+  t: TranslateFn,
+): string {
+  const hasSubscriptionEvidence =
+    Boolean(String(account.subscriptionPlan || "").trim()) ||
+    account.subscriptionExpiresAt != null ||
+    account.subscriptionRenewsAt != null;
+
+  if (account.hasSubscription === true || (account.hasSubscription == null && hasSubscriptionEvidence)) {
+    return t("已订阅");
+  }
+  if (account.hasSubscription === false) {
+    return t("未订阅");
+  }
+  return t("未知");
+}
+
 export function getAccountPlanBadgeClassName(planLabel: string | null): string {
   switch (planLabel) {
     case "FREE":
@@ -449,6 +479,14 @@ export function AccountInfoCell({
 }) {
   const { t } = useI18n();
   const accountPlanLabel = formatAccountPlanLabel(account, t);
+  const subscriptionStatusLabel = formatAccountSubscriptionStatusLabel(account, t);
+  const subscriptionPlanLabel = formatAccountSubscriptionPlanLabel(account, t);
+  const subscriptionExpiryText =
+    account.subscriptionExpiresAt != null
+      ? formatTsFromSeconds(account.subscriptionExpiresAt, t("未知"))
+      : account.hasSubscription === false
+        ? t("未订阅")
+        : t("未知");
   const tagsText = formatAccountTags(account.tags);
   const noteText = String(account.note || "").trim();
 
@@ -487,6 +525,9 @@ export function AccountInfoCell({
             {t("最近刷新")}:{" "}
             {formatTsFromSeconds(account.lastRefreshAt, t("从未刷新"))}
           </span>
+          <span className="text-[10px] text-muted-foreground">
+            {t("订阅到期")}: {subscriptionExpiryText}
+          </span>
         </div>
       </TooltipTrigger>
       <TooltipContent className="max-w-sm">
@@ -504,6 +545,36 @@ export function AccountInfoCell({
               </div>
               <div className="font-medium">
                 {t(account.availabilityText || "未知")}
+              </div>
+            </div>
+            <div className="space-y-0.5">
+              <div className="text-[10px] text-background/70">
+                {t("订阅状态")}
+              </div>
+              <div className="font-medium">{subscriptionStatusLabel}</div>
+            </div>
+            <div className="space-y-0.5">
+              <div className="text-[10px] text-background/70">
+                {t("订阅方案")}
+              </div>
+              <div className="font-medium">{subscriptionPlanLabel}</div>
+            </div>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="space-y-0.5">
+              <div className="text-[10px] text-background/70">
+                {t("到期时间")}
+              </div>
+              <div className="font-medium">
+                {formatTsFromSeconds(account.subscriptionExpiresAt, t("未知"))}
+              </div>
+            </div>
+            <div className="space-y-0.5">
+              <div className="text-[10px] text-background/70">
+                {t("续费时间")}
+              </div>
+              <div className="font-medium">
+                {formatTsFromSeconds(account.subscriptionRenewsAt, t("未知"))}
               </div>
             </div>
           </div>
