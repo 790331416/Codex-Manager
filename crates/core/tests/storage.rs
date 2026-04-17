@@ -340,6 +340,63 @@ fn storage_account_metadata_roundtrip_and_delete_cleanup() {
         .is_none());
 }
 
+/// 函数 `storage_account_subscription_roundtrip_and_delete_cleanup`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-17
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn storage_account_subscription_roundtrip_and_delete_cleanup() {
+    let mut storage = Storage::open_in_memory().expect("open in memory");
+    storage.init().expect("init schema");
+
+    let account = Account {
+        id: "acc-sub-1".to_string(),
+        label: "subscription account".to_string(),
+        issuer: "https://auth.openai.com".to_string(),
+        chatgpt_account_id: Some("org-sub-1".to_string()),
+        workspace_id: Some("org-sub-1".to_string()),
+        group_name: None,
+        sort: 0,
+        status: "active".to_string(),
+        created_at: now_ts(),
+        updated_at: now_ts(),
+    };
+    storage.insert_account(&account).expect("insert account");
+    storage
+        .upsert_account_subscription(
+            "acc-sub-1",
+            true,
+            Some("plus"),
+            Some(1_746_501_889),
+            Some(1_746_501_889),
+        )
+        .expect("upsert subscription");
+
+    let subscription = storage
+        .find_account_subscription("acc-sub-1")
+        .expect("find subscription")
+        .expect("subscription exists");
+    assert!(subscription.has_subscription);
+    assert_eq!(subscription.plan_type.as_deref(), Some("plus"));
+    assert_eq!(subscription.expires_at, Some(1_746_501_889));
+    assert_eq!(subscription.renews_at, Some(1_746_501_889));
+
+    storage
+        .delete_account("acc-sub-1")
+        .expect("delete account");
+    assert!(storage
+        .find_account_subscription("acc-sub-1")
+        .expect("find subscription after delete")
+        .is_none());
+}
+
 /// 函数 `storage_can_update_account_status`
 ///
 /// 作者: gaohongshun

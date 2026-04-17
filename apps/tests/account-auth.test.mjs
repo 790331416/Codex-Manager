@@ -46,6 +46,10 @@ test("readCurrentAccessTokenAccountReadResult 解析当前账号与认证要求"
       email: "demo@example.com",
       planType: "pro",
       planTypeRaw: "pro",
+      hasSubscription: true,
+      subscriptionPlan: "pro",
+      subscriptionExpiresAt: 1746502289,
+      subscriptionRenewsAt: 1746502289,
       chatgptAccountId: "org-1",
       workspaceId: "ws-1",
       status: "active",
@@ -56,6 +60,8 @@ test("readCurrentAccessTokenAccountReadResult 解析当前账号与认证要求"
   assert.equal(result.account?.accountId, "acc-1");
   assert.equal(result.account?.email, "demo@example.com");
   assert.equal(result.account?.chatgptAccountId, "org-1");
+  assert.equal(result.account?.hasSubscription, true);
+  assert.equal(result.account?.subscriptionPlan, "pro");
   assert.equal(result.requiresOpenaiAuth, true);
 });
 
@@ -64,9 +70,15 @@ test("readChatgptAuthTokensRefreshResult 对齐刷新返回字段", () => {
     accessToken: " token ",
     chatgptAccountId: " org-2 ",
     chatgptPlanType: " team ",
+    hasSubscription: true,
+    subscriptionPlan: "team",
+    subscriptionExpiresAt: 1746502289,
+    subscriptionRenewsAt: 1746502289,
   });
 
   assert.equal(result.accessToken, "token");
   assert.equal(result.chatgptAccountId, "org-2");
   assert.equal(result.chatgptPlanType, "team");
+  assert.equal(result.hasSubscription, true);
+  assert.equal(result.subscriptionPlan, "team");
 });

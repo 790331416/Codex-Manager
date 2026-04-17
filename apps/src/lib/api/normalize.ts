@@ -394,8 +394,22 @@ export function normalizeAccount(item: unknown, usage?: AccountUsage | null): Ac
     sort: asInteger(source.sort ?? source.priority, 0, 0),
     status,
     statusReason,
-    planType: asString(source.planType ?? source.plan_type) || null,
+    planType:
+      asString(source.planType ?? source.plan_type ?? source.subscriptionPlan ?? source.subscription_plan) ||
+      null,
     planTypeRaw: asString(source.planTypeRaw ?? source.plan_type_raw) || null,
+    hasSubscription:
+      typeof (source.hasSubscription ?? source.has_subscription) === "boolean"
+        ? Boolean(source.hasSubscription ?? source.has_subscription)
+        : null,
+    subscriptionPlan:
+      asString(source.subscriptionPlan ?? source.subscription_plan) || null,
+    subscriptionExpiresAt: toNullableNumber(
+      source.subscriptionExpiresAt ?? source.subscription_expires_at
+    ),
+    subscriptionRenewsAt: toNullableNumber(
+      source.subscriptionRenewsAt ?? source.subscription_renews_at
+    ),
     note: asString(source.note) || null,
     tags: asStringArray(source.tags),
     isAvailable: availability.level === "ok",

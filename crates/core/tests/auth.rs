@@ -1,4 +1,10 @@
+use base64::Engine;
 use codexmanager_core::auth::build_authorize_url;
+
+fn jwt_with_json(payload_json: &str) -> String {
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload_json);
+    format!("eyJhbGciOiJIUzI1NiJ9.{payload}.sig")
+}
 
 /// 函数 `build_authorize_url_matches_codex`
 ///
@@ -82,4 +88,35 @@ fn extract_token_exp_reads_exp_claim() {
     let token = "eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjE3NzA0NjU4ODYsInN1YiI6InVzZXItMSJ9.sig";
     let exp = codexmanager_core::auth::extract_token_exp(token);
     assert_eq!(exp, Some(1770465886));
+}
+
+#[test]
+fn normalize_scoped_identity_values_extracts_account_and_workspace_segments() {
+    let composite =
+        "google-oauth2|105671307665841419748::cgpt=ed08d56a-c038-4322-b325-53f504c0c88c|ws=org-AP6ypcMi84Thfueli6EU3B4m";
+
+    assert_eq!(
+        codexmanager_core::auth::normalize_chatgpt_account_id(Some(composite)),
+        Some("ed08d56a-c038-4322-b325-53f504c0c88c".to_string())
+    );
+    assert_eq!(
+        codexmanager_core::auth::normalize_workspace_id(Some(composite)),
+        Some("org-AP6ypcMi84Thfueli6EU3B4m".to_string())
+    );
+}
+
+#[test]
+fn extract_scope_ids_from_token_filters_storage_style_identity_suffix() {
+    let token = jwt_with_json(
+        r#"{"sub":"user-1","workspace_id":"google-oauth2|105671307665841419748::cgpt=ed08d56a-c038-4322-b325-53f504c0c88c|ws=org-AP6ypcMi84Thfueli6EU3B4m","https://api.openai.com/auth":{"chatgpt_account_id":"google-oauth2|105671307665841419748::cgpt=ed08d56a-c038-4322-b325-53f504c0c88c|ws=org-AP6ypcMi84Thfueli6EU3B4m"}}"#,
+    );
+
+    assert_eq!(
+        codexmanager_core::auth::extract_chatgpt_account_id(&token),
+        Some("ed08d56a-c038-4322-b325-53f504c0c88c".to_string())
+    );
+    assert_eq!(
+        codexmanager_core::auth::extract_workspace_id(&token),
+        Some("org-AP6ypcMi84Thfueli6EU3B4m".to_string())
+    );
 }

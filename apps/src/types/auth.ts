@@ -24,6 +24,10 @@ export interface CurrentAccessTokenAccount {
   email: string;
   planType: string;
   planTypeRaw?: string | null;
+  hasSubscription?: boolean | null;
+  subscriptionPlan?: string | null;
+  subscriptionExpiresAt?: number | null;
+  subscriptionRenewsAt?: number | null;
   chatgptAccountId: string | null;
   workspaceId: string | null;
   status: string;
@@ -38,4 +42,8 @@ export interface ChatgptAuthTokensRefreshResult {
   accessToken: string;
   chatgptAccountId: string;
   chatgptPlanType: string | null;
+  hasSubscription?: boolean | null;
+  subscriptionPlan?: string | null;
+  subscriptionExpiresAt?: number | null;
+  subscriptionRenewsAt?: number | null;
 }

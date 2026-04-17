@@ -156,6 +156,10 @@ fn extract_usage_status_code(message: &str) -> Option<u16> {
         Some(rest)
     } else if let Some(rest) = message.strip_prefix("usage endpoint failed: status=") {
         Some(rest)
+    } else if let Some(rest) = message.strip_prefix("subscription endpoint status ") {
+        Some(rest)
+    } else if let Some(rest) = message.strip_prefix("subscription endpoint failed: status=") {
+        Some(rest)
     } else {
         None
     }?;

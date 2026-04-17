@@ -1,4 +1,5 @@
-use codexmanager_core::usage::usage_endpoint;
+use chrono::DateTime;
+use codexmanager_core::usage::{subscription_endpoint, usage_endpoint};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
 use reqwest::Client;
 use reqwest::Proxy;
@@ -8,6 +9,7 @@ use std::time::Duration;
 use tokio::runtime::{Builder, Runtime};
 
 static USAGE_HTTP_CLIENT: OnceLock<RwLock<Client>> = OnceLock::new();
+static SUBSCRIPTION_HTTP_CLIENT: OnceLock<RwLock<Client>> = OnceLock::new();
 static USAGE_HTTP_RUNTIME: OnceLock<Runtime> = OnceLock::new();
 const USAGE_HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const ENV_UPSTREAM_PROXY_URL: &str = "CODEXMANAGER_UPSTREAM_PROXY_URL";
@@ -86,6 +88,28 @@ pub(crate) struct RefreshTokenResponse {
     pub(crate) refresh_token: Option<String>,
     #[serde(default)]
     pub(crate) id_token: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct AccountSubscriptionSnapshot {
+    pub(crate) has_subscription: bool,
+    pub(crate) plan_type: Option<String>,
+    pub(crate) expires_at: Option<i64>,
+    pub(crate) renews_at: Option<i64>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct AccountSubscriptionResponse {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    plan_type: Option<String>,
+    #[serde(default)]
+    active_until: Option<String>,
+    #[serde(default)]
+    next_credit_grant_update: Option<String>,
+    #[serde(default)]
+    will_renew: Option<bool>,
 }
 
 /// 函数 `usage_http_runtime`
@@ -472,6 +496,29 @@ fn build_usage_http_client() -> Client {
     builder.build().unwrap_or_else(|_| Client::new())
 }
 
+fn build_subscription_http_client() -> Client {
+    let mut builder = Client::builder()
+        .connect_timeout(USAGE_HTTP_CONNECT_TIMEOUT)
+        .timeout(USAGE_HTTP_TOTAL_TIMEOUT)
+        .pool_max_idle_per_host(4)
+        .pool_idle_timeout(Some(Duration::from_secs(60)));
+    if let Some(proxy_url) = current_upstream_proxy_url() {
+        match Proxy::all(proxy_url.as_str()) {
+            Ok(proxy) => {
+                builder = builder.proxy(proxy);
+            }
+            Err(err) => {
+                log::warn!(
+                    "event=subscription_http_proxy_invalid proxy={} err={}",
+                    proxy_url,
+                    err
+                );
+            }
+        }
+    }
+    builder.build().unwrap_or_else(|_| Client::new())
+}
+
 /// 函数 `build_usage_http_default_headers`
 ///
 /// 作者: gaohongshun
@@ -587,7 +634,8 @@ fn extract_response_header(headers: &HeaderMap, name: &str) -> Option<String> {
 ///
 /// # 返回
 /// 返回函数执行结果
-fn summarize_usage_error_response(
+fn summarize_endpoint_error_response(
+    endpoint_name: &str,
     status: reqwest::StatusCode,
     headers: &HeaderMap,
     body: &str,
@@ -624,14 +672,77 @@ fn summarize_usage_error_response(
     }
 
     if details.is_empty() {
-        format!("usage endpoint failed: status={} body={body_hint}", status)
+        format!("{endpoint_name} endpoint failed: status={} body={body_hint}", status)
     } else {
         format!(
-            "usage endpoint failed: status={} body={body_hint}, {}",
+            "{endpoint_name} endpoint failed: status={} body={body_hint}, {}",
             status,
             details.join(", ")
         )
     }
+}
+
+/// 函数 `summarize_usage_error_response`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-02
+///
+/// # 参数
+/// - status: 参数 status
+/// - headers: 参数 headers
+/// - body: 参数 body
+/// - force_html_error: 参数 force_html_error
+///
+/// # 返回
+/// 返回函数执行结果
+fn summarize_usage_error_response(
+    status: reqwest::StatusCode,
+    headers: &HeaderMap,
+    body: &str,
+    force_html_error: bool,
+) -> String {
+    summarize_endpoint_error_response("usage", status, headers, body, force_html_error)
+}
+
+/// 函数 `summarize_subscription_error_response`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-17
+///
+/// # 参数
+/// - status: 参数 status
+/// - headers: 参数 headers
+/// - body: 参数 body
+/// - force_html_error: 参数 force_html_error
+///
+/// # 返回
+/// 返回函数执行结果
+fn summarize_subscription_error_response(
+    status: reqwest::StatusCode,
+    headers: &HeaderMap,
+    body: &str,
+    force_html_error: bool,
+) -> String {
+    summarize_endpoint_error_response("subscription", status, headers, body, force_html_error)
+}
+
+fn normalize_optional_text(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(ToString::to_string)
+}
+
+fn parse_subscription_timestamp(value: Option<&str>) -> Option<i64> {
+    let text = value?.trim();
+    if text.is_empty() {
+        return None;
+    }
+    DateTime::parse_from_rfc3339(text)
+        .ok()
+        .map(|timestamp| timestamp.timestamp())
 }
 
 /// 函数 `usage_http_client`
@@ -648,6 +759,12 @@ fn summarize_usage_error_response(
 pub(crate) fn usage_http_client() -> Client {
     let lock = USAGE_HTTP_CLIENT.get_or_init(|| RwLock::new(build_usage_http_client()));
     crate::lock_utils::read_recover(lock, "usage_http_client").clone()
+}
+
+fn subscription_http_client() -> Client {
+    let lock =
+        SUBSCRIPTION_HTTP_CLIENT.get_or_init(|| RwLock::new(build_subscription_http_client()));
+    crate::lock_utils::read_recover(lock, "subscription_http_client").clone()
 }
 
 /// 函数 `rebuild_usage_http_client`
@@ -668,6 +785,13 @@ fn rebuild_usage_http_client() {
     *current = next;
 }
 
+fn rebuild_subscription_http_client() {
+    let next = build_subscription_http_client();
+    let lock = SUBSCRIPTION_HTTP_CLIENT.get_or_init(|| RwLock::new(next.clone()));
+    let mut current = crate::lock_utils::write_recover(lock, "subscription_http_client");
+    *current = next;
+}
+
 /// 函数 `reload_usage_http_client_from_env`
 ///
 /// 作者: gaohongshun
@@ -681,6 +805,7 @@ fn rebuild_usage_http_client() {
 /// 无
 pub(crate) fn reload_usage_http_client_from_env() {
     rebuild_usage_http_client();
+    rebuild_subscription_http_client();
 }
 
 /// 函数 `current_upstream_proxy_url`
@@ -718,6 +843,34 @@ pub(crate) fn fetch_usage_snapshot(
     workspace_id: Option<&str>,
 ) -> Result<serde_json::Value, String> {
     run_usage_future(fetch_usage_snapshot_async(base_url, bearer, workspace_id))
+}
+
+/// 函数 `fetch_account_subscription`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-17
+///
+/// # 参数
+/// - base_url: 参数 base_url
+/// - bearer: 参数 bearer
+/// - account_id: 参数 account_id
+/// - workspace_id: 参数 workspace_id
+///
+/// # 返回
+/// 返回函数执行结果
+pub(crate) fn fetch_account_subscription(
+    base_url: &str,
+    bearer: &str,
+    account_id: &str,
+    workspace_id: Option<&str>,
+) -> Result<AccountSubscriptionSnapshot, String> {
+    run_usage_future(fetch_account_subscription_async(
+        base_url,
+        bearer,
+        account_id,
+        workspace_id,
+    ))
 }
 
 /// 函数 `fetch_usage_snapshot_async`
@@ -792,6 +945,107 @@ async fn fetch_usage_snapshot_async(
     read_response_json(resp, USAGE_HTTP_TOTAL_TIMEOUT)
         .await
         .map_err(|e| format!("read usage endpoint json failed: {e}"))
+}
+
+/// 函数 `fetch_account_subscription_async`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-17
+///
+/// # 参数
+/// - base_url: 参数 base_url
+/// - bearer: 参数 bearer
+/// - account_id: 参数 account_id
+/// - workspace_id: 参数 workspace_id
+///
+/// # 返回
+/// 返回函数执行结果
+async fn fetch_account_subscription_async(
+    base_url: &str,
+    bearer: &str,
+    account_id: &str,
+    _workspace_id: Option<&str>,
+) -> Result<AccountSubscriptionSnapshot, String> {
+    let normalized_account_id = account_id.trim();
+    if normalized_account_id.is_empty() {
+        return Ok(AccountSubscriptionSnapshot::default());
+    }
+
+    let url = subscription_endpoint(base_url, normalized_account_id);
+    let build_request = || {
+        let client = subscription_http_client();
+        // 中文注释：subscriptions 接口按官方最小画像访问，
+        // 这里只保留 Authorization，account_id 已在 query 里，不再附带额外业务头。
+        client
+            .get(&url)
+            .header("Authorization", format!("Bearer {bearer}"))
+    };
+    let resp = match build_request().send().await {
+        Ok(resp) => resp,
+        Err(first_err) => {
+            rebuild_subscription_http_client();
+            let retried = build_request().send().await;
+            match retried {
+                Ok(resp) => resp,
+                Err(second_err) => {
+                    return Err(format!(
+                        "{}; retry_after_client_rebuild: {}",
+                        first_err, second_err
+                    ));
+                }
+            }
+        }
+    };
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(AccountSubscriptionSnapshot::default());
+    }
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let headers = resp.headers().clone();
+        let body = read_response_text(resp, USAGE_HTTP_TOTAL_TIMEOUT).await?;
+        return Err(summarize_subscription_error_response(
+            status, &headers, &body, false,
+        ));
+    }
+    let content_type = resp
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    if crate::gateway::is_html_content_type(content_type) {
+        let status = resp.status();
+        let headers = resp.headers().clone();
+        let body = read_response_text(resp, USAGE_HTTP_TOTAL_TIMEOUT).await?;
+        return Err(summarize_subscription_error_response(
+            status, &headers, &body, true,
+        ));
+    }
+
+    let response: AccountSubscriptionResponse = read_response_json(resp, USAGE_HTTP_TOTAL_TIMEOUT)
+        .await
+        .map_err(|e| format!("read subscription endpoint json failed: {e}"))?;
+    let plan_type = normalize_optional_text(response.plan_type.as_deref());
+    let expires_at = parse_subscription_timestamp(response.active_until.as_deref());
+    let renews_at = parse_subscription_timestamp(response.next_credit_grant_update.as_deref())
+        .or_else(|| {
+            if response.will_renew.unwrap_or(false) {
+                expires_at
+            } else {
+                None
+            }
+        });
+    let has_subscription = normalize_optional_text(response.id.as_deref()).is_some()
+        || plan_type.is_some()
+        || expires_at.is_some()
+        || renews_at.is_some();
+
+    Ok(AccountSubscriptionSnapshot {
+        has_subscription,
+        plan_type,
+        expires_at,
+        renews_at,
+    })
 }
 
 /// 函数 `refresh_access_token`

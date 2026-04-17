@@ -241,6 +241,15 @@ fn init_tracks_schema_migrations_and_is_idempotent() {
         )
         .expect("count 050 migration");
     assert_eq!(applied_050, 1);
+    let applied_052: i64 = storage
+        .conn
+        .query_row(
+            "SELECT COUNT(1) FROM schema_migrations WHERE version = '052_account_subscriptions'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count 052 migration");
+    assert_eq!(applied_052, 1);
 
     assert!(!storage
         .has_column("accounts", "note")
@@ -302,6 +311,21 @@ fn init_tracks_schema_migrations_and_is_idempotent() {
     assert!(storage
         .has_column("conversation_bindings", "last_switch_reason")
         .expect("check conversation_bindings.last_switch_reason"));
+    assert!(storage
+        .has_table("account_subscriptions")
+        .expect("check account_subscriptions table"));
+    assert!(storage
+        .has_column("account_subscriptions", "has_subscription")
+        .expect("check account_subscriptions.has_subscription"));
+    assert!(storage
+        .has_column("account_subscriptions", "plan_type")
+        .expect("check account_subscriptions.plan_type"));
+    assert!(storage
+        .has_column("account_subscriptions", "expires_at")
+        .expect("check account_subscriptions.expires_at"));
+    assert!(storage
+        .has_column("account_subscriptions", "renews_at")
+        .expect("check account_subscriptions.renews_at"));
     assert!(storage
         .has_column("api_key_profiles", "service_tier")
         .expect("check api_key_profiles.service_tier"));

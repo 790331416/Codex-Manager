@@ -26,6 +26,10 @@ export interface Account {
   statusReason: string;
   planType: string | null;
   planTypeRaw: string | null;
+  hasSubscription: boolean | null;
+  subscriptionPlan: string | null;
+  subscriptionExpiresAt: number | null;
+  subscriptionRenewsAt: number | null;
   note: string | null;
   tags: string[];
   isAvailable: boolean;

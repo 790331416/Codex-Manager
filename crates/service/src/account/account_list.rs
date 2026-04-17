@@ -1,6 +1,6 @@
 use codexmanager_core::{
     rpc::types::{AccountListParams, AccountListResult, AccountSummary},
-    storage::{Account, AccountMetadata, Token, UsageSnapshotRecord},
+    storage::{Account, AccountMetadata, AccountSubscription, Token, UsageSnapshotRecord},
 };
 use std::collections::HashMap;
 
@@ -302,6 +302,10 @@ fn to_account_summary_with_reason(
     status_reason: Option<String>,
     plan_type: Option<String>,
     plan_type_raw: Option<String>,
+    has_subscription: Option<bool>,
+    subscription_plan: Option<String>,
+    subscription_expires_at: Option<i64>,
+    subscription_renews_at: Option<i64>,
     note: Option<String>,
     tags: Option<String>,
 ) -> AccountSummary {
@@ -315,6 +319,10 @@ fn to_account_summary_with_reason(
         status_reason,
         plan_type,
         plan_type_raw,
+        has_subscription,
+        subscription_plan,
+        subscription_expires_at,
+        subscription_renews_at,
         note,
         tags,
     }
@@ -364,6 +372,12 @@ fn to_account_summaries(
         .into_iter()
         .map(|item| (item.account_id.clone(), item))
         .collect::<HashMap<String, AccountMetadata>>();
+    let subscriptions = storage
+        .list_account_subscriptions()
+        .map_err(|err| format!("load account subscriptions failed: {err}"))?
+        .into_iter()
+        .map(|item| (item.account_id.clone(), item))
+        .collect::<HashMap<String, AccountSubscription>>();
     Ok(accounts
         .into_iter()
         .map(|account| {
@@ -374,6 +388,7 @@ fn to_account_summaries(
                 &tokens,
                 &usages,
                 &metadata,
+                &subscriptions,
             )
         })
         .collect())
@@ -401,22 +416,30 @@ fn map_account_summary(
     tokens: &HashMap<String, Token>,
     usages: &HashMap<String, UsageSnapshotRecord>,
     metadata: &HashMap<String, AccountMetadata>,
+    subscriptions: &HashMap<String, AccountSubscription>,
 ) -> AccountSummary {
     let account_id = account.id.clone();
     let status_reason = status_reasons.get(&account_id).cloned();
     let preferred = preferred_account_id.is_some_and(|id| id == account_id);
     let plan = resolve_account_plan(tokens.get(&account_id), usages.get(&account_id));
     let account_metadata = metadata.get(&account_id);
-    let (plan_type, plan_type_raw) = match plan {
+    let subscription = subscriptions.get(&account_id);
+    let (fallback_plan_type, plan_type_raw) = match plan {
         Some(value) => (Some(value.normalized), value.raw),
         None => (None, None),
     };
+    let subscription_plan = subscription.and_then(|value| value.plan_type.clone());
+    let plan_type = subscription_plan.clone().or(fallback_plan_type);
     to_account_summary_with_reason(
         account,
         preferred,
         status_reason,
         plan_type,
         plan_type_raw,
+        subscription.map(|value| value.has_subscription),
+        subscription_plan,
+        subscription.and_then(|value| value.expires_at),
+        subscription.and_then(|value| value.renews_at),
         account_metadata.and_then(|value| value.note.clone()),
         account_metadata.and_then(|value| value.tags.clone()),
     )

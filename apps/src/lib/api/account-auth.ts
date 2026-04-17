@@ -23,6 +23,18 @@ function readBooleanField(payload: unknown, key: string, fallback = false): bool
   return typeof value === "boolean" ? value : fallback;
 }
 
+function readNullableBooleanField(payload: unknown, key: string): boolean | null {
+  const source = asRecord(payload);
+  const value = source?.[key];
+  return typeof value === "boolean" ? value : null;
+}
+
+function readNullableNumberField(payload: unknown, key: string): number | null {
+  const source = asRecord(payload);
+  const value = source?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function readNullableStringField(payload: unknown, key: string): string | null {
   const value = readStringField(payload, key);
   return value ? value : null;
@@ -49,6 +61,10 @@ export function readCurrentAccessTokenAccount(
     email: readStringField(source, "email"),
     planType: readStringField(source, "planType"),
     planTypeRaw: readNullableStringField(source, "planTypeRaw"),
+    hasSubscription: readNullableBooleanField(source, "hasSubscription"),
+    subscriptionPlan: readNullableStringField(source, "subscriptionPlan"),
+    subscriptionExpiresAt: readNullableNumberField(source, "subscriptionExpiresAt"),
+    subscriptionRenewsAt: readNullableNumberField(source, "subscriptionRenewsAt"),
     chatgptAccountId: readNullableStringField(source, "chatgptAccountId"),
     workspaceId: readNullableStringField(source, "workspaceId"),
     status: readStringField(source, "status"),
@@ -72,5 +88,9 @@ export function readChatgptAuthTokensRefreshResult(
     accessToken: readStringField(payload, "accessToken"),
     chatgptAccountId: readStringField(payload, "chatgptAccountId"),
     chatgptPlanType: readNullableStringField(payload, "chatgptPlanType"),
+    hasSubscription: readNullableBooleanField(payload, "hasSubscription"),
+    subscriptionPlan: readNullableStringField(payload, "subscriptionPlan"),
+    subscriptionExpiresAt: readNullableNumberField(payload, "subscriptionExpiresAt"),
+    subscriptionRenewsAt: readNullableNumberField(payload, "subscriptionRenewsAt"),
   };
 }

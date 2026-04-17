@@ -24,6 +24,16 @@ fn usage_refresh_error_class_groups_by_status_code() {
         classify_usage_refresh_error("usage endpoint status 503 Service Unavailable"),
         "usage_status_503"
     );
+    assert_eq!(
+        classify_usage_refresh_error("subscription endpoint status 401 Unauthorized"),
+        "usage_status_401"
+    );
+    assert_eq!(
+        classify_usage_refresh_error(
+            "subscription endpoint failed: status=503 Service Unavailable body=upstream unavailable"
+        ),
+        "usage_status_503"
+    );
 }
 
 /// 函数 `usage_refresh_error_class_catches_timeout_and_connection`

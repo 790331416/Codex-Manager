@@ -1,6 +1,6 @@
 use codexmanager_core::auth::{
-    extract_chatgpt_account_id, extract_workspace_id, parse_id_token_claims, DEFAULT_CLIENT_ID,
-    DEFAULT_ISSUER,
+    extract_chatgpt_account_id, extract_workspace_id, normalize_chatgpt_account_id,
+    normalize_workspace_id, parse_id_token_claims, DEFAULT_CLIENT_ID, DEFAULT_ISSUER,
 };
 use codexmanager_core::rpc::types::LoginStartResult;
 use codexmanager_core::storage::{now_ts, Account, Storage, Token};
@@ -13,6 +13,7 @@ use crate::account_identity::{
 use crate::account_status::mark_account_unavailable_for_auth_error;
 use crate::app_settings::{get_persisted_app_setting, save_persisted_app_setting};
 use crate::storage_helpers::open_storage;
+use crate::usage_http::fetch_account_subscription;
 use crate::usage_token_refresh::refresh_and_persist_access_token;
 
 const CURRENT_AUTH_ACCOUNT_ID_KEY: &str = "auth.current_account_id";
@@ -36,6 +37,10 @@ pub(crate) struct CurrentAuthAccount {
     pub(crate) email: String,
     pub(crate) plan_type: String,
     pub(crate) plan_type_raw: Option<String>,
+    pub(crate) has_subscription: Option<bool>,
+    pub(crate) subscription_plan: Option<String>,
+    pub(crate) subscription_expires_at: Option<i64>,
+    pub(crate) subscription_renews_at: Option<i64>,
     pub(crate) chatgpt_account_id: Option<String>,
     pub(crate) workspace_id: Option<String>,
     pub(crate) status: String,
@@ -47,6 +52,10 @@ pub(crate) struct ChatgptAuthTokensRefreshResponse {
     pub(crate) access_token: String,
     pub(crate) chatgpt_account_id: String,
     pub(crate) chatgpt_plan_type: Option<String>,
+    pub(crate) has_subscription: Option<bool>,
+    pub(crate) subscription_plan: Option<String>,
+    pub(crate) subscription_expires_at: Option<i64>,
+    pub(crate) subscription_renews_at: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -90,23 +99,27 @@ pub(crate) fn login_with_chatgpt_auth_tokens(
     if subject_account_id.is_empty() {
         return Err("access token missing subject".to_string());
     }
+    let claim_chatgpt_account_id = claims
+        .auth
+        .as_ref()
+        .and_then(|auth| normalize_chatgpt_account_id(auth.chatgpt_account_id.as_deref()));
+    let claim_workspace_id = normalize_workspace_id(claims.workspace_id.as_deref());
 
     let chatgpt_account_id = clean_value(
         input
             .chatgpt_account_id
+            .as_deref()
+            .and_then(|value| normalize_chatgpt_account_id(Some(value)))
             .or_else(|| extract_chatgpt_account_id(access_token))
-            .or_else(|| {
-                claims
-                    .auth
-                    .as_ref()
-                    .and_then(|auth| auth.chatgpt_account_id.clone())
-            }),
+            .or(claim_chatgpt_account_id),
     );
     let workspace_id = clean_value(
         input
             .workspace_id
+            .as_deref()
+            .and_then(|value| normalize_workspace_id(Some(value)))
             .or_else(|| extract_workspace_id(access_token))
-            .or_else(|| claims.workspace_id.clone())
+            .or(claim_workspace_id)
             .or_else(|| chatgpt_account_id.clone()),
     );
     let resolved_scope_id = workspace_id
@@ -225,6 +238,7 @@ pub(crate) fn read_current_account(refresh_token: bool) -> Result<AccountReadRes
     let auth_mode = resolve_current_auth_mode(&token);
     Ok(AccountReadResponse {
         account: Some(current_account_payload(
+            &storage,
             &account,
             &token,
             auth_mode.as_str(),
@@ -267,22 +281,52 @@ pub(crate) fn refresh_current_chatgpt_auth_tokens(
         .find_account_by_id(&account.id)
         .map_err(|err| err.to_string())?
         .unwrap_or(account);
-    let chatgpt_account_id = refreshed_account
-        .chatgpt_account_id
+    let stored_chatgpt_account_id =
+        normalize_chatgpt_account_id(refreshed_account.chatgpt_account_id.as_deref());
+    let stored_workspace_id = normalize_workspace_id(refreshed_account.workspace_id.as_deref());
+    let chatgpt_account_id = stored_chatgpt_account_id
         .clone()
-        .or_else(|| refreshed_account.workspace_id.clone())
         .or_else(|| extract_chatgpt_account_id(&token.access_token))
+        .or_else(|| stored_workspace_id.clone())
         .or_else(|| extract_workspace_id(&token.access_token))
         .ok_or_else(|| "refreshed token missing chatgptAccountId".to_string())?;
+    let workspace_id = stored_workspace_id
+        .clone()
+        .or_else(|| extract_workspace_id(&token.access_token))
+        .or_else(|| stored_chatgpt_account_id.clone())
+        .or_else(|| extract_chatgpt_account_id(&token.access_token));
     let access_claims = parse_id_token_claims(&token.access_token).ok();
     let plan_type_resolution = resolve_plan_type_resolution(&token, access_claims.as_ref());
+    let base_url = std::env::var("CODEXMANAGER_USAGE_BASE_URL")
+        .unwrap_or_else(|_| "https://chatgpt.com".to_string());
+    let subscription = fetch_account_subscription(
+        &base_url,
+        &token.access_token,
+        &chatgpt_account_id,
+        workspace_id.as_deref(),
+    )?;
+    storage
+        .upsert_account_subscription(
+            &refreshed_account.id,
+            subscription.has_subscription,
+            subscription.plan_type.as_deref(),
+            subscription.expires_at,
+            subscription.renews_at,
+        )
+        .map_err(|err| format!("store account subscription failed: {err}"))?;
+    let chatgpt_plan_type = subscription
+        .plan_type
+        .clone()
+        .or_else(|| plan_type_resolution.as_ref().map(|plan| plan.normalized.clone()));
 
     Ok(ChatgptAuthTokensRefreshResponse {
         access_token: token.access_token,
         chatgpt_account_id,
-        chatgpt_plan_type: plan_type_resolution
-            .as_ref()
-            .map(|plan| plan.normalized.clone()),
+        chatgpt_plan_type,
+        has_subscription: Some(subscription.has_subscription),
+        subscription_plan: subscription.plan_type,
+        subscription_expires_at: subscription.expires_at,
+        subscription_renews_at: subscription.renews_at,
     })
 }
 
@@ -378,8 +422,10 @@ fn resolve_refresh_target(
     let accounts = storage.list_accounts().map_err(|err| err.to_string())?;
     let found = accounts.into_iter().find(|account| {
         account.id == previous_account_id
-            || account.chatgpt_account_id.as_deref() == Some(previous_account_id)
-            || account.workspace_id.as_deref() == Some(previous_account_id)
+            || normalize_chatgpt_account_id(account.chatgpt_account_id.as_deref()).as_deref()
+                == Some(previous_account_id)
+            || normalize_workspace_id(account.workspace_id.as_deref()).as_deref()
+                == Some(previous_account_id)
     });
     let Some(account) = found else {
         return Ok(None);
@@ -404,12 +450,19 @@ fn resolve_refresh_target(
 /// # 返回
 /// 返回函数执行结果
 fn current_account_payload(
+    storage: &Storage,
     account: &Account,
     token: &Token,
     auth_mode: &str,
 ) -> CurrentAuthAccount {
     let claims = parse_id_token_claims(&token.access_token).ok();
     let plan_type_resolution = resolve_plan_type_resolution(token, claims.as_ref());
+    let subscription = storage.find_account_subscription(&account.id).ok().flatten();
+    let plan_type = subscription
+        .as_ref()
+        .and_then(|value| value.plan_type.clone())
+        .or_else(|| plan_type_resolution.as_ref().map(|plan| plan.normalized.clone()))
+        .unwrap_or_else(|| "unknown".to_string());
     CurrentAuthAccount {
         kind: auth_mode.to_string(),
         account_id: account.id.clone(),
@@ -417,13 +470,14 @@ fn current_account_payload(
             .as_ref()
             .and_then(|claims| claims.email.clone())
             .unwrap_or_else(|| account.label.clone()),
-        plan_type: plan_type_resolution
-            .as_ref()
-            .map(|plan| plan.normalized.clone())
-            .unwrap_or_else(|| "unknown".to_string()),
+        plan_type,
         plan_type_raw: plan_type_resolution.and_then(|plan| plan.raw),
-        chatgpt_account_id: account.chatgpt_account_id.clone(),
-        workspace_id: account.workspace_id.clone(),
+        has_subscription: subscription.as_ref().map(|value| value.has_subscription),
+        subscription_plan: subscription.as_ref().and_then(|value| value.plan_type.clone()),
+        subscription_expires_at: subscription.as_ref().and_then(|value| value.expires_at),
+        subscription_renews_at: subscription.as_ref().and_then(|value| value.renews_at),
+        chatgpt_account_id: normalize_chatgpt_account_id(account.chatgpt_account_id.as_deref()),
+        workspace_id: normalize_workspace_id(account.workspace_id.as_deref()),
         status: account.status.clone(),
     }
 }

@@ -6,6 +6,17 @@ use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Client;
 use reqwest::StatusCode;
 use std::sync::MutexGuard;
+use std::thread;
+use std::time::Duration;
+use tiny_http::{Header, Response, Server, StatusCode as TinyStatusCode};
+
+struct RecordedSubscriptionRequest {
+    path: String,
+    authorization: Option<String>,
+    chatgpt_account_id: Option<String>,
+    originator: Option<String>,
+    residency: Option<String>,
+}
 
 /// 函数 `usage_header_runtime_scope`
 ///
@@ -403,6 +414,99 @@ fn usage_request_headers_use_official_chatgpt_account_header_name() {
         Some("workspace_123")
     );
     assert_eq!(headers.len(), 1);
+}
+
+/// 函数 `subscription_request_uses_only_authorization_without_custom_usage_headers`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-17
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn subscription_request_uses_only_authorization_without_custom_usage_headers() {
+    let (_guard, _restore) = usage_header_runtime_scope();
+    crate::gateway::set_originator("codex_cli_rs_usage").expect("set gateway originator");
+    crate::gateway::set_residency_requirement(Some("us"))
+        .expect("set gateway residency requirement");
+
+    let server = Server::http("127.0.0.1:0").expect("start mock subscription server");
+    let addr = format!("http://{}", server.server_addr());
+    let (tx, rx) = std::sync::mpsc::channel();
+    let handle = thread::spawn(move || {
+        let request = server
+            .recv_timeout(Duration::from_secs(5))
+            .expect("subscription server timeout")
+            .expect("receive subscription request");
+        let path = request.url().to_string();
+        let authorization = request
+            .headers()
+            .iter()
+            .find(|header| header.field.equiv("Authorization"))
+            .map(|header| header.value.as_str().to_string());
+        let chatgpt_account_id = request
+            .headers()
+            .iter()
+            .find(|header| header.field.equiv("ChatGPT-Account-ID"))
+            .map(|header| header.value.as_str().to_string());
+        let originator = request
+            .headers()
+            .iter()
+            .find(|header| header.field.equiv("originator"))
+            .map(|header| header.value.as_str().to_string());
+        let residency = request
+            .headers()
+            .iter()
+            .find(|header| header.field.equiv("x-openai-internal-codex-residency"))
+            .map(|header| header.value.as_str().to_string());
+        tx.send(RecordedSubscriptionRequest {
+            path,
+            authorization,
+            chatgpt_account_id,
+            originator,
+            residency,
+        })
+        .expect("send subscription request");
+        let response = Response::from_string(
+            r#"{"id":"sub_123","plan_type":"plus","active_until":"2026-05-06T03:31:29Z"}"#,
+        )
+        .with_status_code(TinyStatusCode(200))
+        .with_header(
+            Header::from_bytes("Content-Type", "application/json")
+                .expect("content-type header"),
+        );
+        request
+            .respond(response)
+            .expect("respond subscription request");
+    });
+
+    let snapshot = super::fetch_account_subscription(
+        &addr,
+        "token_123",
+        "32673762-4fd7-4cef-8d9e-fa96aec5b5c4",
+        Some("workspace_123"),
+    )
+    .expect("fetch subscription");
+
+    let recorded = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("receive recorded request");
+    handle.join().expect("join subscription server");
+
+    assert!(snapshot.has_subscription);
+    assert_eq!(snapshot.plan_type.as_deref(), Some("plus"));
+    assert_eq!(
+        recorded.path,
+        "/subscriptions?account_id=32673762-4fd7-4cef-8d9e-fa96aec5b5c4"
+    );
+    assert_eq!(recorded.authorization.as_deref(), Some("Bearer token_123"));
+    assert_eq!(recorded.chatgpt_account_id, None);
+    assert_eq!(recorded.originator, None);
+    assert_eq!(recorded.residency, None);
 }
 
 /// 函数 `refresh_token_url_uses_official_default_for_openai_issuer`

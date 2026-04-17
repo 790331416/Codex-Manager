@@ -155,6 +155,28 @@ pub fn usage_endpoint(base_url: &str) -> String {
     }
 }
 
+/// 函数 `subscription_endpoint`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-17
+///
+/// # 参数
+/// - base_url: 参数 base_url
+/// - account_id: 参数 account_id
+///
+/// # 返回
+/// 返回函数执行结果
+pub fn subscription_endpoint(base_url: &str, account_id: &str) -> String {
+    let base = normalize_base_url(base_url);
+    let trimmed_account_id = account_id.trim();
+    let base_endpoint = format!("{base}/subscriptions");
+    format!(
+        "{base_endpoint}?account_id={}",
+        urlencoding::encode(trimmed_account_id)
+    )
+}
+
 /// 函数 `parse_usage_snapshot`
 ///
 /// 作者: gaohongshun

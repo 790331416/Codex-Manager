@@ -216,6 +216,32 @@ fn ensure_workspace_allowed_rejects_mismatched_workspace() {
     );
 }
 
+/// 函数 `ensure_workspace_allowed_accepts_composite_scope_values_after_normalization`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-17
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn ensure_workspace_allowed_accepts_composite_scope_values_after_normalization() {
+    let token = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyLTEiLCJ3b3Jrc3BhY2VfaWQiOiJnb29nbGUtb2F1dGgyfDEwNTY3MTMwNzY2NTg0MTQxOTc0ODo6Y2dwdD1lZDA4ZDU2YS1jMDM4LTQzMjItYjMyNS01M2Y1MDRjMGM4OGN8d3M9b3JnLUFQNnlwY01pODRUaGZ1ZWxpNkVVM0I0bSIsImh0dHBzOi8vYXBpLm9wZW5haS5jb20vYXV0aCI6eyJjaGF0Z3B0X2FjY291bnRfaWQiOiJnb29nbGUtb2F1dGgyfDEwNTY3MTMwNzY2NTg0MTQxOTc0ODo6Y2dwdD1lZDA4ZDU2YS1jMDM4LTQzMjItYjMyNS01M2Y1MDRjMGM4OGN8d3M9b3JnLUFQNnlwY01pODRUaGZ1ZWxpNkVVM0I0bSJ9fQ.sig".to_string();
+    let claims = parse_id_token_claims(&token).expect("claims");
+
+    let result = ensure_workspace_allowed(
+        Some("org-AP6ypcMi84Thfueli6EU3B4m"),
+        &claims,
+        &token,
+        &token,
+    );
+
+    assert!(result.is_ok(), "workspace should match after normalization");
+}
+
 /// 函数 `parse_token_endpoint_error_prefers_error_description`
 ///
 /// 作者: gaohongshun

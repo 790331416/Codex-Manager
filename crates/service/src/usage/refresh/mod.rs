@@ -14,7 +14,7 @@ use crate::usage_account_meta::{
     build_workspace_map_from_accounts, clean_header_value, derive_account_meta, patch_account_meta,
     patch_account_meta_cached, workspace_header_for_account,
 };
-use crate::usage_http::fetch_usage_snapshot;
+use crate::usage_http::{fetch_account_subscription, fetch_usage_snapshot};
 use crate::usage_keepalive::{is_keepalive_error_ignorable, run_gateway_keepalive_once};
 use crate::usage_scheduler::{
     parse_interval_secs, DEFAULT_GATEWAY_KEEPALIVE_FAILURE_BACKOFF_MAX_SECS,
@@ -440,27 +440,32 @@ fn refresh_usage_for_token(
             storage,
             accounts,
             &current.account_id,
-            derived_chatgpt_id,
-            derived_workspace_id,
+            derived_chatgpt_id.clone(),
+            derived_workspace_id.clone(),
         );
     } else {
         patch_account_meta(
             storage,
             &current.account_id,
-            derived_chatgpt_id,
-            derived_workspace_id,
+            derived_chatgpt_id.clone(),
+            derived_workspace_id.clone(),
         );
     }
 
     let resolved_workspace_id = clean_header_value(resolved_workspace_id);
+    let resolved_subscription_account_id =
+        clean_header_value(derived_chatgpt_id.or_else(|| resolved_workspace_id.clone()));
     let bearer = current.access_token.clone();
 
-    match fetch_usage_snapshot(&base_url, &bearer, resolved_workspace_id.as_deref()) {
-        Ok(value) => {
-            let status = classify_usage_status_from_snapshot_value(&value);
-            store_usage_snapshot(storage, &current.account_id, value)?;
-            Ok(UsageRefreshResult { _status: status })
-        }
+    match refresh_account_snapshot(
+        storage,
+        &current.account_id,
+        &base_url,
+        &bearer,
+        resolved_workspace_id.as_deref(),
+        resolved_subscription_account_id.as_deref(),
+    ) {
+        Ok(status) => Ok(UsageRefreshResult { _status: status }),
         Err(err) if should_retry_usage_refresh_with_token(&current, &err) => {
             if current.refresh_token.trim().is_empty() {
                 log::debug!(
@@ -478,13 +483,27 @@ fn refresh_usage_for_token(
                 mark_usage_unreachable_if_needed(storage, &current.account_id, &refresh_err);
                 return Err(refresh_err);
             }
+            let (refreshed_chatgpt_id, refreshed_workspace_id) = derive_account_meta(&current);
+            patch_account_meta(
+                storage,
+                &current.account_id,
+                refreshed_chatgpt_id.clone(),
+                refreshed_workspace_id.clone(),
+            );
+            let refreshed_workspace_id =
+                clean_header_value(refreshed_workspace_id.or_else(|| refreshed_chatgpt_id.clone()));
+            let refreshed_subscription_account_id =
+                clean_header_value(refreshed_chatgpt_id.or_else(|| refreshed_workspace_id.clone()));
             let bearer = current.access_token.clone();
-            match fetch_usage_snapshot(&base_url, &bearer, resolved_workspace_id.as_deref()) {
-                Ok(value) => {
-                    let status = classify_usage_status_from_snapshot_value(&value);
-                    store_usage_snapshot(storage, &current.account_id, value)?;
-                    Ok(UsageRefreshResult { _status: status })
-                }
+            match refresh_account_snapshot(
+                storage,
+                &current.account_id,
+                &base_url,
+                &bearer,
+                refreshed_workspace_id.as_deref(),
+                refreshed_subscription_account_id.as_deref(),
+            ) {
+                Ok(status) => Ok(UsageRefreshResult { _status: status }),
                 Err(err) => {
                     mark_usage_unreachable_if_needed(storage, &current.account_id, &err);
                     Err(err)
@@ -496,6 +515,38 @@ fn refresh_usage_for_token(
             Err(err)
         }
     }
+}
+
+fn refresh_account_snapshot(
+    storage: &Storage,
+    account_id: &str,
+    base_url: &str,
+    bearer: &str,
+    workspace_id: Option<&str>,
+    subscription_account_id: Option<&str>,
+) -> Result<UsageAvailabilityStatus, String> {
+    if let Some(subscription_account_id) = subscription_account_id {
+        let subscription = fetch_account_subscription(
+            base_url,
+            bearer,
+            subscription_account_id,
+            workspace_id,
+        )?;
+        storage
+            .upsert_account_subscription(
+                account_id,
+                subscription.has_subscription,
+                subscription.plan_type.as_deref(),
+                subscription.expires_at,
+                subscription.renews_at,
+            )
+            .map_err(|err| format!("store account subscription failed: {err}"))?;
+    }
+
+    let value = fetch_usage_snapshot(base_url, bearer, workspace_id)?;
+    let status = classify_usage_status_from_snapshot_value(&value);
+    store_usage_snapshot(storage, account_id, value)?;
+    Ok(status)
 }
 
 #[cfg(test)]
@@ -560,7 +611,11 @@ fn classify_usage_status_from_snapshot_value(value: &serde_json::Value) -> Usage
 /// # 返回
 /// 返回函数执行结果
 fn classify_usage_status_from_error(err: &str) -> UsageAvailabilityStatus {
-    if err.starts_with("usage endpoint status ") {
+    if err.starts_with("usage endpoint status ")
+        || err.starts_with("usage endpoint failed: status=")
+        || err.starts_with("subscription endpoint status ")
+        || err.starts_with("subscription endpoint failed: status=")
+    {
         return UsageAvailabilityStatus::Unavailable;
     }
     UsageAvailabilityStatus::Unknown

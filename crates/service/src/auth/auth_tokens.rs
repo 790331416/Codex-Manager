@@ -1,6 +1,7 @@
 use codexmanager_core::auth::{
     device_redirect_uri, device_token_url, device_usercode_url, extract_chatgpt_account_id,
-    extract_workspace_id, parse_id_token_claims, token_exchange_body_authorization_code,
+    extract_workspace_id, normalize_chatgpt_account_id, normalize_workspace_id,
+    parse_id_token_claims, token_exchange_body_authorization_code,
     token_exchange_body_token_exchange, IdTokenClaims, DEFAULT_CLIENT_ID, DEFAULT_ISSUER,
 };
 use codexmanager_core::storage::{now_ts, Account, Token};
@@ -1153,18 +1154,18 @@ pub(crate) fn complete_login_with_redirect(
         .email
         .clone()
         .unwrap_or_else(|| subject_account_id.clone());
+    let claim_chatgpt_account_id = claims
+        .auth
+        .as_ref()
+        .and_then(|auth| normalize_chatgpt_account_id(auth.chatgpt_account_id.as_deref()));
+    let claim_workspace_id = normalize_workspace_id(claims.workspace_id.as_deref());
     let chatgpt_account_id = clean_value(
-        claims
-            .auth
-            .as_ref()
-            .and_then(|auth| auth.chatgpt_account_id.clone())
+        claim_chatgpt_account_id
             .or_else(|| extract_chatgpt_account_id(&tokens.id_token))
             .or_else(|| extract_chatgpt_account_id(&tokens.access_token)),
     );
     let workspace_id = clean_value(
-        claims
-            .workspace_id
-            .clone()
+        claim_workspace_id
             .or_else(|| extract_workspace_id(&tokens.id_token))
             .or_else(|| extract_workspace_id(&tokens.access_token))
             .or_else(|| chatgpt_account_id.clone()),
@@ -1471,27 +1472,41 @@ fn ensure_workspace_allowed(
     id_token: &str,
     access_token: &str,
 ) -> Result<(), String> {
-    let Some(expected) = expected.map(str::trim).filter(|value| !value.is_empty()) else {
+    let Some(expected_raw) = expected.map(str::trim).filter(|value| !value.is_empty()) else {
         return Ok(());
     };
 
-    let actual = clean_value(
-        claims
-            .auth
-            .as_ref()
-            .and_then(|auth| auth.chatgpt_account_id.clone())
-            .or_else(|| extract_chatgpt_account_id(id_token))
-            .or_else(|| extract_chatgpt_account_id(access_token))
-            .or_else(|| claims.workspace_id.clone())
-            .or_else(|| extract_workspace_id(id_token))
-            .or_else(|| extract_workspace_id(access_token)),
-    );
+    let expected_workspace = normalize_workspace_id(Some(expected_raw));
+    let expected_chatgpt = normalize_chatgpt_account_id(Some(expected_raw));
+    let expected = expected_workspace
+        .clone()
+        .or(expected_chatgpt.clone())
+        .ok_or_else(|| "Login is restricted to a specific workspace, but the workspace id was invalid.".to_string())?;
 
-    let Some(actual) = actual else {
+    let actual_workspace = normalize_workspace_id(claims.workspace_id.as_deref())
+        .or_else(|| extract_workspace_id(id_token))
+        .or_else(|| extract_workspace_id(access_token));
+    let actual_chatgpt = claims
+        .auth
+        .as_ref()
+        .and_then(|auth| normalize_chatgpt_account_id(auth.chatgpt_account_id.as_deref()))
+        .or_else(|| extract_chatgpt_account_id(id_token))
+        .or_else(|| extract_chatgpt_account_id(access_token));
+
+    if actual_workspace.is_none() && actual_chatgpt.is_none() {
         return Err("Login is restricted to a specific workspace, but the token did not include a workspace claim.".to_string());
-    };
+    }
 
-    if actual == expected {
+    let workspace_matches = expected_workspace
+        .as_ref()
+        .zip(actual_workspace.as_ref())
+        .is_some_and(|(expected, actual)| expected == actual);
+    let chatgpt_matches = expected_chatgpt
+        .as_ref()
+        .zip(actual_chatgpt.as_ref())
+        .is_some_and(|(expected, actual)| expected == actual);
+
+    if workspace_matches || chatgpt_matches {
         Ok(())
     } else {
         Err(format!("Login is restricted to workspace id {expected}."))

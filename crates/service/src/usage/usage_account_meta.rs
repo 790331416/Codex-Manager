@@ -1,5 +1,6 @@
 use codexmanager_core::auth::{
-    extract_chatgpt_account_id, extract_workspace_id, parse_id_token_claims,
+    extract_chatgpt_account_id, extract_workspace_id, normalize_chatgpt_account_id,
+    normalize_workspace_id, parse_id_token_claims,
 };
 use codexmanager_core::storage::{now_ts, Account, Storage, Token};
 use std::collections::HashMap;
@@ -45,7 +46,8 @@ fn resolve_workspace_header(
     workspace_id: Option<String>,
     chatgpt_account_id: Option<String>,
 ) -> Option<String> {
-    clean_header_value(workspace_id).or_else(|| clean_header_value(chatgpt_account_id))
+    normalize_workspace_id(workspace_id.as_deref())
+        .or_else(|| normalize_chatgpt_account_id(chatgpt_account_id.as_deref()))
 }
 
 /// 函数 `workspace_header_for_account`
@@ -148,11 +150,11 @@ pub(crate) fn derive_account_meta(token: &Token) -> (Option<String>, Option<Stri
     if let Ok(claims) = parse_id_token_claims(&token.id_token) {
         if let Some(auth) = claims.auth {
             if chatgpt_account_id.is_none() {
-                chatgpt_account_id = clean_header_value(auth.chatgpt_account_id);
+                chatgpt_account_id = normalize_chatgpt_account_id(auth.chatgpt_account_id.as_deref());
             }
         }
         if workspace_id.is_none() {
-            workspace_id = clean_header_value(claims.workspace_id);
+            workspace_id = normalize_workspace_id(claims.workspace_id.as_deref());
         }
     }
 
@@ -292,8 +294,8 @@ fn apply_account_meta_patch(
     workspace_id: Option<String>,
 ) -> bool {
     let mut changed = false;
-    let next_chatgpt_account_id = clean_header_value(chatgpt_account_id);
-    let next_workspace_id = clean_header_value(workspace_id);
+    let next_chatgpt_account_id = normalize_chatgpt_account_id(chatgpt_account_id.as_deref());
+    let next_workspace_id = normalize_workspace_id(workspace_id.as_deref());
 
     if let Some(next) = next_chatgpt_account_id.clone() {
         if is_invalid_upstream_scope_value(&next) {

@@ -98,6 +98,40 @@ pub fn parse_id_token_claims(token: &str) -> Result<IdTokenClaims, String> {
     serde_json::from_str(json).map_err(|e| e.to_string())
 }
 
+fn normalize_scoped_identity_value(value: Option<&str>, marker: &str) -> Option<String> {
+    let raw = value.map(str::trim).filter(|value| !value.is_empty())?;
+
+    let scoped = raw.rsplit_once("::").map(|(_, suffix)| suffix).unwrap_or(raw);
+    if let Some(found) = scoped.split('|').find_map(|segment| {
+        segment
+            .trim()
+            .strip_prefix(marker)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    }) {
+        return Some(found);
+    }
+
+    if raw.contains("::")
+        || raw.contains('|')
+        || raw.contains('=')
+        || raw.starts_with("import-sub-")
+    {
+        return None;
+    }
+
+    Some(raw.to_string())
+}
+
+pub fn normalize_chatgpt_account_id(value: Option<&str>) -> Option<String> {
+    normalize_scoped_identity_value(value, "cgpt=")
+}
+
+pub fn normalize_workspace_id(value: Option<&str>) -> Option<String> {
+    normalize_scoped_identity_value(value, "ws=")
+}
+
 /// 函数 `extract_token_exp`
 ///
 /// 作者: gaohongshun
@@ -142,16 +176,15 @@ pub fn extract_chatgpt_account_id(token: &str) -> Option<String> {
     let json = std::str::from_utf8(&decoded).ok()?;
     let value: serde_json::Value = serde_json::from_str(json).ok()?;
     if let Some(v) = value.get("chatgpt_account_id").and_then(|v| v.as_str()) {
-        if !v.trim().is_empty() {
-            return Some(v.to_string());
+        if let Some(account_id) = normalize_chatgpt_account_id(Some(v)) {
+            return Some(account_id);
         }
     }
     value
         .get("https://api.openai.com/auth")
         .and_then(|v| v.get("chatgpt_account_id"))
         .and_then(|v| v.as_str())
-        .map(|v| v.to_string())
-        .filter(|v| !v.trim().is_empty())
+        .and_then(|v| normalize_chatgpt_account_id(Some(v)))
 }
 
 /// 函数 `extract_workspace_id`
@@ -182,8 +215,8 @@ pub fn extract_workspace_id(token: &str) -> Option<String> {
     ];
     for key in keys {
         if let Some(v) = value.get(key).and_then(|v| v.as_str()) {
-            if !v.trim().is_empty() {
-                return Some(v.to_string());
+            if let Some(workspace_id) = normalize_workspace_id(Some(v)) {
+                return Some(workspace_id);
             }
         }
     }
@@ -198,23 +231,23 @@ pub fn extract_workspace_id(token: &str) -> Option<String> {
                     .unwrap_or(false)
             }) {
                 if let Some(v) = default_org.get("id").and_then(|v| v.as_str()) {
-                    if !v.trim().is_empty() {
-                        return Some(v.to_string());
+                    if let Some(workspace_id) = normalize_workspace_id(Some(v)) {
+                        return Some(workspace_id);
                     }
                 }
             }
             if let Some(first_org) = orgs.first() {
                 if let Some(v) = first_org.get("id").and_then(|v| v.as_str()) {
-                    if !v.trim().is_empty() {
-                        return Some(v.to_string());
+                    if let Some(workspace_id) = normalize_workspace_id(Some(v)) {
+                        return Some(workspace_id);
                     }
                 }
             }
         }
         for key in keys {
             if let Some(v) = auth.get(key).and_then(|v| v.as_str()) {
-                if !v.trim().is_empty() {
-                    return Some(v.to_string());
+                if let Some(workspace_id) = normalize_workspace_id(Some(v)) {
+                    return Some(workspace_id);
                 }
             }
         }

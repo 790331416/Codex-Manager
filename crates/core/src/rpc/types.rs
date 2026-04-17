@@ -184,6 +184,10 @@ pub struct AccountSummary {
     pub status_reason: Option<String>,
     pub plan_type: Option<String>,
     pub plan_type_raw: Option<String>,
+    pub has_subscription: Option<bool>,
+    pub subscription_plan: Option<String>,
+    pub subscription_expires_at: Option<i64>,
+    pub subscription_renews_at: Option<i64>,
     pub note: Option<String>,
     pub tags: Option<String>,
 }

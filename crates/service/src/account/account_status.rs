@@ -144,6 +144,10 @@ fn extract_usage_http_status_code(message: &str) -> Option<u16> {
         Some(rest)
     } else if let Some(rest) = trimmed.strip_prefix("usage endpoint failed: status=") {
         Some(rest)
+    } else if let Some(rest) = trimmed.strip_prefix("subscription endpoint status ") {
+        Some(rest)
+    } else if let Some(rest) = trimmed.strip_prefix("subscription endpoint failed: status=") {
+        Some(rest)
     } else {
         None
     }?;
@@ -464,6 +468,16 @@ mod tests {
         assert!(matches!(
             classify_account_availability_signal("usage endpoint status 429 Too Many Requests"),
             Some(AccountAvailabilitySignal::UsageHttp(429))
+        ));
+        assert!(matches!(
+            classify_account_availability_signal("subscription endpoint status 403 Forbidden"),
+            Some(AccountAvailabilitySignal::UsageHttp(403))
+        ));
+        assert!(matches!(
+            classify_account_availability_signal(
+                "subscription endpoint failed: status=401 Unauthorized body=token expired"
+            ),
+            Some(AccountAvailabilitySignal::UsageHttp(401))
         ));
 
         assert!(matches!(
