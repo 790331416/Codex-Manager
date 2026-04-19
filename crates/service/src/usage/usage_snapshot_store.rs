@@ -7,6 +7,10 @@ const DEFAULT_USAGE_SNAPSHOTS_RETAIN_PER_ACCOUNT: usize = 0;
 const USAGE_SNAPSHOTS_RETAIN_PER_ACCOUNT_ENV: &str =
     "CODEXMANAGER_USAGE_SNAPSHOTS_RETAIN_PER_ACCOUNT";
 
+fn usage_status_updates_blocked(current_status: &str) -> bool {
+    current_status.trim().eq_ignore_ascii_case("disabled")
+}
+
 /// 函数 `usage_snapshots_retain_per_account`
 ///
 /// 作者: gaohongshun
@@ -41,16 +45,25 @@ pub(crate) fn apply_status_from_snapshot(
     record: &UsageSnapshotRecord,
 ) -> Availability {
     let availability = evaluate_snapshot(record);
-    if matches!(availability, Availability::Available) {
-        let current_status = storage
-            .find_account_by_id(&record.account_id)
-            .ok()
-            .flatten()
-            .map(|account| account.status)
-            .unwrap_or_default();
-        if !current_status.trim().eq_ignore_ascii_case("disabled") {
+    let current_status = storage
+        .find_account_by_id(&record.account_id)
+        .ok()
+        .flatten()
+        .map(|account| account.status)
+        .unwrap_or_default();
+
+    if usage_status_updates_blocked(&current_status) {
+        return availability;
+    }
+
+    match availability {
+        Availability::Available => {
             set_account_status(storage, &record.account_id, "active", "usage_ok");
         }
+        Availability::Unavailable("usage_exhausted_primary" | "usage_exhausted_secondary") => {
+            set_account_status(storage, &record.account_id, "limited", "usage_limit_exhausted");
+        }
+        Availability::Unavailable(_) => {}
     }
     availability
 }

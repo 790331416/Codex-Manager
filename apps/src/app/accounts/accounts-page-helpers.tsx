@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/tooltip";
 import type { Account } from "@/types";
 
-export type StatusFilter = "all" | "available" | "low_quota" | "banned";
+export type StatusFilter = "all" | "available" | "low_quota" | "limited" | "banned";
 export type AccountExportMode = "single" | "multiple";
 export type AccountSizeSortMode = "large-first" | "small-first";
 
@@ -82,6 +82,8 @@ export function formatStatusFilterLabel(value: string, t: TranslateFn) {
       return t("可用");
     case "low_quota":
       return t("低配额");
+    case "limited":
+      return t("限流");
     case "banned":
       return t("封禁");
     case "all":

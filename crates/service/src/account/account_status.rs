@@ -281,7 +281,7 @@ fn mark_account_unavailable_for_confirmed_usage_exhausted(
     if !exhausted {
         return false;
     }
-    set_account_unavailable_with_reason(storage, account_id, "usage_limit_exhausted")
+    set_account_limited_with_reason(storage, account_id, "usage_limit_exhausted")
 }
 
 /// 函数 `set_account_unavailable_with_reason`
@@ -302,6 +302,14 @@ fn set_account_unavailable_with_reason(storage: &Storage, account_id: &str, reas
         return false;
     }
     set_account_status(storage, account_id, "unavailable", reason);
+    true
+}
+
+fn set_account_limited_with_reason(storage: &Storage, account_id: &str, reason: &str) -> bool {
+    if should_preserve_manual_account_status(storage, account_id) {
+        return false;
+    }
+    set_account_status(storage, account_id, "limited", reason);
     true
 }
 
@@ -566,7 +574,7 @@ mod tests {
         assert_eq!(account.status, "active");
     }
 
-    /// 函数 `gateway_usage_limit_error_marks_account_unavailable_when_snapshot_exhausted`
+    /// 函数 `gateway_usage_limit_error_marks_account_limited_when_snapshot_exhausted`
     ///
     /// 作者: gaohongshun
     ///
@@ -578,7 +586,7 @@ mod tests {
     /// # 返回
     /// 无
     #[test]
-    fn gateway_usage_limit_error_marks_account_unavailable_when_snapshot_exhausted() {
+    fn gateway_usage_limit_error_marks_account_limited_when_snapshot_exhausted() {
         let _guard = crate::test_env_guard();
         let storage = Storage::open_in_memory().expect("open storage");
         storage.init().expect("init storage");
@@ -621,6 +629,13 @@ mod tests {
             .find_account_by_id("acc-usage-exhausted")
             .expect("find account")
             .expect("account exists");
-        assert_eq!(account.status, "unavailable");
+        assert_eq!(account.status, "limited");
+        let reasons = storage
+            .latest_account_status_reasons(&["acc-usage-exhausted".to_string()])
+            .expect("load reasons");
+        assert_eq!(
+            reasons.get("acc-usage-exhausted").map(String::as_str),
+            Some("usage_limit_exhausted")
+        );
     }
 }

@@ -219,6 +219,10 @@ function isUnavailableAccount(account?: { status?: string } | null): boolean {
   return normalizedAccountStatus(account) === "unavailable";
 }
 
+export function isLimitedAccount(account?: { status?: string } | null): boolean {
+  return normalizedAccountStatus(account) === "limited";
+}
+
 /**
  * 函数 `isBannedAccount`
  *
@@ -586,6 +590,9 @@ export function calcAvailability(
   usage?: Partial<AccountUsage> | null,
   account?: { status?: string; statusReason?: string } | null
 ): { text: string; level: AvailabilityLevel } {
+  const primaryExhausted = (usage?.usedPercent ?? 0) >= 100;
+  const secondaryExhausted = (usage?.secondaryUsedPercent ?? 0) >= 100;
+
   if (isDisabledAccount(account)) {
     return { text: "已禁用", level: "bad" };
   }
@@ -594,6 +601,9 @@ export function calcAvailability(
   }
   if (isBannedAccount(account)) {
     return { text: "封禁", level: "bad" };
+  }
+  if (isLimitedAccount(account)) {
+    return { text: "限流", level: "bad" };
   }
   if (isUnavailableAccount(account)) {
     return { text: "不可用", level: "bad" };
@@ -616,6 +626,9 @@ export function calcAvailability(
     };
   }
   if (normalizedStatus === "unavailable") {
+    if (primaryExhausted || secondaryExhausted) {
+      return { text: "限流", level: "bad" };
+    }
     return { text: "不可用", level: "bad" };
   }
   if (normalizedStatus === "unknown") {
@@ -633,8 +646,8 @@ export function calcAvailability(
     toNullableNumber(usage.secondaryWindowMinutes) == null;
 
   if (primaryMissing) return { text: "用量缺失", level: "bad" };
-  if ((usage.usedPercent ?? 0) >= 100) {
-    return { text: "不可用", level: "bad" };
+  if (primaryExhausted) {
+    return { text: "限流", level: "bad" };
   }
   if (!secondaryPresent) {
     return {
@@ -645,8 +658,8 @@ export function calcAvailability(
   if (secondaryMissing) {
     return { text: "用量缺失", level: "bad" };
   }
-  if ((usage.secondaryUsedPercent ?? 0) >= 100) {
-    return { text: "不可用", level: "bad" };
+  if (secondaryExhausted) {
+    return { text: "限流", level: "bad" };
   }
   return { text: "可用", level: "ok" };
 }
@@ -707,8 +720,8 @@ export function isLowQuotaUsage(usage?: Partial<AccountUsage> | null): boolean {
   const primaryRemain = buckets.primaryRemainPercent;
   const secondaryRemain = buckets.secondaryRemainPercent;
   return (
-    (primaryRemain != null && primaryRemain <= 20) ||
-    (secondaryRemain != null && secondaryRemain <= 20)
+    (primaryRemain != null && primaryRemain > 0 && primaryRemain <= 20) ||
+    (secondaryRemain != null && secondaryRemain > 0 && secondaryRemain <= 20)
   );
 }
 

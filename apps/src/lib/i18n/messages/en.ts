@@ -139,6 +139,7 @@ export const EN_MESSAGES: MessageCatalog = {
   删除密钥: "Delete key",
   全部: "All",
   低配额: "Low quota",
+  限流: "Rate limited",
   封禁: "Banned",
   未知: "Unknown",
   重置: "Reset",

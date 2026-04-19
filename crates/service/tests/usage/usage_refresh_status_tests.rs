@@ -157,6 +157,127 @@ fn apply_status_skips_db_and_event_when_status_unchanged() {
     assert_eq!(storage.event_count().expect("count events"), 1);
 }
 
+/// 函数 `apply_status_exhausted_snapshot_marks_account_limited`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-19
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn apply_status_exhausted_snapshot_marks_account_limited() {
+    let storage = Storage::open_in_memory().expect("open");
+    storage.init().expect("init");
+    let account = Account {
+        id: "acc-limited".to_string(),
+        label: "limited".to_string(),
+        issuer: "issuer".to_string(),
+        chatgpt_account_id: None,
+        workspace_id: None,
+        group_name: None,
+        sort: 0,
+        status: "active".to_string(),
+        created_at: now_ts(),
+        updated_at: now_ts(),
+    };
+    storage.insert_account(&account).expect("insert");
+
+    let record = UsageSnapshotRecord {
+        account_id: "acc-limited".to_string(),
+        used_percent: Some(100.0),
+        window_minutes: Some(300),
+        resets_at: None,
+        secondary_used_percent: Some(42.0),
+        secondary_window_minutes: Some(10080),
+        secondary_resets_at: None,
+        credits_json: None,
+        captured_at: now_ts(),
+    };
+
+    let availability = apply_status_from_snapshot(&storage, &record);
+    assert!(matches!(
+        availability,
+        Availability::Unavailable("usage_exhausted_primary")
+    ));
+
+    let limited = storage
+        .find_account_by_id("acc-limited")
+        .expect("find")
+        .expect("exists");
+    assert_eq!(limited.status, "limited");
+
+    let reasons = storage
+        .latest_account_status_reasons(&["acc-limited".to_string()])
+        .expect("load reasons");
+    assert_eq!(
+        reasons.get("acc-limited").map(String::as_str),
+        Some("usage_limit_exhausted")
+    );
+}
+
+/// 函数 `apply_status_available_snapshot_recovers_limited_account_to_active`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-19
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn apply_status_available_snapshot_recovers_limited_account_to_active() {
+    let storage = Storage::open_in_memory().expect("open");
+    storage.init().expect("init");
+    let account = Account {
+        id: "acc-limited-recover".to_string(),
+        label: "limited-recover".to_string(),
+        issuer: "issuer".to_string(),
+        chatgpt_account_id: None,
+        workspace_id: None,
+        group_name: None,
+        sort: 0,
+        status: "limited".to_string(),
+        created_at: now_ts(),
+        updated_at: now_ts(),
+    };
+    storage.insert_account(&account).expect("insert");
+
+    let record = UsageSnapshotRecord {
+        account_id: "acc-limited-recover".to_string(),
+        used_percent: Some(12.0),
+        window_minutes: Some(300),
+        resets_at: None,
+        secondary_used_percent: Some(18.0),
+        secondary_window_minutes: Some(10080),
+        secondary_resets_at: None,
+        credits_json: None,
+        captured_at: now_ts(),
+    };
+
+    let availability = apply_status_from_snapshot(&storage, &record);
+    assert!(matches!(availability, Availability::Available));
+
+    let active = storage
+        .find_account_by_id("acc-limited-recover")
+        .expect("find")
+        .expect("exists");
+    assert_eq!(active.status, "active");
+
+    let reasons = storage
+        .latest_account_status_reasons(&["acc-limited-recover".to_string()])
+        .expect("load reasons");
+    assert_eq!(
+        reasons.get("acc-limited-recover").map(String::as_str),
+        Some("usage_ok")
+    );
+}
+
 /// 函数 `mark_usage_unreachable_marks_401_403_as_unavailable_but_ignores_429`
 ///
 /// 作者: gaohongshun

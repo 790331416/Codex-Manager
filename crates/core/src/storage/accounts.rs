@@ -916,7 +916,7 @@ fn account_usage_filter_clause(
 ) -> String {
     match mode {
         AccountUsageQueryMode::ActiveAvailable => format!(
-            "LOWER(TRIM(COALESCE({account_alias}.status, ''))) NOT IN ('inactive', 'disabled', 'unavailable', 'banned')
+            "LOWER(TRIM(COALESCE({account_alias}.status, ''))) NOT IN ('inactive', 'disabled', 'unavailable', 'limited', 'banned')
              AND ({usage_alias}.account_id IS NULL OR ({}))",
             available_usage_clause(usage_alias)
         ),
