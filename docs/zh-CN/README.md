@@ -25,6 +25,18 @@
 <table>
   <tr>
     <td align="center" valign="middle" width="180">
+      <a href="https://coder.visioncoder.cn">
+        <img src="https://coder.visioncoder.cn/logo.png" alt="VisionCoder" width="88" />
+      </a>
+    </td>
+    <td valign="top">
+      <strong>感谢 VisionCoder 对本项目的支持。</strong><br />
+      <a href="https://coder.visioncoder.cn">VisionCoder 开发平台</a> 是一个可靠高效的 API 中继服务提供商，提供 Claude Code、Codex、Gemini 等主流 AI 模型，帮助开发者和团队更轻松地集成 AI 功能，提升工作效率。<br />
+      <strong>限时活动：</strong> VisionCoder 为我们的用户提供 <a href="https://coder.visioncoder.cn">Token Plan</a> 优惠，购买 1 个月，赠送 1 个月。
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="middle" width="180">
       <a href="https://www.aixiamo.com/">
         <img src="../../assets/images/sponsors/aixiamo.ico" alt="小末 AI 小卖铺" width="88" />
       </a>
