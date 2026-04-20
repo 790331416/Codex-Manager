@@ -71,6 +71,17 @@ impl PassthroughSseUsageReader {
             if let Some(event_type) = inspection.last_event_type {
                 collector.last_event_type = Some(event_type);
             }
+            // 上游偶尔会用 200 + 正常 data: 帧夹带 "You've hit your usage limit..."
+            // 回覆（不走 response.failed）。这类帧里 delta 文本会让 inspection.usage 被
+            // 初始化为 Some，直接落到下面的 merge_usage 分支，永远不会触发 terminal。
+            // 所以必须在进任何分支前先扫一遍正文；命中 usage-limit 关键字就标 terminal 错误，
+            // 让后续 response_finalize 走 failover + cooldown。
+            if collector.terminal_error.is_none() {
+                if let Some(msg) = extract_usage_limit_from_sse_data(lines) {
+                    collector.saw_terminal = true;
+                    collector.terminal_error = Some(msg);
+                }
+            }
             if inspection.usage.is_none() && inspection.terminal.is_none() {
                 if collector.upstream_error_hint.is_none() {
                     let raw_frame = lines.concat();
@@ -203,5 +214,63 @@ impl Read for PassthroughSseUsageReader {
             }
             self.out_cursor = Cursor::new(self.next_chunk()?);
         }
+    }
+}
+
+fn extract_usage_limit_from_sse_data(lines: &[String]) -> Option<String> {
+    let mut data_payload = String::new();
+    for line in lines {
+        let trimmed = line.trim_end_matches(['\r', '\n']);
+        if let Some(rest) = trimmed.strip_prefix("data:") {
+            if !data_payload.is_empty() {
+                data_payload.push('\n');
+            }
+            data_payload.push_str(rest.trim_start());
+        }
+    }
+    if data_payload.is_empty() {
+        return None;
+    }
+    crate::account_status::usage_limit_reason_from_message(&data_payload)?;
+    Some(data_payload)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_usage_limit_matches_plain_text_delta() {
+        let lines = vec![
+            "event: response.output_text.delta\n".to_string(),
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"You've hit your usage limit. To get more access now, send a request to your admin or try again at 7:44 PM.\"}\n".to_string(),
+        ];
+        let got = extract_usage_limit_from_sse_data(&lines).expect("must match");
+        assert!(got.contains("hit your usage limit"));
+    }
+
+    #[test]
+    fn extract_usage_limit_matches_quota_exceeded_json() {
+        let lines = vec![
+            "data: {\"error\":{\"code\":\"insufficient_quota\",\"message\":\"quota exceeded\"}}\n".to_string(),
+        ];
+        assert!(extract_usage_limit_from_sse_data(&lines).is_some());
+    }
+
+    #[test]
+    fn extract_usage_limit_ignores_unrelated_content() {
+        let lines = vec![
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello world\"}\n".to_string(),
+        ];
+        assert!(extract_usage_limit_from_sse_data(&lines).is_none());
+    }
+
+    #[test]
+    fn extract_usage_limit_ignores_frames_without_data() {
+        let lines = vec![
+            "event: ping\n".to_string(),
+            ": keepalive\n".to_string(),
+        ];
+        assert!(extract_usage_limit_from_sse_data(&lines).is_none());
     }
 }

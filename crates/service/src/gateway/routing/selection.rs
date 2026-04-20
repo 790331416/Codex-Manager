@@ -1,4 +1,5 @@
-use codexmanager_core::storage::{now_ts, Account, Storage, Token};
+use codexmanager_core::storage::{now_ts, Account, Storage, Token, UsageSnapshotRecord};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
@@ -11,6 +12,10 @@ static CANDIDATE_CACHE_TTL_MS: AtomicU64 = AtomicU64::new(DEFAULT_CANDIDATE_CACH
 static CURRENT_DB_PATH: OnceLock<RwLock<String>> = OnceLock::new();
 const DEFAULT_CANDIDATE_CACHE_TTL_MS: u64 = 500;
 const CANDIDATE_CACHE_TTL_ENV: &str = "CODEXMANAGER_CANDIDATE_CACHE_TTL_MS";
+// OpenAI 在 used_percent 未到 100 时就会触发 usage limit（常见于 ChatGPT Plus OAuth
+// 账号的 5 小时窗口）。将快要耗尽的账号降权到候选列表尾部，避免网关反复挑到它。
+const LOW_QUOTA_THRESHOLD_ENV: &str = "CODEXMANAGER_LOW_QUOTA_THRESHOLD_PERCENT";
+const DEFAULT_LOW_QUOTA_THRESHOLD_PERCENT: f64 = 95.0;
 
 #[derive(Clone)]
 struct CandidateSnapshotCache {
@@ -68,10 +73,63 @@ fn collect_gateway_candidates_uncached(storage: &Storage) -> Result<Vec<(Account
         }
         out.push((candidate_account, token));
     }
+    demote_low_quota_candidates(storage, &mut out);
     if out.is_empty() {
         log_no_candidates(storage);
     }
     Ok(out)
+}
+
+/// 将快要耗尽的账号（primary 或 secondary used_percent 超过阈值）稳定地排到列表尾部。
+/// 不从候选中剔除，保证在全部账号都被降权的极端场景下仍有号可用。
+fn demote_low_quota_candidates(storage: &Storage, candidates: &mut Vec<(Account, Token)>) {
+    if candidates.len() < 2 {
+        return;
+    }
+    let snapshots = load_usage_snapshots(storage);
+    if snapshots.is_empty() {
+        return;
+    }
+    let threshold = low_quota_threshold_percent();
+    candidates.sort_by_key(|(account, _)| {
+        if is_low_quota_account(&account.id, &snapshots, threshold) {
+            1u8
+        } else {
+            0u8
+        }
+    });
+}
+
+fn load_usage_snapshots(storage: &Storage) -> HashMap<String, UsageSnapshotRecord> {
+    storage
+        .latest_usage_snapshots_by_account()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|snap| (snap.account_id.clone(), snap))
+        .collect()
+}
+
+fn is_low_quota_account(
+    account_id: &str,
+    snapshots: &HashMap<String, UsageSnapshotRecord>,
+    threshold: f64,
+) -> bool {
+    let Some(snap) = snapshots.get(account_id) else {
+        return false;
+    };
+    let primary_low = snap.used_percent.is_some_and(|pct| pct >= threshold);
+    let secondary_low = snap
+        .secondary_used_percent
+        .is_some_and(|pct| pct >= threshold);
+    primary_low || secondary_low
+}
+
+fn low_quota_threshold_percent() -> f64 {
+    std::env::var(LOW_QUOTA_THRESHOLD_ENV)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<f64>().ok())
+        .filter(|pct| pct.is_finite() && *pct > 0.0 && *pct <= 100.0)
+        .unwrap_or(DEFAULT_LOW_QUOTA_THRESHOLD_PERCENT)
 }
 
 /// 函数 `read_candidate_cache`

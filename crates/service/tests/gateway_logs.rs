@@ -8,5 +8,7 @@ mod openai;
 mod retry_logging;
 #[path = "gateway_logs/support.rs"]
 mod support;
+#[path = "gateway_logs/usage_limit_failover.rs"]
+mod usage_limit_failover;
 
 pub(crate) use support::*;

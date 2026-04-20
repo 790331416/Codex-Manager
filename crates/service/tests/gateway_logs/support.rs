@@ -762,6 +762,21 @@ pub(super) fn start_mock_upstream_sequence_lenient(
     Receiver<CapturedUpstreamRequest>,
     thread::JoinHandle<()>,
 ) {
+    let typed = responses
+        .into_iter()
+        .map(|(status, body)| (status, body, "application/json".to_string()))
+        .collect();
+    start_mock_upstream_sequence_lenient_with_content_types(typed, idle_timeout)
+}
+
+pub(super) fn start_mock_upstream_sequence_lenient_with_content_types(
+    responses: Vec<(u16, String, String)>,
+    idle_timeout: Duration,
+) -> (
+    String,
+    Receiver<CapturedUpstreamRequest>,
+    thread::JoinHandle<()>,
+) {
     let listener = bind_test_listener("mock upstream");
     let addr = listener.local_addr().expect("mock upstream addr");
     let (tx, rx) = mpsc::channel();
@@ -771,20 +786,22 @@ pub(super) fn start_mock_upstream_sequence_lenient(
         let fallback_body =
             "{\"error\":{\"message\":\"unexpected extra upstream request\",\"type\":\"server_error\"}}"
                 .to_string();
+        let fallback_ct = "application/json".to_string();
         loop {
             let Some((mut stream, captured)) = accept_http_request(&listener, idle_timeout) else {
                 break;
             };
             let _ = tx.send(captured);
 
-            let (status, body) = responses
+            let (status, body, content_type) = responses
                 .get(idx)
-                .map(|(status, body)| (*status, body.as_str()))
-                .unwrap_or((500, fallback_body.as_str()));
+                .map(|(status, body, ct)| (*status, body.as_str(), ct.as_str()))
+                .unwrap_or((500, fallback_body.as_str(), fallback_ct.as_str()));
             let body_bytes = body.as_bytes().to_vec();
             let header = format!(
-                "HTTP/1.1 {} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                "HTTP/1.1 {} OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                 status,
+                content_type,
                 body_bytes.len()
             );
             stream
