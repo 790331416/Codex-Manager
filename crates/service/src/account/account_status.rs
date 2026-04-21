@@ -192,6 +192,7 @@ pub(crate) fn usage_limit_reason_from_message(message: &str) -> Option<&'static 
     let normalized = message.trim().to_ascii_lowercase();
     if normalized.contains("you've hit your usage limit")
         || normalized.contains("you have hit your usage limit")
+        || normalized.contains("usage limit has been reached")
         || normalized.contains("insufficient_quota")
         || normalized.contains("quota exceeded")
         || normalized.contains("usage exhausted")
@@ -527,6 +528,13 @@ mod tests {
         assert!(!usage_limit_last.should_failover);
         assert!(usage_limit_last.should_mark_account_unavailable);
         assert!(!usage_limit_last.should_mark_default_cooldown);
+
+        // Regression: backend-native WS upstream phrasing.
+        let ws_usage_limit = analyze_gateway_error("The usage limit has been reached", true);
+        assert_eq!(ws_usage_limit.kind, GatewayErrorKind::UsageLimit);
+        assert!(ws_usage_limit.should_failover);
+        assert!(ws_usage_limit.should_mark_account_unavailable);
+        assert!(ws_usage_limit.should_mark_default_cooldown);
     }
 
     /// 函数 `gateway_usage_limit_error_does_not_persist_unavailable_status`
