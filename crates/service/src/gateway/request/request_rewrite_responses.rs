@@ -52,6 +52,31 @@ pub(super) fn is_responses_path(path: &str) -> bool {
     is_standard_responses_path(path) || is_compact_path(path)
 }
 
+/// 函数 `ensure_instructions`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-02
+///
+/// # 参数
+/// - super: 参数 super
+///
+/// # 返回
+/// 返回函数执行结果
+pub(super) fn ensure_instructions(path: &str, obj: &mut serde_json::Map<String, Value>) -> bool {
+    if !is_responses_path(path) {
+        return false;
+    }
+    if obj.contains_key("instructions") {
+        return false;
+    }
+    // 中文注释：恢复 v0.2.4 的 compat 语义。
+    // 第三方 compat `/v1/responses` / `/v1/responses/compact` 缺失 instructions 时统一补空字符串，
+    // 避免 codex backend 对字段存在性更敏感时直接返回 challenge / 非预期 HTML。
+    obj.insert("instructions".to_string(), Value::String(String::new()));
+    true
+}
+
 /// 函数 `ensure_input_list`
 ///
 /// 作者: gaohongshun
@@ -92,6 +117,123 @@ pub(super) fn ensure_input_list(path: &str, obj: &mut serde_json::Map<String, Va
         }
         _ => false,
     }
+}
+
+fn extract_instruction_text_from_content(content: &Value) -> Option<String> {
+    match content {
+        Value::String(text) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+        Value::Array(parts) => {
+            let texts: Vec<String> = parts
+                .iter()
+                .filter_map(|part| {
+                    let part_obj = part.as_object()?;
+                    let part_type = part_obj.get("type").and_then(Value::as_str)?;
+                    if !matches!(part_type, "input_text" | "output_text" | "text") {
+                        return None;
+                    }
+                    let text = part_obj.get("text").and_then(Value::as_str)?.trim();
+                    if text.is_empty() {
+                        None
+                    } else {
+                        Some(text.to_string())
+                    }
+                })
+                .collect();
+            if texts.is_empty() {
+                None
+            } else {
+                Some(texts.join("\n\n"))
+            }
+        }
+        _ => None,
+    }
+}
+
+fn extract_instruction_text_from_message_item(item: &Value) -> Option<String> {
+    let item_obj = item.as_object()?;
+    let role = item_obj.get("role").and_then(Value::as_str)?;
+    if !role.eq_ignore_ascii_case("developer") && !role.eq_ignore_ascii_case("system") {
+        return None;
+    }
+    let content = item_obj.get("content")?;
+    extract_instruction_text_from_content(content)
+}
+
+/// 函数 `promote_leading_instruction_messages_to_instructions`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-21
+///
+/// # 参数
+/// - path: 参数 path
+/// - obj: 参数 obj
+///
+/// # 返回
+/// 返回函数执行结果
+pub(super) fn promote_leading_instruction_messages_to_instructions(
+    path: &str,
+    obj: &mut serde_json::Map<String, Value>,
+) -> bool {
+    if !is_standard_responses_path(path) {
+        return false;
+    }
+    if obj
+        .get("instructions")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some()
+    {
+        return false;
+    }
+
+    let (instructions, consumed_items, single_object_consumed) = match obj.get("input") {
+        Some(Value::Array(items)) => {
+            let mut instruction_items = Vec::<String>::new();
+            let mut consumed = 0usize;
+            for item in items {
+                let Some(text) = extract_instruction_text_from_message_item(item) else {
+                    break;
+                };
+                instruction_items.push(text);
+                consumed += 1;
+            }
+            if instruction_items.is_empty() {
+                return false;
+            }
+            (instruction_items.join("\n\n"), consumed, false)
+        }
+        Some(Value::Object(_)) => {
+            let Some(text) = obj
+                .get("input")
+                .and_then(extract_instruction_text_from_message_item)
+            else {
+                return false;
+            };
+            (text, 1, true)
+        }
+        _ => return false,
+    };
+
+    if single_object_consumed {
+        obj.insert("input".to_string(), Value::Array(Vec::new()));
+    } else {
+        let Some(input_array) = obj.get_mut("input").and_then(Value::as_array_mut) else {
+            return false;
+        };
+        input_array.drain(0..consumed_items);
+    }
+
+    obj.insert("instructions".to_string(), Value::String(instructions));
+    true
 }
 
 /// 函数 `ensure_stream_true`

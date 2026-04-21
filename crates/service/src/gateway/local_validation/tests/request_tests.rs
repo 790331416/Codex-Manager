@@ -210,6 +210,24 @@ fn sample_incoming_headers(
     originator: Option<&str>,
     session_affinity: Option<&str>,
 ) -> super::super::super::IncomingHeaderSnapshot {
+    sample_incoming_headers_with_session_id(
+        conversation_id,
+        turn_state,
+        user_agent,
+        originator,
+        session_affinity,
+        None,
+    )
+}
+
+fn sample_incoming_headers_with_session_id(
+    conversation_id: Option<&str>,
+    turn_state: Option<&str>,
+    user_agent: Option<&str>,
+    originator: Option<&str>,
+    session_affinity: Option<&str>,
+    session_id: Option<&str>,
+) -> super::super::super::IncomingHeaderSnapshot {
     let mut headers = HeaderMap::new();
     if let Some(conversation_id) = conversation_id {
         headers.insert(
@@ -239,6 +257,12 @@ fn sample_incoming_headers(
         headers.insert(
             "x-session-affinity",
             HeaderValue::from_str(session_affinity).expect("header"),
+        );
+    }
+    if let Some(session_id) = session_id {
+        headers.insert(
+            "session_id",
+            HeaderValue::from_str(session_id).expect("header"),
         );
     }
     super::super::super::IncomingHeaderSnapshot::from_http_headers(&headers)
@@ -381,24 +405,33 @@ fn aggregate_passthrough_applies_model_reasoning_and_service_tier_overrides_with
 }
 
 #[test]
-fn native_codex_client_detection_rejects_opencode_headers() {
+fn native_codex_client_detection_uses_codex_signals_instead_of_client_brand() {
     let native_headers = sample_incoming_headers(
         None,
         None,
-        Some("codex_cli_rs/0.999.0"),
-        Some("codex_cli_rs"),
+        Some("codex_exec/0.999.0"),
+        Some("codex_exec"),
         Some("affinity-1"),
     );
     assert!(is_native_codex_client_request(&native_headers));
 
-    let opencode_headers = sample_incoming_headers(
+    let plain_opencode_headers = sample_incoming_headers(
         None,
         None,
         Some("opencode/0.1.0"),
         Some("opencode"),
         Some("affinity-1"),
     );
-    assert!(!is_native_codex_client_request(&opencode_headers));
+    assert!(!is_native_codex_client_request(&plain_opencode_headers));
+
+    let opencode_with_codex_signals = sample_incoming_headers(
+        None,
+        Some("turn-state-1"),
+        Some("opencode/0.1.0"),
+        Some("opencode"),
+        Some("affinity-1"),
+    );
+    assert!(is_native_codex_client_request(&opencode_with_codex_signals));
 }
 
 #[test]
@@ -409,6 +442,22 @@ fn non_native_responses_requests_force_codex_compat_rewrite() {
         false
     ));
     assert!(!should_force_codex_compat_rewrite("/v1/responses", true));
+}
+
+#[test]
+fn opencode_headers_with_only_session_id_still_force_compat_rewrite() {
+    let opencode_headers = sample_incoming_headers_with_session_id(
+        None,
+        None,
+        Some("opencode/0.1.0"),
+        Some("opencode"),
+        Some("affinity-1"),
+        Some("session-1"),
+    );
+    assert!(should_force_codex_compat_rewrite(
+        "/v1/responses",
+        is_native_codex_client_request(&opencode_headers),
+    ));
 }
 
 #[test]

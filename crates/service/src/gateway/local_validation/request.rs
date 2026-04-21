@@ -178,22 +178,18 @@ fn is_native_codex_client_request(incoming_headers: &super::super::IncomingHeade
         .unwrap_or_default()
         .to_ascii_lowercase();
 
-    if user_agent.contains("opencode") || originator.contains("opencode") {
-        return false;
-    }
-
-    let has_codex_header_signals = incoming_headers.session_id().is_some()
-        || incoming_headers.client_request_id().is_some()
+    let has_codex_header_signals = incoming_headers.client_request_id().is_some()
         || incoming_headers.subagent().is_some()
         || incoming_headers.beta_features().is_some()
         || incoming_headers.window_id().is_some()
         || incoming_headers.turn_metadata().is_some()
         || incoming_headers.turn_state().is_some()
-        || incoming_headers.parent_thread_id().is_some()
-        || incoming_headers.conversation_id().is_some();
+        || incoming_headers.parent_thread_id().is_some();
 
     user_agent.contains("codex_cli_rs")
         || originator.contains("codex_cli_rs")
+        || user_agent.contains("codex_exec")
+        || originator.contains("codex_exec")
         || has_codex_header_signals
 }
 

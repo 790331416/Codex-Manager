@@ -714,6 +714,12 @@ fn apply_request_overrides_with_prompt_cache_key_mode(
                 if responses::normalize_codex_backend_service_tier(path, obj) {
                     changed = true;
                 }
+                if responses::promote_leading_instruction_messages_to_instructions(path, obj) {
+                    changed = true;
+                }
+                if use_codex_compat_rewrite && responses::ensure_instructions(path, obj) {
+                    changed = true;
+                }
                 if use_codex_compat_rewrite {
                     if responses::normalize_dynamic_tools_to_tools(path, obj) {
                         changed = true;
