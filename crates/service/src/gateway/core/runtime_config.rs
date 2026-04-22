@@ -577,11 +577,8 @@ pub(crate) fn resolve_forwarded_model(model: &str) -> Option<String> {
 /// # 返回
 /// 返回函数执行结果
 pub(crate) fn resolve_builtin_forwarded_model(model: &str) -> Option<String> {
-    match model {
-        // 中文注释：Spark 目录项是长尾展示名，出站时回落到官方稳定的基础 Codex 模型。
-        "gpt-5.3-codex-spark" => Some("gpt-5.3-codex".to_string()),
-        _ => None,
-    }
+    let _ = model;
+    None
 }
 
 /// 函数 `current_originator`

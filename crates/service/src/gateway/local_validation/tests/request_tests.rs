@@ -195,6 +195,20 @@ fn openai_key_keeps_empty_overrides() {
     assert_eq!(service_tier, None);
 }
 
+#[test]
+fn openai_key_keeps_codex_long_tail_slug_override() {
+    let api_key = sample_api_key(
+        "openai_compat",
+        Some("gpt-5.3-codex-spark"),
+        Some("medium"),
+        None,
+    );
+    let (model, reasoning, service_tier) = resolve_effective_request_overrides(&api_key);
+    assert_eq!(model.as_deref(), Some("gpt-5.3-codex-spark"));
+    assert_eq!(reasoning.as_deref(), Some("medium"));
+    assert_eq!(service_tier, None);
+}
+
 fn sample_request_metadata(prompt_cache_key: Option<&str>) -> ParsedRequestMetadata {
     ParsedRequestMetadata {
         prompt_cache_key: prompt_cache_key.map(str::to_string),

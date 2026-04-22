@@ -601,7 +601,9 @@ fn responses_codex_backend_hoists_leading_developer_message_to_instructions() {
     );
     let value: serde_json::Value = serde_json::from_slice(&out).expect("parse output body");
     assert_eq!(
-        value.get("instructions").and_then(serde_json::Value::as_str),
+        value
+            .get("instructions")
+            .and_then(serde_json::Value::as_str),
         Some("You are OpenCode")
     );
     let input = value
@@ -644,7 +646,9 @@ fn responses_codex_backend_hoists_leading_system_message_to_instructions() {
     );
     let value: serde_json::Value = serde_json::from_slice(&out).expect("parse output body");
     assert_eq!(
-        value.get("instructions").and_then(serde_json::Value::as_str),
+        value
+            .get("instructions")
+            .and_then(serde_json::Value::as_str),
         Some("You are Cherry")
     );
     let input = value
@@ -677,7 +681,9 @@ fn responses_codex_backend_hoists_single_object_system_input_to_instructions() {
     );
     let value: serde_json::Value = serde_json::from_slice(&out).expect("parse output body");
     assert_eq!(
-        value.get("instructions").and_then(serde_json::Value::as_str),
+        value
+            .get("instructions")
+            .and_then(serde_json::Value::as_str),
         Some("You are Cherry")
     );
     let input = value
@@ -715,7 +721,9 @@ fn responses_codex_backend_preserves_existing_instructions() {
     );
     let value: serde_json::Value = serde_json::from_slice(&out).expect("parse output body");
     assert_eq!(
-        value.get("instructions").and_then(serde_json::Value::as_str),
+        value
+            .get("instructions")
+            .and_then(serde_json::Value::as_str),
         Some("Keep me")
     );
     let input = value
@@ -745,7 +753,9 @@ fn responses_codex_backend_defaults_empty_instructions_when_missing() {
     );
     let value: serde_json::Value = serde_json::from_slice(&out).expect("parse output body");
     assert_eq!(
-        value.get("instructions").and_then(serde_json::Value::as_str),
+        value
+            .get("instructions")
+            .and_then(serde_json::Value::as_str),
         Some("")
     );
 }
@@ -1603,7 +1613,7 @@ fn responses_platform_key_bound_model_overrides_global_model_forward_rules() {
 }
 
 #[test]
-fn responses_platform_key_bound_spark_model_falls_back_to_base_codex_model() {
+fn responses_platform_key_bound_spark_model_keeps_original_slug() {
     let _guard = crate::test_env_guard();
     let original_rules = crate::gateway::current_model_forward_rules();
     let _ = crate::gateway::set_model_forward_rules("");
@@ -1623,7 +1633,7 @@ fn responses_platform_key_bound_spark_model_falls_back_to_base_codex_model() {
 
     assert_eq!(
         value.get("model").and_then(serde_json::Value::as_str),
-        Some("gpt-5.3-codex")
+        Some("gpt-5.3-codex-spark")
     );
 
     let _ = crate::gateway::set_model_forward_rules(original_rules.as_str());

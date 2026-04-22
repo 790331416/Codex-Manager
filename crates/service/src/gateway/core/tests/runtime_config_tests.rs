@@ -393,18 +393,15 @@ fn set_model_forward_rules_preserves_case_while_matching_case_insensitively() {
 }
 
 #[test]
-fn builtin_model_forward_rule_maps_spark_to_base_codex_model() {
+fn builtin_model_forward_rule_does_not_remap_codex_long_tail_slug() {
     let _guard = crate::test_env_guard();
     let _rules_guard = EnvGuard::clear(ENV_MODEL_FORWARD_RULES);
 
-    assert_eq!(
-        resolve_forwarded_model("gpt-5.3-codex-spark"),
-        Some("gpt-5.3-codex".to_string())
-    );
+    assert_eq!(resolve_forwarded_model("gpt-5.3-codex-spark"), None);
 }
 
 #[test]
-fn explicit_model_forward_rule_overrides_builtin_spark_mapping() {
+fn explicit_model_forward_rule_can_remap_codex_long_tail_slug() {
     let _guard = crate::test_env_guard();
     let _rules_guard = EnvGuard::clear(ENV_MODEL_FORWARD_RULES);
 
