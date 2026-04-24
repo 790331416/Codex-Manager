@@ -25,7 +25,7 @@ fn stop_codex_processes() -> Result<(), String> {
             "Bypass",
             "-Command",
             r#"
-$ErrorActionPreference = 'SilentlyContinue'
+$ErrorActionPreference = 'Stop'
 function Test-CodexProcess($p) {
   $name = [string]$p.Name
   $path = [string]$p.ExecutablePath
@@ -34,58 +34,65 @@ function Test-CodexProcess($p) {
     -or $path -match '\\OpenAI\.Codex_' `
     -or $path -match '\\AppData\\Local\\OpenAI\\Codex\\'
 }
-function Get-CodexProcessTreeIds {
+function Get-CodexProcesses {
   $all = @(Get-CimInstance Win32_Process)
-  $ids = @{}
-  foreach ($p in $all) {
-    if (Test-CodexProcess $p) {
-      $ids[[int]$p.ProcessId] = $true
+  $matches = @()
+  foreach ($proc in $all) {
+    if (Test-CodexProcess $proc) {
+      $matches += $proc
     }
   }
-  $changed = $true
-  while ($changed) {
-    $changed = $false
-    foreach ($p in $all) {
-      $pid = [int]$p.ProcessId
-      $ppid = [int]$p.ParentProcessId
-      if (-not $ids.ContainsKey($pid) -and $ids.ContainsKey($ppid)) {
-        $ids[$pid] = $true
-        $changed = $true
-      }
-    }
-  }
-  return @($ids.Keys | Sort-Object -Descending)
+  return @($matches)
 }
-function Get-CodexRootIds {
-  $all = @(Get-CimInstance Win32_Process)
+function Get-CodexRootIds($all) {
   $ids = @{}
-  foreach ($p in $all) {
-    if (Test-CodexProcess $p) {
-      $ids[[int]$p.ProcessId] = [int]$p.ParentProcessId
-    }
+  foreach ($proc in $all) {
+    $ids[[int]$proc.ProcessId] = [int]$proc.ParentProcessId
   }
   $roots = @()
-  foreach ($pid in $ids.Keys) {
-    $ppid = $ids[$pid]
-    if (-not $ids.ContainsKey($ppid)) {
-      $roots += [int]$pid
+  foreach ($procId in $ids.Keys) {
+    $parentProcId = $ids[$procId]
+    if (-not $ids.ContainsKey($parentProcId)) {
+      $roots += [int]$procId
     }
   }
-  return @($roots | Sort-Object -Descending)
+  return @($roots | Sort-Object -Descending -Unique)
 }
-$rootIds = @(Get-CodexRootIds)
-foreach ($id in $rootIds) {
-  & taskkill.exe /PID $id /T /F | Out-Null
+function Stop-CodexIds($procIds) {
+  foreach ($procId in @($procIds | Sort-Object -Descending -Unique)) {
+    try {
+      Stop-Process -Id $procId -Force -ErrorAction Stop
+    } catch {
+    }
+    try {
+      & taskkill.exe /PID $procId /T /F | Out-Null
+    } catch {
+    }
+  }
 }
-for ($i = 0; $i -lt 20; $i++) {
-  Start-Sleep -Milliseconds 500
-  $remaining = @(Get-CodexProcessTreeIds)
+$initial = @(Get-CodexProcesses)
+if ($initial.Count -eq 0) {
+  exit 0
+}
+$rootIds = @(Get-CodexRootIds $initial)
+Stop-CodexIds $rootIds
+$remaining = @()
+for ($i = 0; $i -lt 40; $i++) {
+  Start-Sleep -Milliseconds 250
+  $remaining = @(Get-CodexProcesses)
   if ($remaining.Count -eq 0) {
     exit 0
   }
+  if ($i -eq 7 -or $i -eq 15 -or $i -eq 31) {
+    Stop-CodexIds ($remaining | Select-Object -ExpandProperty ProcessId)
+  }
 }
-$left = @(Get-CodexProcessTreeIds) -join ','
-throw "Codex processes still running: $left"
+$left = @(
+  $remaining |
+    Sort-Object ProcessId |
+    ForEach-Object { "{0}:{1}" -f $_.ProcessId, $_.Name }
+) -join ','
+throw "Codex processes still running after retries: $left"
 "#,
         ])
         .output()
