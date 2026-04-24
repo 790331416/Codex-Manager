@@ -1,5 +1,6 @@
 use crate::app_storage::resolve_db_path_with_legacy_migration;
-use codexmanager_core::storage::Storage;
+use chrono::{SecondsFormat, Utc};
+use codexmanager_core::storage::{Storage, Token};
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -17,14 +18,67 @@ fn get_auth_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 fn stop_codex_processes() -> Result<(), String> {
-    Command::new("powershell")
+    let output = Command::new("powershell")
         .args(&[
-            "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
-            "$procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '(?i)^codex$' -or $_.ProcessName -match '(?i)^codex cli$' -or $_.ProcessName -match '(?i)codex-cli' }; if ($procs) { $procs | Stop-Process -Force }"
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            r#"
+$ErrorActionPreference = 'SilentlyContinue'
+function Test-CodexProcess($p) {
+  $name = [string]$p.Name
+  $path = [string]$p.ExecutablePath
+  return $name -ieq 'Codex.exe' `
+    -or $name -ieq 'codex.exe' `
+    -or $path -match '\\OpenAI\.Codex_' `
+    -or $path -match '\\AppData\\Local\\OpenAI\\Codex\\'
+}
+function Get-CodexProcessTreeIds {
+  $all = @(Get-CimInstance Win32_Process)
+  $ids = @{}
+  foreach ($p in $all) {
+    if (Test-CodexProcess $p) {
+      $ids[[int]$p.ProcessId] = $true
+    }
+  }
+  $changed = $true
+  while ($changed) {
+    $changed = $false
+    foreach ($p in $all) {
+      $pid = [int]$p.ProcessId
+      $ppid = [int]$p.ParentProcessId
+      if (-not $ids.ContainsKey($pid) -and $ids.ContainsKey($ppid)) {
+        $ids[$pid] = $true
+        $changed = $true
+      }
+    }
+  }
+  return @($ids.Keys | Sort-Object -Descending)
+}
+$ids = @(Get-CodexProcessTreeIds)
+foreach ($id in $ids) {
+  & taskkill.exe /PID $id /T /F | Out-Null
+}
+for ($i = 0; $i -lt 20; $i++) {
+  Start-Sleep -Milliseconds 500
+  $remaining = @(Get-CodexProcessTreeIds)
+  if ($remaining.Count -eq 0) {
+    exit 0
+  }
+}
+$left = @(Get-CodexProcessTreeIds) -join ','
+throw "Codex processes still running: $left"
+"#,
         ])
         .output()
         .map_err(|e| format!("Failed to stop Codex: {}", e))?;
-    std::thread::sleep(Duration::from_millis(1500));
+    if !output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let detail = if stderr.is_empty() { stdout } else { stderr };
+        return Err(format!("Failed to stop Codex processes: {}", detail));
+    }
     Ok(())
 }
 
@@ -280,6 +334,17 @@ fn decode_jwt_chatgpt_account_id(token: &str) -> Option<String> {
     Some(account_id.to_string())
 }
 
+fn now_unix_ts() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
+fn now_rfc3339() -> String {
+    Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
 fn get_config_toml_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager;
     let home = app.path().home_dir().map_err(|e| e.to_string())?;
@@ -394,8 +459,9 @@ pub async fn local_codex_switch(
     log::info!("[switcher] db_path: {:?}", db_path);
 
     let aid = account_id.clone();
+    let db_path_for_read = db_path.clone();
     let db_tokens_res = tauri::async_runtime::spawn_blocking(move || {
-        let storage = Storage::open(db_path).map_err(|e| e.to_string())?;
+        let storage = Storage::open(db_path_for_read).map_err(|e| e.to_string())?;
         storage
             .find_token_by_account_id(&aid)
             .map_err(|e| e.to_string())
@@ -447,6 +513,27 @@ pub async fn local_codex_switch(
         )
     };
 
+    if refreshed {
+        let db_path_for_write = db_path.clone();
+        let refreshed_token = Token {
+            account_id: token.account_id.clone(),
+            id_token: final_it.clone(),
+            access_token: final_at.clone(),
+            refresh_token: final_rt.clone(),
+            api_key_access_token: token.api_key_access_token.clone(),
+            last_refresh: now_unix_ts(),
+        };
+        tauri::async_runtime::spawn_blocking(move || {
+            let storage = Storage::open(db_path_for_write).map_err(|e| e.to_string())?;
+            storage
+                .insert_token(&refreshed_token)
+                .map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|err| format!("token update task failed: {err}"))??;
+        log::info!("[switcher] refreshed tokens persisted to local DB");
+    }
+
     log::info!("[switcher] stopping Codex processes...");
     stop_codex_processes()?;
 
@@ -495,7 +582,8 @@ pub async fn local_codex_switch(
             "access_token": final_at,
             "refresh_token": final_rt,
             "account_id": true_account_id,
-        }
+        },
+        "last_refresh": now_rfc3339()
     });
 
     atomic_write_json(&auth_path, &payload)

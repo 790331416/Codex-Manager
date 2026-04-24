@@ -6,6 +6,7 @@ version = 3
 name = "CodexManager"
 version = "0.2.5"
 dependencies = [
+ "chrono",
  "codexmanager-core",
  "codexmanager-service",
  "log",
