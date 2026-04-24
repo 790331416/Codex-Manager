@@ -1,5 +1,9 @@
 import { invoke, invokeFirst } from "./transport";
-import { AppSettings, CodexLatestVersionInfo } from "../../types";
+import {
+  AppSettings,
+  CodexAccountSwitchResult,
+  CodexLatestVersionInfo,
+} from "../../types";
 import { normalizeAppSettings } from "./normalize";
 import {
   readUpdateActionResult,
@@ -40,6 +44,10 @@ export const appClient = {
   openInFileManager: (path: string) => invoke("open_in_file_manager", { path }),
   openUpdateLogsDir: (assetPath?: string) =>
     invoke("app_update_open_logs_dir", { assetPath: assetPath || null }),
+  switchCodexAccount: (accountId: string) =>
+    invoke<CodexAccountSwitchResult>("local_codex_switch", { accountId }),
+  enableCodexLocalProxyMode: () =>
+    invoke<CodexAccountSwitchResult>("enable_local_proxy_mode"),
 
   async checkUpdate(): Promise<UpdateCheckResult> {
     const result = await invokeFirst<unknown>(

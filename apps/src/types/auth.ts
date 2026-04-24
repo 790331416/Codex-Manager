@@ -47,3 +47,9 @@ export interface ChatgptAuthTokensRefreshResult {
   subscriptionExpiresAt?: number | null;
   subscriptionRenewsAt?: number | null;
 }
+
+export interface CodexAccountSwitchResult {
+  success: boolean;
+  message: string;
+  refreshed?: boolean;
+}

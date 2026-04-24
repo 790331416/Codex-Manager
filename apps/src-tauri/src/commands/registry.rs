@@ -20,6 +20,8 @@ macro_rules! invoke_handler {
             crate::commands::account::transfer::service_account_import_by_directory,
             crate::commands::account::transfer::service_account_export_by_account_files,
             crate::commands::account::local::local_account_delete,
+            crate::commands::account::switcher::enable_local_proxy_mode,
+            crate::commands::account::switcher::local_codex_switch,
             // usage
             crate::commands::usage::service_usage_read,
             crate::commands::usage::service_usage_list,

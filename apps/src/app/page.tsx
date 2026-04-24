@@ -1,20 +1,24 @@
 "use client";
 
+import type { ReactNode } from "react";
 import {
   Activity,
   BrainCircuit,
   CheckCircle2,
   Database,
   DollarSign,
+  LoaderCircle,
   PieChart,
   Users,
   XCircle,
   Zap,
   type LucideIcon,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useCodexAccountSwitcher } from "@/hooks/useCodexAccountSwitcher";
 import { useDashboardStats } from "@/hooks/useDashboardStats";
 import { usePageTransitionReady } from "@/hooks/usePageTransitionReady";
 import { useI18n } from "@/lib/i18n/provider";
@@ -43,6 +47,7 @@ interface AccountHighlightCardProps {
   tone?: "green" | "blue";
   progressLabel?: string;
   progressValue?: number | null | undefined;
+  action?: ReactNode;
 }
 
 /**
@@ -179,6 +184,7 @@ function AccountHighlightCard({
   tone = "green",
   progressLabel,
   progressValue,
+  action,
 }: AccountHighlightCardProps) {
   const iconToneClass =
     tone === "blue"
@@ -207,6 +213,7 @@ function AccountHighlightCard({
           <PercentBar label={progressLabel} value={progressValue} tone={tone} />
         </div>
       ) : null}
+      {action ? <div className="mt-3 flex justify-end">{action}</div> : null}
     </div>
   );
 }
@@ -262,6 +269,12 @@ export default function DashboardPage() {
   const { t } = useI18n();
   const { stats, currentAccount, recommendations, requestLogs, isLoading, isServiceReady } =
     useDashboardStats();
+  const {
+    canSwitchCodexAccount,
+    switchCodexAccount,
+    isSwitchingCodexAccount,
+    switchingCodexAccountId,
+  } = useCodexAccountSwitcher();
   usePageTransitionReady("/", !isServiceReady || !isLoading);
   const poolPrimary = stats.poolRemain?.primary ?? 0;
   const poolSecondary = stats.poolRemain?.secondary ?? 0;
@@ -462,6 +475,22 @@ export default function DashboardPage() {
                     tone="green"
                     progressLabel={t("剩余额度")}
                     progressValue={recommendations.primaryPick.primaryRemainPercent}
+                    action={
+                      canSwitchCodexAccount ? (
+                        <Button
+                          size="sm"
+                          onClick={() => switchCodexAccount(recommendations.primaryPick!.id)}
+                          disabled={isSwitchingCodexAccount}
+                        >
+                          {switchingCodexAccountId === recommendations.primaryPick.id ? (
+                            <LoaderCircle className="animate-spin" />
+                          ) : null}
+                          {switchingCodexAccountId === recommendations.primaryPick.id
+                            ? "切号中..."
+                            : "一键切号"}
+                        </Button>
+                      ) : null
+                    }
                   />
                 ) : null}
                 {recommendations.secondaryPick ? (
@@ -472,6 +501,23 @@ export default function DashboardPage() {
                     tone="blue"
                     progressLabel={t("剩余额度")}
                     progressValue={recommendations.secondaryPick.secondaryRemainPercent}
+                    action={
+                      canSwitchCodexAccount ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => switchCodexAccount(recommendations.secondaryPick!.id)}
+                          disabled={isSwitchingCodexAccount}
+                        >
+                          {switchingCodexAccountId === recommendations.secondaryPick.id ? (
+                            <LoaderCircle className="animate-spin" />
+                          ) : null}
+                          {switchingCodexAccountId === recommendations.secondaryPick.id
+                            ? "切号中..."
+                            : "一键切号"}
+                        </Button>
+                      ) : null
+                    }
                   />
                 ) : null}
               </>
