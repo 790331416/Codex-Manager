@@ -146,6 +146,8 @@ def build_request_headers(handler: BaseHTTPRequestHandler) -> Dict[str, str]:
         if lowered in SKIP_REQUEST_HEADERS:
             continue
         outgoing[key] = value
+    if not any(key.lower() == "accept-encoding" for key in outgoing):
+        outgoing["Accept-Encoding"] = "identity"
     return outgoing
 
 
@@ -241,6 +243,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def _handle(self) -> None:
+        response_started = False
         try:
             if self.path == "/__proxy_health":
                 self._health_response()
@@ -326,6 +329,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 self.send_header("Connection", "close")
                 self.send_header("X-Curl-Cffi-Proxy", "1")
                 self.end_headers()
+                response_started = True
 
                 if self.command == "HEAD":
                     return
@@ -337,6 +341,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError):
                 return
+            except Exception as err:
+                if cfg.verbose:
+                    sys.stderr.write(f"[proxy] upstream stream failed: {err}\n")
+                return
             finally:
                 upstream.close()
         except (BrokenPipeError, ConnectionResetError):
@@ -344,6 +352,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         except Exception:
             sys.stderr.write("[proxy] unexpected handler error:\n")
             traceback.print_exc(file=sys.stderr)
+            if response_started:
+                return
             try:
                 payload = json.dumps(
                     {

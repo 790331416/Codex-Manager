@@ -369,7 +369,12 @@ pub(super) fn classify_upstream_stream_read_error(raw: &str) -> String {
         return STREAM_READ_FAILED_FALLBACK_MESSAGE.to_string();
     }
     let normalized = trimmed.to_ascii_lowercase();
-    if normalized == "request or response body error" || normalized == "stream read failed" {
+    if normalized == "request or response body error"
+        || normalized == "stream read failed"
+        || normalized == "error decoding response body"
+        || normalized.contains("decoding response body")
+        || normalized.contains("error reading a body from connection")
+    {
         return STREAM_READ_FAILED_FALLBACK_MESSAGE.to_string();
     }
     if normalized.contains("timed out") || normalized.contains("timeout") {
@@ -409,6 +414,10 @@ mod tests {
     fn classify_upstream_stream_read_error_maps_body_error() {
         assert_eq!(
             classify_upstream_stream_read_error("request or response body error"),
+            "上游中途断开，未返回具体错误信息"
+        );
+        assert_eq!(
+            classify_upstream_stream_read_error("error decoding response body"),
             "上游中途断开，未返回具体错误信息"
         );
     }
