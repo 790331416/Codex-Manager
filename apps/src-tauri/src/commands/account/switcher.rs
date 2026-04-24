@@ -56,8 +56,25 @@ function Get-CodexProcessTreeIds {
   }
   return @($ids.Keys | Sort-Object -Descending)
 }
-$ids = @(Get-CodexProcessTreeIds)
-foreach ($id in $ids) {
+function Get-CodexRootIds {
+  $all = @(Get-CimInstance Win32_Process)
+  $ids = @{}
+  foreach ($p in $all) {
+    if (Test-CodexProcess $p) {
+      $ids[[int]$p.ProcessId] = [int]$p.ParentProcessId
+    }
+  }
+  $roots = @()
+  foreach ($pid in $ids.Keys) {
+    $ppid = $ids[$pid]
+    if (-not $ids.ContainsKey($ppid)) {
+      $roots += [int]$pid
+    }
+  }
+  return @($roots | Sort-Object -Descending)
+}
+$rootIds = @(Get-CodexRootIds)
+foreach ($id in $rootIds) {
   & taskkill.exe /PID $id /T /F | Out-Null
 }
 for ($i = 0; $i -lt 20; $i++) {
