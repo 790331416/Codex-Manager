@@ -472,6 +472,82 @@ fn opencode_headers_with_only_session_id_still_force_compat_rewrite() {
         "/v1/responses",
         is_native_codex_client_request(&opencode_headers),
     ));
+    assert!(!is_native_codex_client_request(&opencode_headers));
+}
+
+#[test]
+fn gemini_stream_generate_content_path_forces_stream_mode_without_body_flag() {
+    assert!(resolve_client_is_stream(
+        crate::apikey_profile::PROTOCOL_GEMINI_NATIVE,
+        "/v1beta/models/gemini-2.5-pro:streamGenerateContent",
+        false,
+        false,
+        false,
+    ));
+    assert!(resolve_client_is_stream(
+        crate::apikey_profile::PROTOCOL_GEMINI_NATIVE,
+        "/v1internal:streamGenerateContent",
+        false,
+        false,
+        false,
+    ));
+    assert!(!resolve_client_is_stream(
+        crate::apikey_profile::PROTOCOL_GEMINI_NATIVE,
+        "/v1beta/models/gemini-2.5-pro:generateContent",
+        false,
+        false,
+        false,
+    ));
+}
+
+#[test]
+fn openai_responses_api_defaults_to_stream_when_stream_is_omitted() {
+    assert!(resolve_client_is_stream(
+        crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
+        "/v1/responses",
+        false,
+        false,
+        false,
+    ));
+    assert!(resolve_client_is_stream(
+        crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
+        "/v1/responses",
+        true,
+        true,
+        false,
+    ));
+    assert!(!resolve_client_is_stream(
+        crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
+        "/v1/responses",
+        false,
+        true,
+        false,
+    ));
+    assert!(!resolve_client_is_stream(
+        crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
+        "/v1/responses",
+        false,
+        false,
+        true,
+    ));
+}
+
+#[test]
+fn openai_responses_api_body_defaults_omitted_stream_to_true_before_rewrite() {
+    let body = br#"{"model":"gpt-5.4","input":"hi"}"#.to_vec();
+    let rewritten = default_omitted_responses_stream_to_true(body);
+    let payload: Value = serde_json::from_slice(&rewritten).expect("json body");
+
+    assert_eq!(payload.get("stream").and_then(Value::as_bool), Some(true));
+}
+
+#[test]
+fn openai_responses_api_body_preserves_explicit_stream_false() {
+    let body = br#"{"model":"gpt-5.4","input":"hi","stream":false}"#.to_vec();
+    let rewritten = default_omitted_responses_stream_to_true(body);
+    let payload: Value = serde_json::from_slice(&rewritten).expect("json body");
+
+    assert_eq!(payload.get("stream").and_then(Value::as_bool), Some(false));
 }
 
 #[test]

@@ -297,6 +297,17 @@ fn should_skip_forward_header_with_overrides(name: &str, injected: &HashSet<Stri
     injected.contains(normalize_header_key(name).as_str())
 }
 
+fn should_skip_forward_header_for_aggregate_request(
+    name: &str,
+    injected: &HashSet<String>,
+    is_stream: bool,
+) -> bool {
+    if should_skip_forward_header_with_overrides(name, injected) {
+        return true;
+    }
+    is_stream && normalize_header_key(name) == "accept"
+}
+
 /// 函数 `respond_error`
 ///
 /// 作者: gaohongshun
@@ -522,8 +533,11 @@ fn build_aggregate_api_request(
     }
     let request_headers = request.headers().to_vec();
     for header in &request_headers {
-        if should_skip_forward_header_with_overrides(header.field.as_str().into(), injected_headers)
-        {
+        if should_skip_forward_header_for_aggregate_request(
+            header.field.as_str().into(),
+            injected_headers,
+            is_stream,
+        ) {
             continue;
         }
         if let (Ok(name), Ok(value)) = (
@@ -532,6 +546,12 @@ fn build_aggregate_api_request(
         ) {
             builder = builder.header(name, value);
         }
+    }
+    if is_stream {
+        builder = builder.header(
+            HeaderName::from_static("accept"),
+            HeaderValue::from_static("text/event-stream"),
+        );
     }
 
     let secret_trimmed = secret.trim();
@@ -1180,6 +1200,22 @@ mod bridge_tests {
             std::env::remove_var("CODEXMANAGER_ROUTE_STRATEGY");
         }
         crate::gateway::reload_runtime_config_from_env();
+    }
+
+    #[test]
+    fn aggregate_stream_requests_override_forwarded_accept_header() {
+        let injected_headers = HashSet::new();
+
+        assert!(should_skip_forward_header_for_aggregate_request(
+            "Accept",
+            &injected_headers,
+            true,
+        ));
+        assert!(!should_skip_forward_header_for_aggregate_request(
+            "Accept",
+            &injected_headers,
+            false,
+        ));
     }
 
     /// 函数 `balanced_route_strategy_preserves_explicit_preferred_aggregate_api`

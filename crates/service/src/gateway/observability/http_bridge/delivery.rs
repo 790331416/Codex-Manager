@@ -217,6 +217,29 @@ fn body_looks_like_cloudflare_challenge(status_code: u16, body: &[u8]) -> bool {
     })
 }
 
+fn replace_content_type_header(headers: &mut Vec<Header>, content_type: &str) {
+    headers.retain(|header| {
+        !header
+            .field
+            .as_str()
+            .as_str()
+            .eq_ignore_ascii_case("Content-Type")
+    });
+    if let Ok(header) = Header::from_bytes(b"Content-Type".as_slice(), content_type.as_bytes()) {
+        headers.push(header);
+    }
+}
+
+fn force_openai_responses_stream_content_type(
+    headers: &mut Vec<Header>,
+    request_path: &str,
+    is_stream: bool,
+) {
+    if is_stream && request_path.starts_with("/v1/responses") {
+        replace_content_type_header(headers, "text/event-stream");
+    }
+}
+
 /// 函数 `classify_compact_invalid_success_kind`
 ///
 /// 作者: gaohongshun
@@ -1241,7 +1264,7 @@ pub(crate) fn respond_with_upstream(
             if is_sse || is_stream {
                 let usage_collector = Arc::new(Mutex::new(PassthroughSseCollector::default()));
                 let response_body: Box<dyn std::io::Read + Send> =
-                    if is_sse && request_path.starts_with("/v1/responses") {
+                    if request_path.starts_with("/v1/responses") {
                         Box::new(OpenAIResponsesPassthroughSseReader::new(
                             upstream,
                             Arc::clone(&usage_collector),
@@ -1257,6 +1280,7 @@ pub(crate) fn respond_with_upstream(
                             request_started_at,
                         ))
                     };
+                force_openai_responses_stream_content_type(&mut headers, request_path, is_stream);
                 let response = Response::new(status, headers, response_body, None, None);
                 let delivery_error = request.respond(response).err().map(|err| err.to_string());
                 let collector = usage_collector
@@ -2204,6 +2228,7 @@ pub(crate) fn respond_with_stream_upstream(
                             "stream upstream response is not supported for path {request_path}"
                         ));
                     };
+                force_openai_responses_stream_content_type(&mut headers, request_path, is_stream);
                 let response = Response::new(status, headers, response_body, None, None);
                 let delivery_error = request.respond(response).err().map(|err| err.to_string());
                 let collector = usage_collector
@@ -2323,7 +2348,10 @@ fn resolve_stream_keepalive_frame(
 
 #[cfg(test)]
 mod tests {
-    use super::{classify_compact_non_success_kind, compact_non_success_body_should_be_normalized};
+    use super::{
+        classify_compact_non_success_kind, compact_non_success_body_should_be_normalized,
+        force_openai_responses_stream_content_type, Header,
+    };
 
     /// 函数 `compact_header_only_identity_error_is_normalized_and_classified`
     ///
@@ -2382,5 +2410,35 @@ mod tests {
             ),
             "cloudflare_edge"
         );
+    }
+
+    #[test]
+    fn streaming_responses_passthrough_forces_sse_content_type() {
+        let mut headers = vec![
+            Header::from_bytes(
+                b"Content-Type".as_slice(),
+                b"application/json; charset=utf-8".as_slice(),
+            )
+            .expect("content-type header"),
+            Header::from_bytes(b"x-request-id".as_slice(), b"req_test".as_slice())
+                .expect("request id header"),
+        ];
+
+        force_openai_responses_stream_content_type(&mut headers, "/v1/responses", true);
+
+        let content_type = headers
+            .iter()
+            .find(|header| {
+                header
+                    .field
+                    .as_str()
+                    .as_str()
+                    .eq_ignore_ascii_case("Content-Type")
+            })
+            .map(|header| header.value.as_str());
+        assert_eq!(content_type, Some("text/event-stream"));
+        assert!(headers
+            .iter()
+            .any(|header| header.field.as_str().as_str() == "x-request-id"));
     }
 }

@@ -10,6 +10,7 @@ pub(crate) struct ParsedRequestMetadata {
     pub(crate) reasoning_effort: Option<String>,
     pub(crate) service_tier: Option<String>,
     pub(crate) is_stream: bool,
+    pub(crate) stream_specified: bool,
     pub(crate) request_shape: Option<String>,
     pub(crate) has_prompt_cache_key: bool,
     pub(crate) prompt_cache_key: Option<String>,
@@ -107,6 +108,7 @@ pub(crate) fn parse_request_metadata(body: &[u8]) -> ParsedRequestMetadata {
             .get("stream")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        stream_specified: object.contains_key("stream"),
         request_shape,
         has_prompt_cache_key,
         prompt_cache_key,

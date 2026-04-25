@@ -140,6 +140,30 @@ fn allow_compat_responses_path_rewrite(protocol_type: &str, normalized_path: &st
             && is_gemini_generate_content_request_path(normalized_path))
 }
 
+fn is_non_native_openai_responses_api_request(
+    protocol_type: &str,
+    normalized_path: &str,
+    native_codex_client: bool,
+) -> bool {
+    protocol_type == crate::apikey_profile::PROTOCOL_OPENAI_COMPAT
+        && normalized_path.starts_with("/v1/responses")
+        && !native_codex_client
+}
+
+fn default_omitted_responses_stream_to_true(body: Vec<u8>) -> Vec<u8> {
+    let Ok(mut payload) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return body;
+    };
+    let Some(obj) = payload.as_object_mut() else {
+        return body;
+    };
+    if obj.contains_key("stream") {
+        return body;
+    }
+    obj.insert("stream".to_string(), serde_json::Value::Bool(true));
+    serde_json::to_vec(&payload).unwrap_or(body)
+}
+
 /// 函数 `should_derive_compat_conversation_anchor`
 ///
 /// 作者: gaohongshun
@@ -300,6 +324,23 @@ fn resolve_local_conversation_id(
     )
 }
 
+fn resolve_client_is_stream(
+    protocol_type: &str,
+    normalized_path: &str,
+    client_is_stream: bool,
+    client_stream_specified: bool,
+    native_codex_client: bool,
+) -> bool {
+    client_is_stream
+        || (is_non_native_openai_responses_api_request(
+            protocol_type,
+            normalized_path,
+            native_codex_client,
+        ) && !client_stream_specified)
+        || (protocol_type == PROTOCOL_GEMINI_NATIVE
+            && normalized_path.contains(":streamGenerateContent"))
+}
+
 /// 函数 `apply_passthrough_request_overrides`
 ///
 /// 作者: gaohongshun
@@ -417,7 +458,7 @@ pub(super) fn build_local_validation_result(
 
     if api_key.rotation_strategy == ROTATION_AGGREGATE_API {
         let (
-            rewritten_body,
+            mut rewritten_body,
             model_for_log,
             reasoning_for_log,
             service_tier_for_log,
@@ -430,10 +471,24 @@ pub(super) fn build_local_validation_result(
             &api_key,
             initial_request_meta.service_tier.clone(),
         );
+        if is_non_native_openai_responses_api_request(
+            effective_protocol_type,
+            normalized_path.as_str(),
+            native_codex_client,
+        ) {
+            rewritten_body = default_omitted_responses_stream_to_true(rewritten_body);
+        }
         super::super::validate_text_input_limit_for_path(&normalized_path, &rewritten_body)
             .map_err(|err| LocalValidationError::new(400, err.message()))?;
         let incoming_headers = incoming_headers
             .with_conversation_id_override(initial_local_conversation_id.as_deref());
+        let is_stream = resolve_client_is_stream(
+            effective_protocol_type,
+            normalized_path.as_str(),
+            initial_request_meta.is_stream,
+            initial_request_meta.stream_specified,
+            native_codex_client,
+        );
         return Ok(LocalValidationResult {
             trace_id,
             incoming_headers,
@@ -441,7 +496,7 @@ pub(super) fn build_local_validation_result(
             original_path: normalized_path.clone(),
             path: normalized_path,
             body: Bytes::from(rewritten_body),
-            is_stream: initial_request_meta.is_stream,
+            is_stream,
             has_prompt_cache_key,
             request_shape,
             protocol_type: effective_protocol_type.to_string(),
@@ -478,6 +533,13 @@ pub(super) fn build_local_validation_result(
     let mut gemini_stream_output_mode = adapted.gemini_stream_output_mode;
     let mut tool_name_restore_map = adapted.tool_name_restore_map;
     body = adapted.body;
+    if is_non_native_openai_responses_api_request(
+        effective_protocol_type,
+        normalized_path.as_str(),
+        native_codex_client,
+    ) {
+        body = default_omitted_responses_stream_to_true(body);
+    }
     if effective_protocol_type != PROTOCOL_ANTHROPIC_NATIVE
         && !normalized_path.starts_with("/v1/responses")
         && path.starts_with("/v1/responses")
@@ -581,7 +643,13 @@ pub(super) fn build_local_validation_result(
         .or(api_key.reasoning_effort.clone());
     let service_tier_for_log = client_request_meta.service_tier;
     let effective_service_tier_for_log = request_meta.service_tier;
-    let is_stream = client_request_meta.is_stream;
+    let is_stream = resolve_client_is_stream(
+        effective_protocol_type,
+        normalized_path.as_str(),
+        initial_request_meta.is_stream,
+        initial_request_meta.stream_specified,
+        native_codex_client,
+    );
     let has_prompt_cache_key = request_meta.has_prompt_cache_key;
     let request_shape = client_request_meta.request_shape;
 

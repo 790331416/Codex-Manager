@@ -534,6 +534,31 @@ fn responses_compat_scope_disabled_preserves_native_codex_body_shape() {
 }
 
 #[test]
+fn responses_compat_scope_enabled_defaults_omitted_stream_to_upstream_sse() {
+    let _guard = crate::test_env_guard();
+    let body = json!({
+        "model": "gpt-5.4",
+        "input": "hello"
+    });
+    let out = apply_request_overrides_with_service_tier_and_prompt_cache_key_scope(
+        "/v1/responses",
+        serde_json::to_vec(&body).expect("serialize request body"),
+        None,
+        None,
+        None,
+        Some("https://chatgpt.com/backend-api/codex"),
+        None,
+        true,
+    );
+    let value: serde_json::Value = serde_json::from_slice(&out).expect("parse output body");
+
+    assert_eq!(
+        value.get("stream").and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+}
+
+#[test]
 fn responses_forced_prompt_cache_scope_disabled_does_not_apply_compat_body_rewrite() {
     let _guard = crate::test_env_guard();
     let body = json!({
