@@ -374,6 +374,7 @@ pub(super) fn classify_upstream_stream_read_error(raw: &str) -> String {
         || normalized == "error decoding response body"
         || normalized.contains("decoding response body")
         || normalized.contains("error reading a body from connection")
+        || normalized.contains("stream closed before response.completed")
     {
         return STREAM_READ_FAILED_FALLBACK_MESSAGE.to_string();
     }

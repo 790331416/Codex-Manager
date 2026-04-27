@@ -146,9 +146,11 @@ pub(crate) fn classify_message(message: &str) -> ErrorCode {
         return ErrorCode::ResponseWriteFailed;
     }
     if eq("stream disconnected before completion")
+        || starts_with("stream disconnected before completion:")
         || eq("request or response body error")
         || eq("stream read failed")
         || eq("response.incomplete")
+        || contains("stream closed before response.completed")
         || eq("上游中途断开，未返回具体错误信息")
         || eq("网络抖动")
         || eq("连接中断（可能是网络波动或客户端主动取消）")
@@ -344,6 +346,12 @@ mod tests {
         );
         assert_eq!(
             classify_message("stream disconnected before completion"),
+            ErrorCode::StreamInterrupted
+        );
+        assert_eq!(
+            classify_message(
+                "stream disconnected before completion: stream closed before response.completed"
+            ),
             ErrorCode::StreamInterrupted
         );
         assert_eq!(

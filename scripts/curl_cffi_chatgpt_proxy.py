@@ -19,13 +19,14 @@ Then point CodexManager to:
 from __future__ import annotations
 
 import argparse
+import codecs
 import json
 import os
 import sys
 import traceback
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Dict, Iterable, Tuple
+from typing import Dict, Iterable, Optional, Tuple
 from urllib.parse import urlsplit, urlunsplit
 
 from curl_cffi import requests
@@ -67,6 +68,13 @@ DEBUG_HEADER_ALLOWLIST = {
     "user-agent",
     "x-requested-with",
 }
+RESPONSES_TERMINAL_EVENT_TYPES = {
+    "response.completed",
+    "response.done",
+    "response.failed",
+    "response.incomplete",
+}
+SSE_TRACK_BUFFER_LIMIT = 64 * 1024
 
 
 def parse_args() -> argparse.Namespace:
@@ -186,6 +194,121 @@ def body_preview(body: bytes, limit: int) -> str:
     return preview.decode("utf-8", errors="replace")
 
 
+def is_responses_sse_stream(
+    request_target: str, response: requests.Response
+) -> bool:
+    path = urlsplit(request_target).path.lower()
+    content_type = response.headers.get("Content-Type", "").lower()
+    return "text/event-stream" in content_type and "/responses" in path
+
+
+class ResponsesSseTerminalTracker:
+    def __init__(self) -> None:
+        self._decoder = codecs.getincrementaldecoder("utf-8")(errors="ignore")
+        self._buffer = ""
+        self.saw_terminal = False
+
+    def feed(self, chunk: bytes) -> None:
+        if self.saw_terminal or not chunk:
+            return
+        self._append_text(self._decoder.decode(chunk))
+
+    def finish(self) -> None:
+        if self.saw_terminal:
+            return
+        self._append_text(self._decoder.decode(b"", final=True))
+        trailing = self._buffer.strip()
+        if trailing:
+            self._process_frame(trailing)
+        self._buffer = ""
+
+    def _append_text(self, text: str) -> None:
+        if not text:
+            return
+        self._buffer += text.replace("\r\n", "\n").replace("\r", "\n")
+        while "\n\n" in self._buffer:
+            frame, self._buffer = self._buffer.split("\n\n", 1)
+            self._process_frame(frame)
+            if self.saw_terminal:
+                self._buffer = ""
+                return
+        if len(self._buffer) > SSE_TRACK_BUFFER_LIMIT:
+            self._buffer = self._buffer[-SSE_TRACK_BUFFER_LIMIT:]
+
+    def _process_frame(self, frame: str) -> None:
+        stripped = frame.strip()
+        if not stripped:
+            return
+        event_name = ""
+        data_lines = []
+        for raw_line in stripped.split("\n"):
+            line = raw_line.strip()
+            if not line or line.startswith(":"):
+                continue
+            lowered = line.lower()
+            if lowered.startswith("event:"):
+                event_name = line[6:].strip().lower()
+            elif lowered.startswith("data:"):
+                data_lines.append(line[5:].lstrip())
+        if event_name in RESPONSES_TERMINAL_EVENT_TYPES:
+            self.saw_terminal = True
+            return
+        data = "\n".join(data_lines).strip()
+        if not data:
+            return
+        if data == "[DONE]":
+            self.saw_terminal = True
+            return
+        try:
+            payload = json.loads(data)
+        except json.JSONDecodeError:
+            return
+        event_type = str(payload.get("type", "")).strip().lower()
+        if event_type in RESPONSES_TERMINAL_EVENT_TYPES:
+            self.saw_terminal = True
+
+
+def build_responses_incomplete_event(detail: str) -> bytes:
+    message = detail.strip() or "stream closed before response.completed"
+    payload = {
+        "type": "response.incomplete",
+        "response": {
+            "status": "incomplete",
+            "status_details": {
+                "error": {
+                    "code": "stream_interrupted",
+                    "message": message,
+                }
+            },
+        },
+    }
+    return (
+        "event: response.incomplete\n"
+        f"data: {json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}\n\n"
+    ).encode("utf-8")
+
+
+def maybe_emit_responses_incomplete_event(
+    handler: BaseHTTPRequestHandler,
+    tracker: Optional[ResponsesSseTerminalTracker],
+    detail: str,
+    verbose: bool,
+) -> None:
+    if tracker is None:
+        return
+    tracker.finish()
+    if tracker.saw_terminal:
+        return
+    tracker.saw_terminal = True
+    if verbose:
+        sys.stderr.write(
+            f"[proxy] synthesize response.incomplete detail={detail.strip() or '-'}\n"
+        )
+    payload = build_responses_incomplete_event(detail)
+    handler.wfile.write(payload)
+    handler.wfile.flush()
+
+
 class ProxyServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -244,6 +367,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
     def _handle(self) -> None:
         response_started = False
+        responses_tracker: Optional[ResponsesSseTerminalTracker] = None
         try:
             if self.path == "/__proxy_health":
                 self._health_response()
@@ -330,6 +454,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 self.send_header("X-Curl-Cffi-Proxy", "1")
                 self.end_headers()
                 response_started = True
+                if upstream.status_code < 400 and is_responses_sse_stream(self.path, upstream):
+                    responses_tracker = ResponsesSseTerminalTracker()
 
                 if self.command == "HEAD":
                     return
@@ -337,13 +463,27 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 for chunk in upstream.iter_content(chunk_size=8192):
                     if not chunk:
                         continue
+                    if responses_tracker is not None:
+                        responses_tracker.feed(chunk)
                     self.wfile.write(chunk)
                     self.wfile.flush()
+                maybe_emit_responses_incomplete_event(
+                    self,
+                    responses_tracker,
+                    "stream closed before response.completed",
+                    cfg.verbose,
+                )
             except (BrokenPipeError, ConnectionResetError):
                 return
             except Exception as err:
                 if cfg.verbose:
                     sys.stderr.write(f"[proxy] upstream stream failed: {err}\n")
+                maybe_emit_responses_incomplete_event(
+                    self,
+                    responses_tracker,
+                    f"stream closed before response.completed: {err}",
+                    cfg.verbose,
+                )
                 return
             finally:
                 upstream.close()

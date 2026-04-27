@@ -40,6 +40,7 @@ function normalizeKnownAppErrorMessage(message: string): string {
   if (
     normalized === "request or response body error" ||
     normalized === "stream read failed" ||
+    normalized === "stream closed before response.completed" ||
     normalized === "上游中途断开，未返回具体错误信息"
   ) {
     return "上游中途断开，未返回具体错误信息";
@@ -56,6 +57,7 @@ function normalizeKnownAppErrorMessage(message: string): string {
     normalized === "response.incomplete" ||
     normalized === "网络抖动" ||
     normalized === "stream disconnected before completion" ||
+    normalized.startsWith("stream disconnected before completion:") ||
     normalized === "连接中断（可能是网络波动或客户端主动取消）"
   ) {
     return "连接中断（可能是网络波动或客户端主动取消）";

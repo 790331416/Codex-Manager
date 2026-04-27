@@ -107,3 +107,18 @@ test("getAppErrorMessage 会把旧的网络抖动文案统一收敛为连接中�
     "连接中断（可能是网络波动或客户端主动取消）"
   );
 });
+test("getAppErrorMessage maps detailed reconnect wording to the same disconnect copy", () => {
+  assert.equal(
+    transportErrors.getAppErrorMessage(
+      "stream disconnected before completion: stream closed before response.completed"
+    ),
+    transportErrors.getAppErrorMessage("stream disconnected before completion")
+  );
+});
+
+test("getAppErrorMessage maps response.completed close detail to upstream body error copy", () => {
+  assert.equal(
+    transportErrors.getAppErrorMessage("stream closed before response.completed"),
+    transportErrors.getAppErrorMessage("stream read failed")
+  );
+});
