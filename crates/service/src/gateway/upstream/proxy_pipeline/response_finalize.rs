@@ -98,6 +98,35 @@ fn derive_status_for_log(
     }
 }
 
+fn derive_response_failure_stage(
+    bridge_ok: bool,
+    upstream_stream_failed: bool,
+    client_delivery_failed: bool,
+    gateway_failover: bool,
+    stream_terminal_seen: bool,
+    stream_terminal_error: Option<&str>,
+) -> Option<&'static str> {
+    if client_delivery_failed {
+        return Some("client_delivery");
+    }
+    if upstream_stream_failed {
+        if !stream_terminal_seen {
+            return Some("stream_missing_terminal");
+        }
+        if stream_terminal_error.is_some() {
+            return Some("stream_terminal_error");
+        }
+        return Some("stream_incomplete");
+    }
+    if gateway_failover {
+        return Some("gateway_failover");
+    }
+    if !bridge_ok {
+        return Some("bridge_error");
+    }
+    None
+}
+
 /// 函数 `respond_total_timeout`
 ///
 /// 作者: gaohongshun
@@ -198,8 +227,11 @@ pub(super) fn finalize_upstream_response(
     model_for_log: Option<&str>,
     attempted_account_ids: Option<&[String]>,
     has_more_candidates: bool,
+    candidate_index: usize,
+    total_candidates: usize,
 ) -> Result<FinalizeUpstreamResponseOutcome, String> {
     let status_code = response.status().as_u16();
+    let adapter_label = format!("{response_adapter:?}");
 
     let bridge = super::super::super::respond_with_upstream(
         request,
@@ -226,7 +258,7 @@ pub(super) fn finalize_upstream_response(
     super::super::super::trace_log::log_bridge_result(
         super::super::super::trace_log::BridgeResultLog {
             trace_id,
-            adapter: format!("{response_adapter:?}").as_str(),
+            adapter: adapter_label.as_str(),
             path,
             is_stream: client_is_stream,
             stream_terminal_seen: bridge.stream_terminal_seen,
@@ -253,7 +285,7 @@ pub(super) fn finalize_upstream_response(
     ) {
         super::super::super::trace_log::log_gemini_bridge_diagnostics(
             trace_id,
-            format!("{response_adapter:?}").as_str(),
+            adapter_label.as_str(),
             gemini_stream_output_mode.map(|mode| match mode {
                 super::super::super::GeminiStreamOutputMode::Sse => "sse",
                 super::super::super::GeminiStreamOutputMode::Raw => "raw",
@@ -297,6 +329,46 @@ pub(super) fn finalize_upstream_response(
         upstream_stream_failed,
         client_delivery_failed,
     );
+    let failure_stage = derive_response_failure_stage(
+        bridge_ok,
+        upstream_stream_failed,
+        client_delivery_failed,
+        gateway_failover,
+        bridge.stream_terminal_seen,
+        bridge.stream_terminal_error.as_deref(),
+    );
+
+    if let Some(failure_stage) = failure_stage {
+        super::super::super::trace_log::log_response_failure_context(
+            super::super::super::trace_log::ResponseFailureContextLog {
+                trace_id,
+                path,
+                adapter: adapter_label.as_str(),
+                account_id,
+                candidate_index,
+                total_candidates,
+                model: model_for_log,
+                upstream_url: last_attempt_url,
+                upstream_status_code: status_code,
+                final_status_code: status_for_log,
+                failure_stage,
+                will_failover: gateway_failover,
+                has_more_candidates,
+                last_attempt_error,
+                final_error: final_error.as_deref(),
+                stream_terminal_seen: bridge.stream_terminal_seen,
+                stream_terminal_error: bridge.stream_terminal_error.as_deref(),
+                delivery_error: bridge.delivery_error.as_deref(),
+                upstream_error_hint: bridge.upstream_error_hint.as_deref(),
+                upstream_request_id: bridge.upstream_request_id.as_deref(),
+                upstream_cf_ray: bridge.upstream_cf_ray.as_deref(),
+                upstream_auth_error: bridge.upstream_auth_error.as_deref(),
+                upstream_identity_error_code: bridge.upstream_identity_error_code.as_deref(),
+                upstream_content_type: bridge.upstream_content_type.as_deref(),
+                last_sse_event_type: bridge.last_sse_event_type.as_deref(),
+            },
+        );
+    }
 
     if upstream_stream_failed {
         super::super::super::mark_account_cooldown(
@@ -332,7 +404,10 @@ pub(super) fn finalize_upstream_response(
 
 #[cfg(test)]
 mod tests {
-    use super::{derive_final_error, derive_status_for_log, is_client_disconnect_error};
+    use super::{
+        derive_final_error, derive_response_failure_stage, derive_status_for_log,
+        is_client_disconnect_error,
+    };
 
     #[test]
     fn derive_final_error_prefers_upstream_hint_then_http_error_then_bridge_error() {
@@ -395,5 +470,33 @@ mod tests {
         assert!(is_client_disconnect_error("broken pipe"));
         assert!(is_client_disconnect_error("connection reset by peer"));
         assert!(!is_client_disconnect_error("upstream timeout"));
+    }
+
+    #[test]
+    fn derive_response_failure_stage_prioritizes_client_then_stream_then_bridge() {
+        assert_eq!(
+            derive_response_failure_stage(true, false, true, false, true, None),
+            Some("client_delivery")
+        );
+        assert_eq!(
+            derive_response_failure_stage(true, true, false, false, false, None),
+            Some("stream_missing_terminal")
+        );
+        assert_eq!(
+            derive_response_failure_stage(true, true, false, false, true, Some("boom")),
+            Some("stream_terminal_error")
+        );
+        assert_eq!(
+            derive_response_failure_stage(true, false, false, true, true, None),
+            Some("gateway_failover")
+        );
+        assert_eq!(
+            derive_response_failure_stage(false, false, false, false, true, None),
+            Some("bridge_error")
+        );
+        assert_eq!(
+            derive_response_failure_stage(true, false, false, false, true, None),
+            None
+        );
     }
 }

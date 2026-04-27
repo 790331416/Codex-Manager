@@ -428,6 +428,8 @@ pub(in super::super) fn execute_candidate_sequence(
                     attempt_model_for_log,
                     Some(attempted_account_ids.as_slice()),
                     context.has_more_candidates(idx),
+                    idx,
+                    setup.candidate_count,
                 )? {
                     FinalizeUpstreamResponseOutcome::Handled => {
                         if let Err(err) = super::super::super::conversation_binding::record_conversation_binding_terminal_response(
