@@ -20,9 +20,11 @@ from __future__ import annotations
 
 import argparse
 import codecs
+import copy
 import json
 import os
 import sys
+import time
 import traceback
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -206,6 +208,7 @@ class ResponsesSseTerminalTracker:
     def __init__(self) -> None:
         self._decoder = codecs.getincrementaldecoder("utf-8")(errors="ignore")
         self._buffer = ""
+        self._last_response: Optional[dict] = None
         self.saw_terminal = False
 
     def feed(self, chunk: bytes) -> None:
@@ -263,29 +266,48 @@ class ResponsesSseTerminalTracker:
             payload = json.loads(data)
         except json.JSONDecodeError:
             return
+        response_obj = payload.get("response")
+        if isinstance(response_obj, dict):
+            self._last_response = copy.deepcopy(response_obj)
         event_type = str(payload.get("type", "")).strip().lower()
         if event_type in RESPONSES_TERMINAL_EVENT_TYPES:
             self.saw_terminal = True
 
+    def build_incomplete_terminal_frames(self, detail: str) -> bytes:
+        message = detail.strip() or "stream closed before response.completed"
+        response = copy.deepcopy(self._last_response) if self._last_response else {}
+        if not isinstance(response, dict):
+            response = {}
+        response.setdefault("id", "resp_proxy_incomplete")
+        response.setdefault("object", "response")
+        response.setdefault("created_at", int(time.time()))
+        response["status"] = "incomplete"
+        response.pop("completed_at", None)
+        response["error"] = {
+            "code": "stream_interrupted",
+            "message": message,
+        }
+        response["incomplete_details"] = {"reason": "error"}
+        response.setdefault("output", [])
 
-def build_responses_incomplete_event(detail: str) -> bytes:
-    message = detail.strip() or "stream closed before response.completed"
-    payload = {
-        "type": "response.incomplete",
-        "response": {
-            "status": "incomplete",
-            "status_details": {
-                "error": {
-                    "code": "stream_interrupted",
-                    "message": message,
-                }
-            },
-        },
-    }
-    return (
-        "event: response.incomplete\n"
-        f"data: {json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}\n\n"
-    ).encode("utf-8")
+        incomplete_payload = {
+            "type": "response.incomplete",
+            "response": response,
+        }
+        # Some reconnecting clients keep waiting for `response.completed` even after an
+        # incomplete terminal. Emit a compatibility terminal frame with the same
+        # incomplete response body so they can stop retrying while still seeing
+        # `response.status = incomplete`.
+        completed_payload = {
+            "type": "response.completed",
+            "response": response,
+        }
+        return (
+            "event: response.incomplete\n"
+            f"data: {json.dumps(incomplete_payload, ensure_ascii=False, separators=(',', ':'))}\n\n"
+            "event: response.completed\n"
+            f"data: {json.dumps(completed_payload, ensure_ascii=False, separators=(',', ':'))}\n\n"
+        ).encode("utf-8")
 
 
 def maybe_emit_responses_incomplete_event(
@@ -304,7 +326,7 @@ def maybe_emit_responses_incomplete_event(
         sys.stderr.write(
             f"[proxy] synthesize response.incomplete detail={detail.strip() or '-'}\n"
         )
-    payload = build_responses_incomplete_event(detail)
+    payload = tracker.build_incomplete_terminal_frames(detail)
     handler.wfile.write(payload)
     handler.wfile.flush()
 
