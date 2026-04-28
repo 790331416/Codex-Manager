@@ -10,6 +10,7 @@ use futures_util::pin_mut;
 use futures_util::stream::unfold;
 use futures_util::task::noop_waker_ref;
 use futures_util::Stream;
+use serde_json::{json, Map, Value};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::task::{Context, Poll};
 use std::thread;
@@ -152,6 +153,9 @@ impl OpenAIResponsesPassthroughSseReader {
             if let Some(event_type) = event.event_type {
                 collector.last_event_type = Some(event_type);
             }
+            if let Some(response_snapshot) = event.response_snapshot {
+                collector.last_response = Some(response_snapshot);
+            }
             merge_usage(&mut collector.usage, event.usage);
             if let Some(upstream_error_hint) = event.upstream_error_hint {
                 collector.upstream_error_hint = Some(upstream_error_hint);
@@ -163,6 +167,28 @@ impl OpenAIResponsesPassthroughSseReader {
                 }
             }
         }
+    }
+
+    fn synthesize_terminal_frames_if_needed(&self) -> Option<Vec<u8>> {
+        let Ok(mut collector) = self.usage_collector.lock() else {
+            return None;
+        };
+        if collector.saw_terminal {
+            return None;
+        }
+
+        let message = collector
+            .terminal_error
+            .clone()
+            .or_else(|| collector.upstream_error_hint.clone())
+            .unwrap_or_else(stream_reader_disconnected_message);
+        let response = build_incomplete_response_value(collector.last_response.as_ref(), &message);
+        collector.saw_terminal = true;
+        collector
+            .terminal_error
+            .get_or_insert_with(|| message.clone());
+
+        Some(build_terminal_frames(&response))
     }
 
     fn drain_sidecar_events(&self) {
@@ -238,7 +264,9 @@ impl OpenAIResponsesPassthroughSseReader {
                         }
                     }
                     self.finished = true;
-                    return Ok(Vec::new());
+                    return Ok(self
+                        .synthesize_terminal_frames_if_needed()
+                        .unwrap_or_default());
                 }
                 Ok(GatewayByteStreamItem::Error(err)) => {
                     self.last_upstream_activity = Instant::now();
@@ -249,7 +277,9 @@ impl OpenAIResponsesPassthroughSseReader {
                             .get_or_insert_with(|| classify_upstream_stream_read_error(&err));
                     }
                     self.finished = true;
-                    return Ok(Vec::new());
+                    return Ok(self
+                        .synthesize_terminal_frames_if_needed()
+                        .unwrap_or_default());
                 }
                 Err(RecvTimeoutError::Timeout) => {
                     self.drain_sidecar_events();
@@ -260,7 +290,9 @@ impl OpenAIResponsesPassthroughSseReader {
                                 .get_or_insert_with(stream_idle_timeout_message);
                         }
                         self.finished = true;
-                        return Ok(Vec::new());
+                        return Ok(self
+                            .synthesize_terminal_frames_if_needed()
+                            .unwrap_or_default());
                     }
                     continue;
                 }
@@ -273,11 +305,58 @@ impl OpenAIResponsesPassthroughSseReader {
                         });
                     }
                     self.finished = true;
-                    return Ok(Vec::new());
+                    return Ok(self
+                        .synthesize_terminal_frames_if_needed()
+                        .unwrap_or_default());
                 }
             }
         }
     }
+}
+
+fn build_incomplete_response_value(last_response: Option<&Value>, message: &str) -> Value {
+    let mut response = match last_response.cloned() {
+        Some(Value::Object(map)) => map,
+        _ => Map::new(),
+    };
+    response.insert(
+        "status".to_string(),
+        Value::String("incomplete".to_string()),
+    );
+    response.insert(
+        "incomplete_details".to_string(),
+        json!({ "reason": "error" }),
+    );
+    response.insert(
+        "status_details".to_string(),
+        json!({
+            "error": {
+                "message": message,
+                "code": "stream_interrupted"
+            }
+        }),
+    );
+    Value::Object(response)
+}
+
+fn build_terminal_frames(response: &Value) -> Vec<u8> {
+    let incomplete = json!({
+        "type": "response.incomplete",
+        "response": response,
+    });
+    let completed = json!({
+        "type": "response.completed",
+        "response": response,
+    });
+    format!(
+        "event: response.incomplete\n\
+         data: {}\n\n\
+         event: response.completed\n\
+         data: {}\n\n",
+        serde_json::to_string(&incomplete).expect("serialize synthesized incomplete event"),
+        serde_json::to_string(&completed).expect("serialize synthesized completed event"),
+    )
+    .into_bytes()
 }
 
 impl Read for OpenAIResponsesPassthroughSseReader {

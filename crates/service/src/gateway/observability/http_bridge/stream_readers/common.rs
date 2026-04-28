@@ -1,4 +1,5 @@
 use super::{Arc, Mutex, UpstreamResponseUsage};
+use serde_json::Value;
 use std::io::{BufRead, BufReader};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
@@ -21,6 +22,7 @@ pub(crate) struct PassthroughSseCollector {
     pub(crate) terminal_error: Option<String>,
     pub(crate) upstream_error_hint: Option<String>,
     pub(crate) last_event_type: Option<String>,
+    pub(crate) last_response: Option<Value>,
 }
 
 fn elapsed_ms_since(started_at: Instant) -> i64 {

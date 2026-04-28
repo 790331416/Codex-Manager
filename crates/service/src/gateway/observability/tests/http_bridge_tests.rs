@@ -1897,6 +1897,53 @@ fn openai_responses_passthrough_reader_maps_bare_incomplete_to_disconnect_messag
     assert!(collector.saw_terminal);
 }
 
+#[test]
+fn openai_responses_passthrough_reader_synthesizes_terminal_frames_when_stream_ends_mid_delta() {
+    let (upstream, server) = open_streaming_mock_http_response(
+        "text/event-stream",
+        &[(
+            "event: response.created\n\
+             data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_mid_delta_1\",\"created\":1700000001,\"model\":\"gpt-5.4\"}}\n\n\
+             event: response.function_call_arguments.delta\n\
+             data: {\"type\":\"response.function_call_arguments.delta\",\"response_id\":\"resp_mid_delta_1\",\"created\":1700000001,\"model\":\"gpt-5.4\",\"output_index\":0,\"delta\":\"{\\\"path\\\":\\\"README.md\\\"}\"}\n\n",
+            0,
+        )],
+    );
+    let usage_collector = Arc::new(Mutex::new(PassthroughSseCollector::default()));
+    let mut reader = OpenAIResponsesPassthroughSseReader::new(
+        upstream,
+        Arc::clone(&usage_collector),
+        SseKeepAliveFrame::OpenAIResponses,
+        std::time::Instant::now(),
+    );
+    let mut mapped = String::new();
+    reader
+        .read_to_string(&mut mapped)
+        .expect("read synthesized terminal openai responses stream");
+    server
+        .join()
+        .expect("join synthesized terminal openai responses upstream");
+
+    let collector = usage_collector
+        .lock()
+        .expect("lock usage collector")
+        .clone();
+    assert!(mapped.contains("event: response.function_call_arguments.delta"));
+    assert!(mapped.contains("event: response.incomplete"));
+    assert!(mapped.contains("event: response.completed"));
+    assert!(mapped.contains("\"status\":\"incomplete\""));
+    assert!(mapped.contains("\"id\":\"resp_mid_delta_1\""));
+    assert_eq!(
+        collector.terminal_error.as_deref(),
+        Some("连接中断（可能是网络波动或客户端主动取消）")
+    );
+    assert!(collector.saw_terminal);
+    assert_eq!(
+        collector.last_event_type.as_deref(),
+        Some("response.function_call_arguments.delta")
+    );
+}
+
 /// 函数 `passthrough_sse_reader_captures_raw_html_error_body`
 ///
 /// 作者: gaohongshun

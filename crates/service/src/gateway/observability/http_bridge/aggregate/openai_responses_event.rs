@@ -1,4 +1,4 @@
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use super::output_text::{
     append_output_text, collect_output_text_from_event_fields, collect_response_output_text,
@@ -49,6 +49,7 @@ pub(in super::super) struct OpenAIResponsesEvent {
     pub(in super::super) usage: UpstreamResponseUsage,
     pub(in super::super) terminal: Option<SseTerminal>,
     pub(in super::super) upstream_error_hint: Option<String>,
+    pub(in super::super) response_snapshot: Option<Value>,
 }
 
 impl OpenAIResponsesEvent {
@@ -80,7 +81,31 @@ impl OpenAIResponsesEvent {
             usage,
             terminal,
             upstream_error_hint,
+            response_snapshot: extract_response_snapshot(&value),
         })
+    }
+}
+
+fn extract_response_snapshot(value: &Value) -> Option<Value> {
+    if let Some(response) = value.get("response").cloned().filter(Value::is_object) {
+        return Some(response);
+    }
+
+    let mut response = Map::new();
+    if let Some(response_id) = value.get("response_id").and_then(Value::as_str) {
+        response.insert("id".to_string(), Value::String(response_id.to_string()));
+    }
+    if let Some(created) = value.get("created").cloned() {
+        response.insert("created".to_string(), created);
+    }
+    if let Some(model) = value.get("model").and_then(Value::as_str) {
+        response.insert("model".to_string(), Value::String(model.to_string()));
+    }
+
+    if response.is_empty() {
+        None
+    } else {
+        Some(Value::Object(response))
     }
 }
 
