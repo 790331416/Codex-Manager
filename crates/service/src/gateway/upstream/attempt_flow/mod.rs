@@ -1,3 +1,4 @@
+pub(super) mod auto_compact;
 pub(super) mod candidate_flow;
 pub(super) mod fallback_branch;
 pub(super) mod openai_base;

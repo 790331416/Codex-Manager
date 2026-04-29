@@ -13,6 +13,7 @@ pub(crate) enum AccountAvailabilitySignal {
 pub(crate) enum GatewayErrorKind {
     Deactivation,
     UsageLimit,
+    Network,
     Other,
 }
 
@@ -203,20 +204,45 @@ pub(crate) fn usage_limit_reason_from_message(message: &str) -> Option<&'static 
     None
 }
 
+pub(crate) fn transient_network_reason_from_message(message: &str) -> Option<&'static str> {
+    let normalized = message.trim().to_ascii_lowercase();
+    if normalized.contains("error sending request for url")
+        || normalized.contains("error trying to connect")
+        || normalized.contains("dns error")
+        || normalized.contains("connection refused")
+        || normalized.contains("tcp connect error")
+        || normalized.contains("tls handshake eof")
+        || normalized.contains("operation timed out")
+    {
+        return Some("transient_network");
+    }
+    None
+}
+
 pub(crate) fn analyze_gateway_error(err: &str, has_more_candidates: bool) -> GatewayErrorFollowUp {
     let kind = if deactivation_reason_from_message(err).is_some() {
         GatewayErrorKind::Deactivation
     } else if usage_limit_reason_from_message(err).is_some() {
         GatewayErrorKind::UsageLimit
+    } else if transient_network_reason_from_message(err).is_some() {
+        GatewayErrorKind::Network
     } else {
         GatewayErrorKind::Other
     };
-    let is_actionable = !matches!(kind, GatewayErrorKind::Other);
-    let should_failover = has_more_candidates && is_actionable;
+    let should_failover = has_more_candidates
+        && matches!(
+            kind,
+            GatewayErrorKind::Deactivation
+                | GatewayErrorKind::UsageLimit
+                | GatewayErrorKind::Network
+        );
     GatewayErrorFollowUp {
         kind,
         should_failover,
-        should_mark_account_unavailable: is_actionable,
+        should_mark_account_unavailable: matches!(
+            kind,
+            GatewayErrorKind::Deactivation | GatewayErrorKind::UsageLimit
+        ),
         should_mark_default_cooldown: matches!(kind, GatewayErrorKind::UsageLimit)
             && should_failover,
     }
@@ -535,6 +561,23 @@ mod tests {
         assert!(ws_usage_limit.should_failover);
         assert!(ws_usage_limit.should_mark_account_unavailable);
         assert!(ws_usage_limit.should_mark_default_cooldown);
+
+        let network = analyze_gateway_error(
+            "upstream error: error sending request for url (https://chatgpt.com/backend-api/codex/responses)",
+            true,
+        );
+        assert_eq!(network.kind, GatewayErrorKind::Network);
+        assert!(network.should_failover);
+        assert!(!network.should_mark_account_unavailable);
+        assert!(!network.should_mark_default_cooldown);
+
+        let network_last = analyze_gateway_error(
+            "upstream error: error sending request for url (https://chatgpt.com/backend-api/codex/responses)",
+            false,
+        );
+        assert_eq!(network_last.kind, GatewayErrorKind::Network);
+        assert!(!network_last.should_failover);
+        assert!(!network_last.should_mark_account_unavailable);
     }
 
     /// 函数 `gateway_usage_limit_error_does_not_persist_unavailable_status`

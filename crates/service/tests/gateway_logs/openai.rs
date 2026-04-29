@@ -3508,3 +3508,185 @@ fn gateway_invalid_refresh_token_marks_first_account_unavailable_and_fails_over(
         .expect("first account exists");
     assert_eq!(bad_account.status, "unavailable");
 }
+
+#[test]
+fn gateway_openai_responses_auto_compacts_oversized_context_before_primary_send() {
+    fn build_large_input_items(count: usize, chars_per_item: usize) -> Vec<serde_json::Value> {
+        (0..count)
+            .map(|idx| {
+                serde_json::json!({
+                    "type": "message",
+                    "role": if idx % 2 == 0 { "user" } else { "assistant" },
+                    "content": [{
+                        "type": "input_text",
+                        "text": format!("item-{idx}-{}", "x".repeat(chars_per_item)),
+                    }]
+                })
+            })
+            .collect()
+    }
+
+    let _lock = test_env_guard();
+    let dir = new_test_dir("codexmanager-gateway-openai-auto-compact");
+    let db_path: PathBuf = dir.join("codexmanager.db");
+
+    let _db_guard = EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
+
+    let compact_response = serde_json::json!({
+        "output": [
+            {
+                "type": "compaction",
+                "encrypted_content": "REMOTE_COMPACTED_SUMMARY"
+            }
+        ]
+    });
+    let final_response = serde_json::json!({
+        "id": "resp_openai_auto_compact",
+        "model": "gpt-5.4",
+        "output": [{
+            "type": "message",
+            "role": "assistant",
+            "content": [{ "type": "output_text", "text": "compacted ok" }]
+        }],
+        "usage": {
+            "input_tokens": 120000,
+            "output_tokens": 3,
+            "total_tokens": 120003
+        }
+    });
+    let compact_body =
+        serde_json::to_string(&compact_response).expect("serialize compact response");
+    let final_body = serde_json::to_string(&final_response).expect("serialize final response");
+    let (upstream_addr, upstream_rx, upstream_join) =
+        start_mock_upstream_sequence(vec![(200, compact_body), (200, final_body)]);
+    let upstream_base = format!("http://{upstream_addr}/backend-api/codex");
+    let _upstream_guard = EnvGuard::set("CODEXMANAGER_UPSTREAM_BASE_URL", &upstream_base);
+
+    let storage = Storage::open(&db_path).expect("open db");
+    storage.init().expect("init db");
+    let now = now_ts();
+
+    storage
+        .insert_account(&Account {
+            id: "acc_openai_auto_compact".to_string(),
+            label: "openai-auto-compact".to_string(),
+            issuer: "https://auth.openai.com".to_string(),
+            chatgpt_account_id: Some("chatgpt_openai_auto_compact".to_string()),
+            workspace_id: None,
+            group_name: None,
+            sort: 0,
+            status: "active".to_string(),
+            created_at: now,
+            updated_at: now,
+        })
+        .expect("insert account");
+    storage
+        .insert_token(&Token {
+            account_id: "acc_openai_auto_compact".to_string(),
+            id_token: String::new(),
+            access_token: "access_token_openai_auto_compact".to_string(),
+            refresh_token: String::new(),
+            api_key_access_token: Some("api_access_token_openai_auto_compact".to_string()),
+            last_refresh: now,
+        })
+        .expect("insert token");
+
+    let platform_key = "pk_openai_auto_compact";
+    storage
+        .insert_api_key(&ApiKey {
+            id: "gk_openai_auto_compact".to_string(),
+            name: Some("openai-auto-compact".to_string()),
+            model_slug: Some("gpt-5.4".to_string()),
+            reasoning_effort: Some("high".to_string()),
+            service_tier: None,
+            rotation_strategy: "account_rotation".to_string(),
+            aggregate_api_id: None,
+            account_plan_filter: None,
+            aggregate_api_url: None,
+            client_type: "codex".to_string(),
+            protocol_type: "openai_compat".to_string(),
+            auth_scheme: "authorization_bearer".to_string(),
+            upstream_base_url: None,
+            static_headers_json: None,
+            key_hash: hash_platform_key_for_test(platform_key),
+            status: "active".to_string(),
+            created_at: now,
+            last_used_at: None,
+        })
+        .expect("insert api key");
+
+    let request_body = serde_json::json!({
+        "model": "gpt-5.4",
+        "instructions": "stay focused",
+        "input": build_large_input_items(12, 60_000),
+        "tools": [],
+        "parallel_tool_calls": true,
+        "reasoning": { "effort": "high" },
+        "text": { "verbosity": "low" },
+        "stream": false,
+        "store": true,
+        "service_tier": "priority",
+        "include": ["reasoning.encrypted_content"],
+        "prompt_cache_key": "thread-auto-compact",
+        "client_metadata": { "requestKind": "stress" },
+        "tool_choice": "auto"
+    });
+
+    let server = codexmanager_service::start_one_shot_server().expect("start server");
+    let (status, gateway_body) = post_http_raw(
+        &server.addr,
+        "/v1/responses",
+        &serde_json::to_string(&request_body).expect("serialize request"),
+        &[
+            ("Content-Type", "application/json"),
+            ("Authorization", &format!("Bearer {platform_key}")),
+        ],
+    );
+    server.join();
+    assert_eq!(status, 200, "gateway response: {gateway_body}");
+
+    let compact_request = upstream_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("receive compact upstream request");
+    let final_request = upstream_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("receive final upstream request");
+    upstream_join.join().expect("join upstream");
+
+    assert_eq!(compact_request.path, "/backend-api/codex/responses/compact");
+    assert_eq!(final_request.path, "/backend-api/codex/responses");
+
+    let compact_payload: serde_json::Value =
+        serde_json::from_slice(&decode_upstream_request_body(&compact_request))
+            .expect("parse compact payload");
+    let final_payload: serde_json::Value =
+        serde_json::from_slice(&decode_upstream_request_body(&final_request))
+            .expect("parse final payload");
+
+    assert!(compact_payload.get("stream").is_none());
+    assert!(compact_payload.get("store").is_none());
+    assert!(compact_payload.get("service_tier").is_none());
+    assert!(compact_payload.get("include").is_none());
+    assert!(compact_payload.get("prompt_cache_key").is_none());
+    assert!(compact_payload.get("client_metadata").is_none());
+    assert!(compact_payload.get("tool_choice").is_none());
+    assert!(
+        compact_payload["input"]
+            .as_array()
+            .is_some_and(|items| !items.is_empty()),
+        "compact payload should carry prefix input: {compact_payload}"
+    );
+
+    let final_input = final_payload["input"]
+        .as_array()
+        .expect("final input array");
+    assert!(final_input.iter().any(|item| item["type"] == "compaction"
+        && item["encrypted_content"] == "REMOTE_COMPACTED_SUMMARY"));
+    assert!(
+        final_input
+            .last()
+            .and_then(|item| item["content"][0]["text"].as_str())
+            .is_some_and(|text| text.contains("item-11-")),
+        "latest raw tail should stay in request: {final_payload}"
+    );
+}

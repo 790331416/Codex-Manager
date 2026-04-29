@@ -4,6 +4,7 @@ use reqwest::header::CONTENT_TYPE;
 use std::time::Instant;
 
 use super::super::GatewayUpstreamResponse;
+use super::auto_compact::maybe_prepare_auto_compacted_body;
 use super::fallback_branch::{handle_openai_fallback_branch, FallbackBranchResult};
 use super::primary_attempt::{run_primary_upstream_attempt, PrimaryAttemptResult};
 use super::transport::UpstreamRequestContext;
@@ -98,6 +99,20 @@ where
         );
     }
 
+    let body_for_primary_attempt = maybe_prepare_auto_compacted_body(
+        client,
+        storage,
+        method,
+        request_deadline,
+        incoming_headers,
+        body,
+        base,
+        account,
+        auth_token.as_str(),
+        strip_session_affinity,
+        debug,
+    );
+
     let upstream = match run_primary_upstream_attempt(
         client,
         method,
@@ -105,7 +120,7 @@ where
         request_deadline,
         request_ctx,
         incoming_headers,
-        body,
+        &body_for_primary_attempt,
         is_stream,
         auth_token.as_str(),
         account,
