@@ -59,6 +59,22 @@ pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
         "account/deleteUnavailableFree" => {
             super::value_or_error(account_cleanup::delete_unavailable_free_accounts())
         }
+        "account/deleteByStatuses" => {
+            let statuses = req
+                .params
+                .as_ref()
+                .and_then(|params| params.get("statuses"))
+                .and_then(|value| value.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str())
+                        .map(|item| item.to_string())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            super::value_or_error(account_cleanup::delete_accounts_by_statuses(statuses))
+        }
         "account/update" => {
             let account_id = super::str_param(req, "accountId").unwrap_or("");
             let sort = super::i64_param(req, "sort");
@@ -229,11 +245,14 @@ pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
             }
         }
         "account/chatgptAuthTokens/refresh" => {
-            let previous_account_id =
-                first_str_param(req, &["previousAccountId", "previous_account_id"]);
+            let target_account_id = first_str_param(req, &["accountId", "account_id"])
+                .or_else(|| first_str_param(req, &["previousAccountId", "previous_account_id"]));
             super::value_or_error(auth_account::refresh_current_chatgpt_auth_tokens(
-                previous_account_id,
+                target_account_id,
             ))
+        }
+        "account/chatgptAuthTokens/refreshAll" => {
+            super::value_or_error(auth_account::refresh_all_chatgpt_auth_tokens())
         }
         "account/read" => {
             let refresh_token =

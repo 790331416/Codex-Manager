@@ -18,17 +18,6 @@ const MODEL_PICKER_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const MODEL_PICKER_TOTAL_TIMEOUT: Duration = Duration::from_secs(120);
 const MODEL_PICKER_RESPONSE_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// 函数 `append_client_version_query`
-///
-/// 作者: gaohongshun
-///
-/// 时间: 2026-04-02
-///
-/// # 参数
-/// - url: 参数 url
-///
-/// # 返回
-/// 返回函数执行结果
 fn append_client_version_query(url: &str) -> String {
     if url.contains("client_version=") {
         return url.to_string();
@@ -87,6 +76,11 @@ fn build_models_request_headers(
         }
     }
     headers
+}
+
+fn build_models_request_url(upstream_base: &str, path: &str) -> String {
+    let (url, _url_alt) = super::super::compute_upstream_url(upstream_base, path);
+    append_client_version_query(&url)
 }
 
 /// 函数 `extract_response_header`
@@ -345,8 +339,7 @@ async fn send_models_request_async(
     account: &Account,
     token: &mut Token,
 ) -> Result<Vec<u8>, String> {
-    let (url, _url_alt) = super::super::compute_upstream_url(upstream_base, path);
-    let url = append_client_version_query(&url);
+    let url = build_models_request_url(upstream_base, path);
     // 中文注释：OpenAI 基线要求 api_key_access_token，
     // 不这样区分会导致模型列表请求在 OpenAI 上游稳定 401。
     let bearer = if super::super::is_openai_api_base(upstream_base) {
@@ -419,7 +412,8 @@ async fn send_models_request_async(
 #[cfg(test)]
 mod tests {
     use super::{
-        append_client_version_query, build_models_request_headers, summarize_models_error_response,
+        append_client_version_query, build_models_request_headers, build_models_request_url,
+        summarize_models_error_response,
     };
     use reqwest::header::{HeaderMap, HeaderValue};
     use reqwest::StatusCode;
@@ -493,6 +487,56 @@ mod tests {
         assert_eq!(
             actual,
             "https://example.com/backend-api/codex/models?client_version=0.101.0"
+        );
+    }
+
+    /// 函数 `build_models_request_url_appends_client_version_for_codex_backend`
+    ///
+    /// 作者: gaohongshun
+    ///
+    /// 时间: 2026-05-03
+    ///
+    /// # 参数
+    /// 无
+    ///
+    /// # 返回
+    /// 无
+    #[test]
+    fn build_models_request_url_appends_client_version_for_codex_backend() {
+        let _guard = crate::test_env_guard();
+        crate::gateway::set_codex_user_agent_version("0.101.0")
+            .expect("set default codex user agent version");
+        let actual =
+            build_models_request_url("https://example.com/backend-api/codex", "/v1/models");
+        assert_eq!(
+            actual,
+            "https://example.com/backend-api/codex/models?client_version=0.101.0"
+        );
+    }
+
+    /// 函数 `build_models_request_url_preserves_existing_query_with_client_version`
+    ///
+    /// 作者: gaohongshun
+    ///
+    /// 时间: 2026-05-03
+    ///
+    /// # 参数
+    /// 无
+    ///
+    /// # 返回
+    /// 无
+    #[test]
+    fn build_models_request_url_preserves_existing_query_with_client_version() {
+        let _guard = crate::test_env_guard();
+        crate::gateway::set_codex_user_agent_version("0.101.0")
+            .expect("set default codex user agent version");
+        let actual = build_models_request_url(
+            "https://example.com/backend-api/codex",
+            "/v1/models?limit=20",
+        );
+        assert_eq!(
+            actual,
+            "https://example.com/backend-api/codex/models?limit=20&client_version=0.101.0"
         );
     }
 

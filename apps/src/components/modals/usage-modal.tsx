@@ -4,6 +4,7 @@ import {
   Calendar,
   Clock,
   Database,
+  KeyRound,
   type LucideIcon,
   RefreshCw,
   Zap,
@@ -39,7 +40,9 @@ interface UsageModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onRefresh: (id: string) => void;
+  onRefreshRt: (id: string) => void;
   isRefreshing: boolean;
+  isRefreshingRt: boolean;
 }
 
 interface UsageDetailRowProps {
@@ -145,7 +148,9 @@ export default function UsageModal({
   open,
   onOpenChange,
   onRefresh,
+  onRefreshRt,
   isRefreshing,
+  isRefreshingRt,
 }: UsageModalProps) {
   const { t } = useI18n();
   if (!account) return null;
@@ -158,7 +163,14 @@ export default function UsageModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="glass-card border-none p-6 sm:max-w-[450px]">
+      <DialogContent
+        className="glass-card grid-rows-[auto_minmax(0,1fr)_auto] border-none p-6"
+        style={{
+          height: "min(680px, calc(100vh - 2rem))",
+          maxWidth: "none",
+          width: "min(700px, calc(100vw - 2rem))",
+        }}
+      >
         <DialogHeader>
           <div className="mb-2 flex items-center gap-3">
             <div className="rounded-full bg-primary/10 p-2 text-primary">
@@ -171,7 +183,7 @@ export default function UsageModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-4 py-4">
+        <div className="grid min-h-0 gap-4 overflow-y-auto py-4 pr-1">
           <div className="space-y-3 rounded-2xl border border-primary/5 bg-accent/10 p-4">
             <div className="space-y-1">
               <p className="text-sm font-semibold">{t("套餐信息")}</p>
@@ -212,7 +224,7 @@ export default function UsageModal({
               </p>
             </div>
 
-            <div className="space-y-2">
+            <div className="grid gap-3 sm:grid-cols-2">
               <UsageDetailRow
                 label={t("5小时额度")}
                 remainPercent={usageBuckets.primaryRemainPercent}
@@ -258,17 +270,36 @@ export default function UsageModal({
           </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="-mx-6 -mb-6 min-h-16 px-10 py-3 sm:items-center sm:justify-between">
           <DialogClose
             className={buttonVariants({ variant: "ghost" })}
             type="button"
           >
             {t("关闭")}
           </DialogClose>
-          <Button onClick={() => onRefresh(account.id)} disabled={isRefreshing} className="gap-2">
-            <RefreshCw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
-            {isRefreshing ? t("正在刷新...") : t("立即刷新")}
-          </Button>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button
+              variant="outline"
+              onClick={() => onRefreshRt(account.id)}
+              disabled={isRefreshingRt}
+              className="gap-2"
+            >
+              <KeyRound
+                className={cn("h-4 w-4", isRefreshingRt && "animate-pulse")}
+              />
+              {isRefreshingRt ? t("AT/RT 刷新中...") : t("刷新 AT/RT")}
+            </Button>
+            <Button
+              onClick={() => onRefresh(account.id)}
+              disabled={isRefreshing}
+              className="gap-2"
+            >
+              <RefreshCw
+                className={cn("h-4 w-4", isRefreshing && "animate-spin")}
+              />
+              {isRefreshing ? t("正在刷新...") : t("立即刷新")}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -76,6 +76,58 @@ export function formatTsFromSeconds(
   return formatLocalDateTimeFromSeconds(timestamp, emptyLabel);
 }
 
+export function formatRemainingDurationFromSeconds(
+  timestamp: number | null | undefined,
+  mode: "hours" | "days" = "hours",
+  emptyLabel = "未知",
+): string {
+  if (!timestamp) return emptyLabel;
+  const diffSeconds = Math.max(0, timestamp - Math.floor(Date.now() / 1000));
+  const totalMinutes = Math.ceil(diffSeconds / 60);
+
+  if (diffSeconds < 10 * 60) {
+    const minutes = Math.floor(diffSeconds / 60);
+    const seconds = diffSeconds % 60;
+    if (mode === "hours") {
+      const hours = Math.floor(minutes / MINUTES_PER_HOUR);
+      const remainMinutes = minutes % MINUTES_PER_HOUR;
+      if (hours > 0) {
+        return `${hours}h${remainMinutes}min${seconds}s`;
+      }
+      return `${remainMinutes}min${seconds}s`;
+    }
+    if (minutes > 0) {
+      return `${minutes}min${seconds}s`;
+    }
+    return `${seconds}s`;
+  }
+
+  if (mode === "hours") {
+    const hours = Math.floor(totalMinutes / MINUTES_PER_HOUR);
+    const minutes = totalMinutes % MINUTES_PER_HOUR;
+    return `${hours}h${String(minutes).padStart(2, "0")}min`;
+  }
+
+  const days = Math.floor(totalMinutes / MINUTES_PER_DAY);
+  const hours = Math.floor((totalMinutes % MINUTES_PER_DAY) / MINUTES_PER_HOUR);
+  const minutes = totalMinutes % MINUTES_PER_HOUR;
+  const parts: string[] = [];
+
+  if (days > 0) {
+    parts.push(`${days}d`);
+  }
+  if (hours > 0) {
+    parts.push(`${hours}h`);
+  }
+  if (parts.length > 0) {
+    parts.push(`${String(minutes).padStart(2, "0")}min`);
+  } else {
+    parts.push(`${minutes}min`);
+  }
+
+  return parts.join("");
+}
+
 /**
  * 函数 `trimTrailingZeros`
  *
@@ -341,7 +393,7 @@ function asObjectRecord(value: unknown): Record<string, unknown> | null {
 function humanizeExtraRateLimitLabel(raw: string): string {
   const normalized = raw.trim().toLowerCase();
   if (!normalized) return "额外额度";
-  if (normalized.includes("spark")) return "Spark 额度";
+  if (normalized.includes("spark") || normalized === "codex_other") return "Spark 额度";
   if (normalized.includes("code_review") || normalized.includes("code review")) {
     return "Code Review 额度";
   }

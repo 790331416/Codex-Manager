@@ -190,7 +190,7 @@ PR should at least clearly state:
 Before each release, you must confirm:
 
 1. `CHANGELOG.md` Updated.
-2. `README.md` is consistent with the current version entry of `README.en.md`.
+2. `README.md` is consistent with the current version entry of `docs/en/README.md`.
 3. Consistent with versions `Cargo.toml`, `apps/src-tauri/Cargo.toml`, and `apps/src-tauri/tauri.conf.json`.
 4. The release workflow input description, script parameter description, and actual workflow are consistent.
 5. High-risk compatibility paths complete at least one round of local verification.
@@ -200,7 +200,7 @@ Before each release, you must confirm:
 
 The long-term maintenance agreement is as follows:
 
-- `README.md` / `README.en.md` Responsible for project introduction, quick start, and entry instructions.
+- `README.md` / `docs/en/README.md` are responsible for project introduction, quick start, and entry instructions.
 - `CHANGELOG.md` Responsible for version history.
 - `ARCHITECTURE.md` Responsible for structural boundaries and operational relationships.
 - `CONTRIBUTING.md` Responsible for collaboration rules and pre-submission checks.

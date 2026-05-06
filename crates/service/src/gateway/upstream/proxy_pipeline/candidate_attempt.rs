@@ -2,10 +2,11 @@ use bytes::Bytes;
 use codexmanager_core::storage::{Account, Storage, Token};
 use std::time::Instant;
 
-use super::super::attempt_flow::candidate_flow::{
-    process_candidate_upstream_flow, CandidateUpstreamDecision,
-};
 use super::super::attempt_flow::transport::UpstreamRequestContext;
+use super::super::executor::{
+    execute_candidate_upstream_flow, resolve_gateway_upstream_executor_kind,
+    CandidateUpstreamDecision,
+};
 use super::execution_context::GatewayUpstreamExecutionContext;
 use super::request_setup::UpstreamRequestSetup;
 
@@ -71,7 +72,10 @@ pub(in super::super) fn run_candidate_attempt(
         trace,
     } = params;
 
-    process_candidate_upstream_flow(
+    let executor_kind = resolve_gateway_upstream_executor_kind(context.protocol_type());
+
+    execute_candidate_upstream_flow(
+        executor_kind,
         storage,
         method,
         request_ctx,

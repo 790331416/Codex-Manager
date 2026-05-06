@@ -77,7 +77,7 @@
 | 网关 | `service_gateway_upstream_proxy_get` | `gateway/upstreamProxy/get` | 读取上游代理 |
 | 网关 | `service_gateway_upstream_proxy_set` | `gateway/upstreamProxy/set` | 参数：`proxyUrl` |
 | 网关 | `service_gateway_transport_get` | `gateway/transport/get` | 读取传输层配置 |
-| 网关 | `service_gateway_transport_set` | `gateway/transport/set` | 参数：`sseKeepaliveIntervalMs`、`upstreamStreamTimeoutMs` |
+| Gateway | `service_gateway_transport_set` | `gateway/transport/set` | Params: `sseKeepaliveIntervalMs`, `upstreamTotalTimeoutMs`, `upstreamStreamTimeoutMs` |
 | 请求日志 | `service_requestlog_list` | `requestlog/list` | 参数：`query`、`statusFilter`、`page`、`pageSize` |
 | 请求日志 | `service_requestlog_summary` | `requestlog/summary` | 参数：`query`、`statusFilter` |
 | 请求日志 | `service_requestlog_clear` | `requestlog/clear` | 清空请求日志 |

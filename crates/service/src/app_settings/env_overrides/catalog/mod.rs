@@ -159,6 +159,10 @@ fn env_override_effect_scope(key: &str) -> &'static str {
     let key = normalized_env_key(key);
     match key.as_str() {
         "CODEXMANAGER_ACCOUNT_MAX_INFLIGHT"
+        | "CODEXMANAGER_CODEX_IMAGE_GENERATION_AUTO_INJECT_TOOL"
+        | "CODEXMANAGER_CODEX_IMAGE_GENERATION_ENABLED"
+        | "CODEXMANAGER_CODEX_IMAGE_MAIN_MODEL"
+        | "CODEXMANAGER_CODEX_IMAGE_TOOL_MODEL"
         | "CODEXMANAGER_FRONT_PROXY_MAX_BODY_BYTES"
         | "CODEXMANAGER_HTTP_BRIDGE_OUTPUT_TEXT_LIMIT_BYTES"
         | "CODEXMANAGER_PROMPT_CACHE_CAPACITY"
@@ -266,5 +270,26 @@ mod tests {
             .and_then(|value| value.as_str())
             .unwrap_or_default()
             .contains("请求语义"));
+
+        let image_enabled = catalog
+            .iter()
+            .find(|item| {
+                item.get("key").and_then(|value| value.as_str())
+                    == Some("CODEXMANAGER_CODEX_IMAGE_GENERATION_ENABLED")
+            })
+            .expect("image generation enabled catalog item");
+
+        assert_eq!(
+            image_enabled
+                .get("riskLevel")
+                .and_then(|value| value.as_str()),
+            Some("high")
+        );
+        assert_eq!(
+            image_enabled
+                .get("effectScope")
+                .and_then(|value| value.as_str()),
+            Some(ENV_OVERRIDE_EFFECT_SCOPE_REQUEST_SEMANTIC)
+        );
     }
 }

@@ -297,7 +297,7 @@ fn gateway_request_log_keeps_only_final_result_for_multi_attempt_flow() {
     assert_eq!(final_logs[0].adapted_path.as_deref(), Some("/v1/responses"));
     assert_eq!(
         final_logs[0].response_adapter.as_deref(),
-        Some("AnthropicJson")
+        Some("AnthropicMessagesFromResponses")
     );
 
     assert!(

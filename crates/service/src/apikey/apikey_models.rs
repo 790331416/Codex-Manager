@@ -13,6 +13,7 @@ use serde_json::Value;
 use crate::gateway;
 use crate::storage_helpers;
 
+const CODEX_IMAGE_TOOL_MODEL: &str = "gpt-image-2";
 const MODEL_CACHE_SCOPE_DEFAULT: &str = "default";
 const MODEL_SOURCE_KIND_REMOTE: &str = "remote";
 const MODEL_SOURCE_KIND_CUSTOM: &str = "custom";
@@ -69,12 +70,14 @@ pub(crate) fn read_managed_model_catalog(
     let cached_catalog = read_managed_model_catalog_from_storage(&storage)?;
     let cached = managed_catalog_to_models_response(&cached_catalog);
     if !refresh_remote && !cached.is_empty() {
-        return Ok(cached_catalog);
+        return Ok(ensure_codex_image_tool_model_in_catalog(&cached_catalog));
     }
 
     match gateway::fetch_models_for_picker() {
         Ok(models) => {
-            let merged_catalog = merge_managed_model_catalog(cached_catalog.clone(), models);
+            let merged_catalog = ensure_codex_image_tool_model_in_catalog(
+                &merge_managed_model_catalog(cached_catalog.clone(), models),
+            );
             if !merged_catalog.items.is_empty() {
                 let _ = save_managed_model_catalog_with_storage(&storage, &merged_catalog);
             }
@@ -82,12 +85,14 @@ pub(crate) fn read_managed_model_catalog(
         }
         Err(err) => {
             if !cached.is_empty() {
-                return Ok(cached_catalog);
+                return Ok(ensure_codex_image_tool_model_in_catalog(&cached_catalog));
             }
             if refresh_remote {
                 Err(err)
             } else {
-                Ok(ManagedModelCatalogResult::default())
+                Ok(ensure_codex_image_tool_model_in_catalog(
+                    &ManagedModelCatalogResult::default(),
+                ))
             }
         }
     }
@@ -261,14 +266,76 @@ pub(crate) fn delete_managed_model_catalog_model(slug: &str) -> Result<(), Strin
 }
 
 fn managed_catalog_to_models_response(catalog: &ManagedModelCatalogResult) -> ModelsResponse {
-    ModelsResponse {
+    ensure_codex_image_tool_model_listed(&ModelsResponse {
         models: catalog
             .items
             .iter()
             .map(|item| item.model.clone())
             .collect::<Vec<_>>(),
         extra: catalog.extra.clone(),
+    })
+}
+
+fn codex_image_tool_model_info() -> ModelInfo {
+    let mut model = ModelInfo {
+        slug: CODEX_IMAGE_TOOL_MODEL.to_string(),
+        display_name: "GPT Image 2".to_string(),
+        description: Some("Image generation tool model for Codex image workflows.".to_string()),
+        supported_in_api: true,
+        visibility: Some("list".to_string()),
+        input_modalities: vec!["text".to_string(), "image".to_string()],
+        ..Default::default()
+    };
+    model.extra.insert(
+        "output_modalities".to_string(),
+        serde_json::json!(["image"]),
+    );
+    model
+}
+
+pub(crate) fn ensure_codex_image_tool_model_listed(models: &ModelsResponse) -> ModelsResponse {
+    if models.models.iter().any(|item| {
+        item.slug
+            .trim()
+            .eq_ignore_ascii_case(CODEX_IMAGE_TOOL_MODEL)
+    }) {
+        return models.clone();
     }
+    let mut augmented = models.clone();
+    augmented.models.push(codex_image_tool_model_info());
+    augmented.extra.remove("etag");
+    augmented
+}
+
+fn ensure_codex_image_tool_model_in_catalog(
+    catalog: &ManagedModelCatalogResult,
+) -> ManagedModelCatalogResult {
+    if catalog.items.iter().any(|item| {
+        item.model
+            .slug
+            .trim()
+            .eq_ignore_ascii_case(CODEX_IMAGE_TOOL_MODEL)
+    }) {
+        return catalog.clone();
+    }
+
+    let mut augmented = catalog.clone();
+    let sort_index = augmented
+        .items
+        .iter()
+        .map(|item| item.sort_index)
+        .max()
+        .unwrap_or(-1)
+        + 1;
+    augmented.items.push(ManagedModelCatalogEntry {
+        model: codex_image_tool_model_info(),
+        source_kind: MODEL_SOURCE_KIND_REMOTE.to_string(),
+        user_edited: false,
+        sort_index,
+        updated_at: 0,
+    });
+    augmented.extra.remove("etag");
+    augmented
 }
 
 fn normalize_managed_model_catalog(
@@ -1160,10 +1227,11 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{
-        merge_managed_model_catalog, merge_models_response, normalize_models_response,
-        read_managed_model_catalog_from_storage, read_model_options_from_storage,
-        save_managed_model_catalog_with_storage, save_model_options_with_storage,
-        MODEL_SOURCE_KIND_CUSTOM, MODEL_SOURCE_KIND_REMOTE,
+        ensure_codex_image_tool_model_in_catalog, ensure_codex_image_tool_model_listed,
+        managed_catalog_to_models_response, merge_managed_model_catalog, merge_models_response,
+        normalize_models_response, read_managed_model_catalog_from_storage,
+        read_model_options_from_storage, save_managed_model_catalog_with_storage,
+        save_model_options_with_storage, MODEL_SOURCE_KIND_CUSTOM, MODEL_SOURCE_KIND_REMOTE,
     };
     use codexmanager_core::rpc::types::{
         ManagedModelCatalogEntry, ManagedModelCatalogResult, ModelInfo, ModelsResponse,
@@ -1303,6 +1371,76 @@ mod tests {
     }
 
     #[test]
+    fn model_options_response_appends_codex_image_tool_model() {
+        let response = ModelsResponse {
+            models: vec![ModelInfo {
+                slug: "gpt-5.4-mini".to_string(),
+                display_name: "GPT-5.4 Mini".to_string(),
+                supported_in_api: true,
+                ..Default::default()
+            }],
+            extra: BTreeMap::from([("etag".to_string(), json!("cached"))]),
+        };
+
+        let augmented = ensure_codex_image_tool_model_listed(&response);
+
+        assert_eq!(
+            augmented
+                .models
+                .iter()
+                .map(|model| model.slug.as_str())
+                .collect::<Vec<_>>(),
+            vec!["gpt-5.4-mini", "gpt-image-2"]
+        );
+        let image_model = augmented
+            .models
+            .iter()
+            .find(|model| model.slug == "gpt-image-2")
+            .expect("image tool model");
+        assert_eq!(image_model.display_name, "GPT Image 2");
+        assert_eq!(
+            image_model.input_modalities,
+            vec!["text".to_string(), "image".to_string()]
+        );
+        assert_eq!(
+            image_model
+                .extra
+                .get("output_modalities")
+                .and_then(Value::as_array)
+                .and_then(|items| items.first())
+                .and_then(Value::as_str),
+            Some("image")
+        );
+        assert!(!augmented.extra.contains_key("etag"));
+    }
+
+    #[test]
+    fn managed_catalog_response_appends_codex_image_tool_model_once() {
+        let catalog = ManagedModelCatalogResult {
+            items: vec![ManagedModelCatalogEntry {
+                model: ModelInfo {
+                    slug: "gpt-image-2".to_string(),
+                    display_name: "Existing Image Model".to_string(),
+                    supported_in_api: true,
+                    ..Default::default()
+                },
+                source_kind: MODEL_SOURCE_KIND_CUSTOM.to_string(),
+                user_edited: true,
+                sort_index: 7,
+                updated_at: 123,
+            }],
+            extra: BTreeMap::new(),
+        };
+
+        let augmented = ensure_codex_image_tool_model_in_catalog(&catalog);
+        let response = managed_catalog_to_models_response(&augmented);
+
+        assert_eq!(augmented.items.len(), 1);
+        assert_eq!(response.models.len(), 1);
+        assert_eq!(response.models[0].display_name, "Existing Image Model");
+    }
+
+    #[test]
     fn read_model_options_from_storage_reads_structured_catalog() {
         let storage = Storage::open_in_memory().expect("open storage");
         storage.init().expect("init storage");
@@ -1324,12 +1462,10 @@ mod tests {
         save_model_options_with_storage(&storage, &payload).expect("seed structured catalog");
 
         let response = read_model_options_from_storage(&storage).expect("read models");
-        assert_eq!(response.models.len(), 1);
+        assert_eq!(response.models.len(), 2);
         assert_eq!(response.models[0].slug, "gpt-5.4");
-        assert_eq!(
-            response.extra.get("etag").and_then(Value::as_str),
-            Some("legacy")
-        );
+        assert_eq!(response.models[1].slug, "gpt-image-2");
+        assert_eq!(response.extra.get("etag").and_then(Value::as_str), None);
 
         let scope = storage
             .get_model_catalog_scope("default")

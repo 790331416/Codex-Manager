@@ -68,6 +68,14 @@ export interface DeleteUnavailableFreeResult {
   deleted?: number;
 }
 
+export interface DeleteAccountsByStatusesResult {
+  scanned?: number;
+  deleted?: number;
+  skippedStatus?: number;
+  targetStatuses?: string[];
+  deletedAccountIds?: string[];
+}
+
 export interface AccountWarmupItemResult {
   accountId: string;
   accountName: string;
@@ -125,6 +133,18 @@ export function readDeleteUnavailableFreeResult(
 ): DeleteUnavailableFreeResult {
   return {
     deleted: readNumberField(payload, "deleted"),
+  };
+}
+
+export function readDeleteAccountsByStatusesResult(
+  payload: unknown
+): DeleteAccountsByStatusesResult {
+  return {
+    scanned: readNumberField(payload, "scanned"),
+    deleted: readNumberField(payload, "deleted"),
+    skippedStatus: readNumberField(payload, "skippedStatus"),
+    targetStatuses: readStringArrayField(payload, "targetStatuses"),
+    deletedAccountIds: readStringArrayField(payload, "deletedAccountIds"),
   };
 }
 

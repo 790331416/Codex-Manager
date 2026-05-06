@@ -197,7 +197,7 @@ PR 至少写清：
 每次发版前必须确认：
 
 1. `CHANGELOG.md` 已更新。
-2. `README.md` 与 `README.en.md` 当前版本入口一致。
+2. `README.md` 与 `docs/en/README.md` 当前版本入口一致。
 3. 根 `Cargo.toml`、`apps/src-tauri/Cargo.toml`、`apps/src-tauri/tauri.conf.json` 版本一致。
 4. release workflow 输入说明、脚本参数说明、实际 workflow 保持一致。
 5. 高风险兼容路径至少完成一轮本地验证。
@@ -207,7 +207,7 @@ PR 至少写清：
 
 长期维护约定如下：
 
-- `README.md` / `README.en.md` 负责项目介绍、快速开始、入口说明。
+- `README.md` / `docs/en/README.md` 负责项目介绍、快速开始、入口说明。
 - `CHANGELOG.md` 负责版本历史。
 - `ARCHITECTURE.md` 负责结构边界与运行关系。
 - `CONTRIBUTING.md` 负责协作规则与提交前检查。

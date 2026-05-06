@@ -1,12 +1,10 @@
 use serde_json::Value;
 
 mod request_rewrite_chat_completions;
-mod request_rewrite_prompt_cache;
-mod request_rewrite_responses;
 mod request_rewrite_shared;
 
+use super::official_responses_http as responses;
 use request_rewrite_chat_completions as chat_completions;
-use request_rewrite_responses as responses;
 
 type RetainFn = fn(&str, &mut serde_json::Map<String, Value>) -> Vec<String>;
 const RETAIN_FN_PROBE_KEY: &str = "__codexmanager_allowlist_probe__";
@@ -711,93 +709,23 @@ fn apply_request_overrides_with_prompt_cache_key_mode(
             }
 
             if use_codex_responses_compat {
-                if responses::normalize_codex_backend_service_tier(path, obj) {
+                let installation_id = crate::process_env::resolve_installation_id()
+                    .inspect_err(|err| {
+                        log::warn!("event=gateway_installation_id_resolve_failed error={}", err);
+                    })
+                    .ok();
+                let codex_http_result = responses::apply_codex_http_request_rules(
+                    path,
+                    obj,
+                    use_codex_compat_rewrite,
+                    prompt_cache_key,
+                    force_prompt_cache_key,
+                    installation_id.as_deref(),
+                );
+                if codex_http_result.changed {
                     changed = true;
                 }
-                if responses::promote_leading_instruction_messages_to_instructions(path, obj) {
-                    changed = true;
-                }
-                if use_codex_compat_rewrite && responses::ensure_instructions(path, obj) {
-                    changed = true;
-                }
-                if use_codex_compat_rewrite {
-                    if responses::normalize_dynamic_tools_to_tools(path, obj) {
-                        changed = true;
-                    }
-                    if responses::ensure_input_list(path, obj) {
-                        changed = true;
-                    }
-                    if responses::ensure_tools_list(path, obj) {
-                        changed = true;
-                    }
-                    if responses::ensure_parallel_tool_calls_bool(path, obj) {
-                        changed = true;
-                    }
-                }
-                if !responses::is_compact_path(path) {
-                    let had_stream_passthrough = obj.contains_key("stream_passthrough");
-                    if use_codex_compat_rewrite {
-                        let stream_passthrough = responses::take_stream_passthrough_flag(path, obj);
-                        if had_stream_passthrough {
-                            changed = true;
-                        }
-                        if !stream_passthrough && responses::ensure_stream_true(path, obj) {
-                            changed = true;
-                        }
-                        if responses::ensure_store_false(path, obj) {
-                            changed = true;
-                        }
-                        if responses::ensure_tool_choice_auto(path, obj) {
-                            changed = true;
-                        }
-                        if responses::ensure_include_list(path, obj) {
-                            changed = true;
-                        }
-                        if responses::ensure_reasoning_include(path, obj) {
-                            changed = true;
-                        }
-                    } else if had_stream_passthrough {
-                        obj.remove("stream_passthrough");
-                        changed = true;
-                    }
-                    let should_apply_prompt_cache_key =
-                        force_prompt_cache_key || use_codex_compat_rewrite;
-                    if should_apply_prompt_cache_key {
-                        let existing_prompt_cache_key = obj
-                            .get("prompt_cache_key")
-                            .and_then(Value::as_str)
-                            .map(str::to_string);
-                        let prompt_cache_key_decision =
-                            request_rewrite_prompt_cache::resolve_prompt_cache_key_rewrite(
-                                existing_prompt_cache_key.as_deref(),
-                                prompt_cache_key,
-                                force_prompt_cache_key,
-                            );
-                        if responses::ensure_prompt_cache_key(
-                            path,
-                            obj,
-                            prompt_cache_key,
-                            force_prompt_cache_key,
-                        ) {
-                            changed = true;
-                        }
-                        log::debug!(
-                            "event=gateway_prompt_cache_key_summary path={} source={} force_override={} changed={} codex_compat={} compact={} final_present={}",
-                            path,
-                            prompt_cache_key_decision.source.as_str(),
-                            if force_prompt_cache_key { "true" } else { "false" },
-                            if prompt_cache_key_decision.changed { "true" } else { "false" },
-                            if use_codex_responses_compat { "true" } else { "false" },
-                            if responses::is_compact_path(path) { "true" } else { "false" },
-                            if obj.get("prompt_cache_key").and_then(Value::as_str).is_some() {
-                                "true"
-                            } else {
-                                "false"
-                            },
-                        );
-                    }
-                }
-                dropped_keys.extend(responses::retain_codex_fields(path, obj));
+                dropped_keys.extend(codex_http_result.dropped_keys);
             }
 
             if !dropped_keys.is_empty() {

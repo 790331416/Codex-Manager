@@ -40,6 +40,23 @@ fn queue_size_has_minimum_guard() {
     assert!(http_stream_queue_size(0) >= HTTP_STREAM_QUEUE_MIN);
 }
 
+/// 函数 `worker_count_has_default_upper_guard`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-05-03
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn worker_count_has_default_upper_guard() {
+    assert!(http_worker_count() <= 16);
+    assert!(http_stream_worker_count() <= 4);
+}
+
 /// 函数 `panic_payload_message_formats_common_payloads`
 ///
 /// 作者: gaohongshun

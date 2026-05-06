@@ -5,6 +5,21 @@ It follows Keep a Changelog with a lightweight adaptation for this repository.
 
 ## [Unreleased]
 
+### Added
+- Added Codex image-generation compatibility: `/v1/responses` now auto-injects the official `image_generation` tool by default to match Codex behavior, explicit tools are forwarded unchanged, and compatible `/v1/images/generations` plus `/v1/images/edits` endpoints are available with `gpt-image-2` as the default image tool model.
+- Added an `auth.json` step to the Codex CLI first-time setup guide, clarifying how the platform key, `auth.json`, and `config.toml` fit together.
+
+### Fixed
+- Fixed missing Spark dedicated quota display by continuing to parse official `additional_rate_limits[].rate_limit` buckets.
+- Adjusted the usage-details dialog so multiple additional quota windows can be shown in two columns with scrolling.
+
+### Changed
+- Bumped the release version to `0.2.6` and synchronized workspace, frontend package, Tauri desktop metadata, and lockfiles.
+- Removed recent-commit blocks from README entry pages so they only keep stable feature and documentation entry points.
+- Restored the upstream total-timeout setting in the Settings gateway transport card. `CODEXMANAGER_UPSTREAM_TOTAL_TIMEOUT_MS` can now be viewed and changed there; default `0` means no service-side total-duration cutoff.
+- Added a dedicated `/v1/images/` block to the Nginx example config for image uploads, large `b64_json` responses, and long-running image generation.
+- Synchronized request-log cost estimates with official `gpt-5.5`, `gpt-5.5-pro`, and `gpt-image-*` pricing. Because current usage logs do not include modality buckets, image models are conservatively estimated with official Image token prices.
+
 ## [0.2.3] - 2026-04-15
 
 ### Fixed
@@ -239,7 +254,8 @@ It follows Keep a Changelog with a lightweight adaptation for this repository.
 ### Changed
 - The operation area of ​​the account management page is integrated into a single "Account Operation" drop-down menu, replacing the stack of multiple buttons on the right, making the interface more concise.
 
-[Unreleased]: https://github.com/qxcnm/Codex-Manager/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/qxcnm/Codex-Manager/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/qxcnm/Codex-Manager/compare/v0.2.3...v0.2.6
 [0.2.3]: https://github.com/qxcnm/Codex-Manager/compare/v0.2.0...v0.2.3
 [0.2.0]: https://github.com/qxcnm/Codex-Manager/releases/tag/v0.2.0
 [0.1.19]: https://github.com/qxcnm/Codex-Manager/releases/tag/v0.1.19

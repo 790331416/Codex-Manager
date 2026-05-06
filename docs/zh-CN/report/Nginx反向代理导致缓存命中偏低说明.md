@@ -129,6 +129,29 @@ send_timeout 600s;
 
 当前仓库里的 `docker/nginx/nginx.conf` 已经内置了这一条专用配置，可直接作为部署基线。
 
+### 5. 给 `/v1/images/` 图片生成入口单独保守配置
+
+CodexManager 已支持 `/v1/images/generations` 与 `/v1/images/edits` 兼容入口。这个链路和普通文本请求不同，常见风险是：
+
+- `/v1/images/edits` 可能上传 multipart 图片，body 明显更大
+- 图片生成耗时可能长于普通文本首包
+- `b64_json` 响应体可能很大，默认代理缓冲容易造成额外截断或延迟
+
+建议给 `/v1/images/` 单独加一条 `location`，至少保留：
+
+```nginx
+client_max_body_size 0;
+proxy_buffering off;
+proxy_request_buffering off;
+gzip off;
+add_header X-Accel-Buffering no;
+proxy_read_timeout 3600s;
+proxy_send_timeout 3600s;
+send_timeout 3600s;
+```
+
+当前仓库里的 `docker/nginx/nginx.conf` 已经包含 `location ^~ /v1/images/`，可直接作为图片生成部署基线。
+
 ## 推荐示例配置
 
 可直接参考：
@@ -143,6 +166,7 @@ send_timeout 600s;
 - 下划线请求头支持
 - 会话相关头透传
 - API 流式代理建议
+- `/v1/images/generations` 与 `/v1/images/edits` 图片生成代理建议
 
 ## 部署后如何验证
 

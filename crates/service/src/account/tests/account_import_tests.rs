@@ -3,13 +3,15 @@ use super::{
     resolve_logical_account_id, ExistingAccountIndex, ImportTokenPayload,
 };
 use crate::account_identity::build_account_storage_id;
-use codexmanager_core::storage::{now_ts, Account, Storage};
+use codexmanager_core::storage::{now_ts, Account, Storage, Token};
 use serde_json::json;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const TEST_ID_TOKEN_WS_A: &str = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzdWItMSIsImVtYWlsIjoidGVzdEBleGFtcGxlLmNvbSIsIndvcmtzcGFjZV9pZCI6IndzLWEiLCJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiY2dwdC0xIn19.sig";
 const TEST_ID_TOKEN_META: &str = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzdWItMSIsImVtYWlsIjoibWV0YUBleGFtcGxlLmNvbSIsIndvcmtzcGFjZV9pZCI6IndzLW1ldGEiLCJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiY2dwdC1tZXRhIn19.sig";
+const TEST_ACCESS_TOKEN_TEAM_USER_A: &str = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzdWJqZWN0LWEiLCJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoidGVhbS0xIiwiY2hhdGdwdF91c2VyX2lkIjoidXNlci1hIn19.sig";
+const TEST_ACCESS_TOKEN_TEAM_USER_B: &str = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzdWJqZWN0LWIiLCJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoidGVhbS0xIiwiY2hhdGdwdF91c2VyX2lkIjoidXNlci1iIn19.sig";
 
 /// 函数 `unique_temp_db_path`
 ///
@@ -322,6 +324,120 @@ fn import_single_item_reuses_existing_login_account_by_scope_identity() {
         .expect("find token")
         .expect("token");
     assert_eq!(token.account_id, accounts[0].id);
+}
+
+/// 函数 `import_single_item_distinguishes_team_members_sharing_account_hint`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-02
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn import_single_item_distinguishes_team_members_sharing_account_hint() {
+    let storage = Storage::open_in_memory().expect("open in memory");
+    storage.init().expect("init");
+    let mut idx = ExistingAccountIndex::build(&storage).expect("build index");
+
+    let user_a = json!({
+        "tokens": {
+            "access_token": TEST_ACCESS_TOKEN_TEAM_USER_A,
+            "account_id": "team-1",
+            "refresh_token": "refresh.user-a"
+        }
+    });
+    let user_b = json!({
+        "tokens": {
+            "access_token": TEST_ACCESS_TOKEN_TEAM_USER_B,
+            "account_id": "team-1",
+            "refresh_token": "refresh.user-b"
+        }
+    });
+
+    assert!(import_single_item(&storage, &mut idx, &user_a, 1).expect("import user a"));
+    assert!(import_single_item(&storage, &mut idx, &user_b, 2).expect("import user b"));
+
+    let accounts = storage.list_accounts().expect("list accounts");
+    assert_eq!(accounts.len(), 2);
+    assert!(accounts
+        .iter()
+        .any(|account| account.id.starts_with("user-a::")));
+    assert!(accounts
+        .iter()
+        .any(|account| account.id.starts_with("user-b::")));
+    assert!(accounts
+        .iter()
+        .all(|account| account.workspace_id.as_deref() == Some("team-1")));
+
+    assert!(!import_single_item(&storage, &mut idx, &user_a, 3).expect("reimport user a"));
+    assert_eq!(storage.list_accounts().expect("list accounts").len(), 2);
+}
+
+/// 函数 `import_single_item_reuses_legacy_team_account_when_token_subject_matches`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-02
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn import_single_item_reuses_legacy_team_account_when_token_subject_matches() {
+    let storage = Storage::open_in_memory().expect("open in memory");
+    storage.init().expect("init");
+    let now = now_ts();
+    storage
+        .insert_account(&Account {
+            id: "team-1".to_string(),
+            label: "legacy team account".to_string(),
+            issuer: "https://auth.openai.com".to_string(),
+            chatgpt_account_id: Some("team-1".to_string()),
+            workspace_id: Some("team-1".to_string()),
+            group_name: None,
+            sort: 0,
+            status: "active".to_string(),
+            created_at: now,
+            updated_at: now,
+        })
+        .expect("insert legacy account");
+    storage
+        .insert_token(&Token {
+            account_id: "team-1".to_string(),
+            id_token: "".to_string(),
+            access_token: TEST_ACCESS_TOKEN_TEAM_USER_A.to_string(),
+            refresh_token: "refresh.user-a.old".to_string(),
+            api_key_access_token: None,
+            last_refresh: now,
+        })
+        .expect("insert legacy token");
+
+    let mut idx = ExistingAccountIndex::build(&storage).expect("build index");
+    let item = json!({
+        "tokens": {
+            "access_token": TEST_ACCESS_TOKEN_TEAM_USER_A,
+            "account_id": "team-1",
+            "refresh_token": "refresh.user-a.new"
+        }
+    });
+
+    let created = import_single_item(&storage, &mut idx, &item, 1).expect("import item");
+    assert!(!created);
+
+    let accounts = storage.list_accounts().expect("list accounts");
+    assert_eq!(accounts.len(), 1);
+    assert_eq!(accounts[0].id, "team-1");
+    let token = storage
+        .find_token_by_account_id("team-1")
+        .expect("find token")
+        .expect("token");
+    assert_eq!(token.refresh_token, "refresh.user-a.new");
 }
 
 /// 函数 `import_single_item_prefers_meta_fields_for_new_account`

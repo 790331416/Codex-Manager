@@ -1,6 +1,25 @@
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+const CODEX_IMAGE_AUTO_INJECT_TOOL_KEY: &str =
+    "CODEXMANAGER_CODEX_IMAGE_GENERATION_AUTO_INJECT_TOOL";
+const LEGACY_CODEX_IMAGE_AUTO_INJECT_TOOL_DEFAULT: &str = "0";
+
+fn migrate_legacy_saved_env_override_value(key: &str, value: String) -> (String, bool) {
+    if key.eq_ignore_ascii_case(CODEX_IMAGE_AUTO_INJECT_TOOL_KEY)
+        && value == LEGACY_CODEX_IMAGE_AUTO_INJECT_TOOL_DEFAULT
+    {
+        if let Some(item) = super::catalog::env_override_catalog_item(key) {
+            // 中文注释：旧版本会把当时的默认 0 写入快照；默认值升到 1 后需要随 catalog 自动升级。
+            if item.default_value != LEGACY_CODEX_IMAGE_AUTO_INJECT_TOOL_DEFAULT {
+                return (item.default_value.to_string(), true);
+            }
+        }
+    }
+
+    (value, false)
+}
+
 /// 函数 `env_override_default_value`
 ///
 /// 作者: gaohongshun
@@ -59,6 +78,7 @@ fn persisted_env_overrides(mut normalized: BTreeMap<String, String>) -> BTreeMap
         return normalized;
     };
 
+    let mut should_save_migrated_snapshot = false;
     for (raw_key, raw_value) in parsed {
         let normalized_key = raw_key.trim().to_ascii_uppercase();
         if super::catalog::is_env_override_reserved_key(&normalized_key) {
@@ -72,11 +92,18 @@ fn persisted_env_overrides(mut normalized: BTreeMap<String, String>) -> BTreeMap
             continue;
         };
         if let Some(value) = super::normalize::parse_saved_env_override_value(&raw_value) {
+            let (value, migrated) = migrate_legacy_saved_env_override_value(&key, value);
+            should_save_migrated_snapshot |= migrated;
             if super::catalog::is_env_override_catalog_key(&key) || !value.is_empty() {
                 normalized.insert(key, value);
             } else {
                 normalized.remove(&key);
             }
+        }
+    }
+    if should_save_migrated_snapshot {
+        if let Err(err) = save_env_overrides_value(&normalized) {
+            log::warn!("migrate persisted env overrides failed: {err}");
         }
     }
     normalized

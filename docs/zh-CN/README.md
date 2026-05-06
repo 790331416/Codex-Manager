@@ -6,17 +6,11 @@
 - 让新协作者不依赖口头交接也能找到正确文档
 
 ## 文档职责边界
-- 根目录 `README.md` / `README.en.md`：首页导航、项目概览、快速开始。
+- 根目录 `README.md` 与多语言 `docs/*/README.md`：首页导航、项目概览、快速开始。
 - 根目录 `CHANGELOG.md`：版本历史与未发版更新的唯一事实源。
 - `report/*`：运行、排障、兼容性、FAQ 类手册。
 - `release/*`：构建、发版、产物和发布流程说明。
 - `docs/plan/*` / `docs/decision/*`：长期治理、实施计划与决策记录。
-
-## 最近提交
-
-- `524834e`：清理文件。
-- `57d85d8`：优化 gateway HTTP bridge 与 session affinity，补强 keepalive、压缩重试与桥接诊断。
-- `43778e4`：完善 `prompt_cache_key` 透传，并收紧账号失效判定。
 
 ## 赞助商
 
@@ -37,16 +31,6 @@
   </tr>
   <tr>
     <td align="center" valign="middle" width="180">
-      <a href="https://www.aixiamo.com/">
-        <img src="../../assets/images/sponsors/aixiamo.ico" alt="小末 AI 小卖铺" width="88" />
-      </a>
-    </td>
-    <td valign="top">
-      <strong>小末 AI 小卖铺（末端夏）</strong> 为 CodexManager 用户提供稳定的 GPT / Gemini 会员与充值服务，支持自助购买、自助兑换激活。通过<a href="https://www.aixiamo.com/">官网</a>注册
-    </td>
-  </tr>
-  <tr>
-    <td align="center" valign="middle" width="180">
       <a href="https://gzxsy.vip/">
         <img src="../../assets/images/sponsors/xingsiyan.jpg" alt="星思研中转站" width="120" />
       </a>
@@ -63,6 +47,7 @@
 | 如果你现在要做什么 | 建议先看 |
 | --- | --- |
 | 跑起来项目、部署 service/web、处理 macOS 首启 | [运行与部署指南](report/运行与部署指南.md) |
+| 配置 Codex CLI / ccswitch 的 `auth.json` 与 `config.toml` | [运行与部署指南](report/运行与部署指南.md#通过-ccswitch-接入) |
 | 配环境变量、数据库、端口、代理、监听地址 | [环境变量与运行配置说明](report/环境变量与运行配置说明.md) |
 | 排查账号不命中、导入异常、挑战拦截 | [FAQ 与账号命中规则](report/FAQ与账号命中规则.md) |
 | 排查后台任务账号跳过、禁用与停用原因 | [后台任务账号跳过说明](report/后台任务账号跳过说明.md) |

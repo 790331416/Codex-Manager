@@ -55,17 +55,14 @@
 
 负责：
 
-- OpenAI/Codex 输入输出适配
-- request mapping
-- response conversion
-- prompt cache
-- tools / `tool_calls` 聚合与还原
+- 生成 gateway 内部统一请求结构
+- 为当前保留链路标记透传响应模式
+- 保留 Gemini stream 输出模式与 tool name map 占位
 
 高风险文件：
 
-- `protocol_adapter/request_mapping.rs`
-- `protocol_adapter/response_conversion.rs`
-- `protocol_adapter/response_conversion/sse_conversion.rs`
+- `protocol_adapter/mod.rs`
+- `protocol_adapter/request_router.rs`
 
 ### `request/`
 
@@ -108,7 +105,7 @@
 1. `request/` 处理传入请求
 2. `routing/` 选择候选账号与策略
 3. `auth/` / `upstream/` 组装并发送上游请求
-4. `protocol_adapter/` 转换输入输出
+4. `protocol_adapter/` 产出内部请求元数据
 5. `observability/` 写入 trace、日志和指标
 
 ## 账号选路策略
@@ -245,16 +242,16 @@
 
 优先查看：
 
-- `protocol_adapter/request_mapping.rs`
+- `protocol_adapter/request_router.rs`
 - `request/request_rewrite_*.rs`
 
 ### 改 tools / `tool_calls`
 
 优先查看：
 
-- `protocol_adapter/response_conversion/tool_mapping.rs`
-- `protocol_adapter/response_conversion.rs`
-- `protocol_adapter/response_conversion/sse_conversion.rs`
+- `official_responses_http.rs`
+- `http/responses_websocket.rs`
+- `observability/http_bridge/aggregate/*.rs`
 
 ### 改日志/错误头/trace
 
@@ -284,7 +281,6 @@
 ## 当前治理重点
 
 - 持续拆小 `http_bridge.rs`
-- 持续拆小 `request_mapping.rs`
-- 持续拆小 `response_conversion.rs` / `sse_conversion.rs`
+- 继续压缩 `protocol_adapter/` 的历史占位字段
 - 把协议兼容回归固定到脚本与 Rust 测试双路径
 - 持续保持 `/v1/models` 与平台模型目录、桌面端 `models_cache.json` 预期之间的行为对齐

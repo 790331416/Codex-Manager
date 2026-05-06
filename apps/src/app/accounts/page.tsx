@@ -20,6 +20,23 @@ import { AccountsPageView } from "@/app/accounts/accounts-page-view";
 import { isBannedAccount, isLimitedAccount } from "@/lib/utils/usage";
 import type { Account } from "@/types";
 
+type CleanupStatus = "unavailable" | "banned" | "limited" | "disabled" | "inactive";
+
+const CLEANUP_STATUSES: CleanupStatus[] = [
+  "unavailable",
+  "banned",
+  "limited",
+  "disabled",
+  "inactive",
+];
+
+function normalizeCleanupStatus(status: string): CleanupStatus | null {
+  const normalized = String(status || "").trim().toLowerCase();
+  return CLEANUP_STATUSES.includes(normalized as CleanupStatus)
+    ? (normalized as CleanupStatus)
+    : null;
+}
+
 export default function AccountsPage() {
   const { t } = useI18n();
   const { isDesktopRuntime, canUseBrowserDownloadExport } =
@@ -30,11 +47,13 @@ export default function AccountsPage() {
     isLoading,
     isServiceReady,
     refreshAccount,
+    refreshAccountRt,
+    refreshAllAccountRt,
     refreshAllAccounts,
     refreshAccountList,
     deleteAccount,
     deleteManyAccounts,
-    deleteUnavailableFree,
+    cleanupAccountsByStatuses,
     importByFile,
     importByDirectory,
     exportAccounts,
@@ -43,7 +62,10 @@ export default function AccountsPage() {
     isRefreshingAllAccounts,
     isExporting,
     isWarmingUpAccounts,
+    isRefreshingRtAccountId,
+    isRefreshingAllRtAccounts,
     isDeletingMany,
+    isCleaningAccountsByStatus,
     setPreferredAccount,
     clearPreferredAccount,
     isUpdatingPreferred,
@@ -78,6 +100,11 @@ export default function AccountsPage() {
     useState<AccountEditorState | null>(null);
   const [deleteDialogState, setDeleteDialogState] =
     useState<DeleteDialogState>(null);
+  const [cleanupDialogOpen, setCleanupDialogOpen] = useState(false);
+  const [cleanupStatusDraft, setCleanupStatusDraft] = useState<CleanupStatus[]>([
+    "unavailable",
+    "banned",
+  ]);
 
   const importFileActionLabel = isDesktopRuntime
     ? t("按文件导入")
@@ -134,6 +161,54 @@ export default function AccountsPage() {
       },
     ],
     [accounts, t],
+  );
+
+  const cleanupStatusCounts = useMemo(() => {
+    const counts = new Map<CleanupStatus, number>(
+      CLEANUP_STATUSES.map((status) => [status, 0] as const),
+    );
+    for (const account of accounts) {
+      const status = normalizeCleanupStatus(account.status);
+      if (status) {
+        counts.set(status, (counts.get(status) || 0) + 1);
+      }
+    }
+    return counts;
+  }, [accounts]);
+
+  const cleanupStatusOptions = useMemo(
+    () =>
+      [
+        {
+          id: "unavailable" as const,
+          label: t("不可用"),
+          description: t("AT/RT 过期、用量接口 401/403 等不可用账号"),
+        },
+        {
+          id: "banned" as const,
+          label: t("封禁"),
+          description: t("账号或工作区被停用的账号"),
+        },
+        {
+          id: "limited" as const,
+          label: t("用量限制"),
+          description: t("明确触发 usage_limit_reached 的账号，不包含低额度账号"),
+        },
+        {
+          id: "disabled" as const,
+          label: t("禁用"),
+          description: t("手动禁用的账号"),
+        },
+        {
+          id: "inactive" as const,
+          label: t("停用"),
+          description: t("手动停用或旧版本标记的账号"),
+        },
+      ].map((option) => ({
+        ...option,
+        count: cleanupStatusCounts.get(option.id as CleanupStatus) || 0,
+      })),
+    [cleanupStatusCounts, t],
   );
 
   const pageSizeNumber = Number(pageSize) || 20;
@@ -248,19 +323,45 @@ export default function AccountsPage() {
     });
   };
 
-  const handleDeleteBanned = () => {
-    const bannedIds = accounts
-      .filter((account) => isBannedAccount(account))
-      .map((account) => account.id);
-    if (!bannedIds.length) {
-      toast.error(t("当前没有可清理的封禁账号"));
+  const openCleanupDialog = () => {
+    if (!accounts.length) {
+      toast.info(t("当前没有可清理的账号"));
       return;
     }
-    setDeleteDialogState({
-      kind: "selected",
-      ids: bannedIds,
-      count: bannedIds.length,
-    });
+    setCleanupDialogOpen(true);
+  };
+
+const toggleCleanupStatus = (rawStatus: string) => {
+  const status = normalizeCleanupStatus(rawStatus);
+  if (!status) {
+    return;
+  }
+  setCleanupStatusDraft((current) =>
+    current.includes(status)
+      ? current.filter((item) => item !== status)
+        : [...current, status],
+    );
+  };
+
+  const handleConfirmCleanupStatuses = async () => {
+    if (!cleanupStatusDraft.length) {
+      toast.error(t("请至少选择一种账号状态"));
+      return;
+    }
+    const targetCount = cleanupStatusDraft.reduce(
+      (total, status) => total + (cleanupStatusCounts.get(status) || 0),
+      0,
+    );
+    if (targetCount <= 0) {
+      toast.info(t("当前没有匹配所选状态的账号"));
+      return;
+    }
+    try {
+      await cleanupAccountsByStatuses(cleanupStatusDraft);
+      setCleanupDialogOpen(false);
+    } catch {
+      // hook 内统一处理 toast，这里保持弹窗不关闭
+    }
   };
 
   const handleWarmupAccounts = async () => {
@@ -487,6 +588,9 @@ export default function AccountsPage() {
       selectedAccount={selectedAccount}
       accountEditorState={accountEditorState}
       deleteDialogState={deleteDialogState}
+      cleanupDialogOpen={cleanupDialogOpen}
+      cleanupStatusDraft={cleanupStatusDraft}
+      cleanupStatusOptions={cleanupStatusOptions}
       currentEditingAccount={currentEditingAccount}
       labelDraft={labelDraft}
       tagsDraft={tagsDraft}
@@ -494,9 +598,12 @@ export default function AccountsPage() {
       sortDraft={sortDraft}
       isRefreshingAllAccounts={isRefreshingAllAccounts}
       isRefreshingAccountId={isRefreshingAccountId}
+      isRefreshingRtAccountId={isRefreshingRtAccountId}
+      isRefreshingAllRtAccounts={isRefreshingAllRtAccounts}
       isExporting={isExporting}
       isWarmingUpAccounts={isWarmingUpAccounts}
       isDeletingMany={isDeletingMany}
+      isCleaningAccountsByStatus={isCleaningAccountsByStatus}
       isUpdatingPreferred={isUpdatingPreferred}
       isReorderingAccounts={isReorderingAccounts}
       isUpdatingProfileAccountId={isUpdatingProfileAccountId}
@@ -510,6 +617,7 @@ export default function AccountsPage() {
       setExportDialogOpen={setExportDialogOpen}
       setExportModeDraft={setExportModeDraft}
       setDeleteDialogState={setDeleteDialogState}
+      setCleanupDialogOpen={setCleanupDialogOpen}
       setAccountEditorState={setAccountEditorState}
       setLabelDraft={setLabelDraft}
       setTagsDraft={setTagsDraft}
@@ -525,7 +633,9 @@ export default function AccountsPage() {
       openUsage={openUsage}
       handleUsageModalOpenChange={handleUsageModalOpenChange}
       handleDeleteSelected={handleDeleteSelected}
-      handleDeleteBanned={handleDeleteBanned}
+      openCleanupDialog={openCleanupDialog}
+      toggleCleanupStatus={toggleCleanupStatus}
+      handleConfirmCleanupStatuses={handleConfirmCleanupStatuses}
       handleWarmupAccounts={handleWarmupAccounts}
       openExportDialog={openExportDialog}
       handleConfirmExport={handleConfirmExport}
@@ -536,10 +646,11 @@ export default function AccountsPage() {
       handleConfirmAccountEditor={handleConfirmAccountEditor}
       handleConfirmDelete={handleConfirmDelete}
       refreshAllAccounts={refreshAllAccounts}
+      refreshAllAccountRt={refreshAllAccountRt}
       refreshAccountList={refreshAccountList}
+      refreshAccountRt={refreshAccountRt}
       importByFile={importByFile}
       importByDirectory={importByDirectory}
-      deleteUnavailableFree={deleteUnavailableFree}
       refreshAccount={refreshAccount}
       clearPreferredAccount={clearPreferredAccount}
       setPreferredAccount={setPreferredAccount}

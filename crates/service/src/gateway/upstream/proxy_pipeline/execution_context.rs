@@ -80,6 +80,10 @@ impl<'a> GatewayUpstreamExecutionContext<'a> {
         idx + 1 < self.candidate_count
     }
 
+    pub(in super::super) fn protocol_type(&self) -> &str {
+        self.protocol_type
+    }
+
     /// 函数 `should_skip_candidate`
     ///
     /// 作者: gaohongshun

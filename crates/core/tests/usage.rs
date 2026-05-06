@@ -36,16 +36,21 @@ fn usage_snapshot_parsed() {
                 "reset_at": 1731552000
             }
         },
-        "additional_rate_limits": {
-            "spark_rate_limit": {
+        "additional_rate_limits": [
+            {
                 "limit_name": "Spark",
-                "primary_window": {
-                    "used_percent": 40.0,
-                    "limit_window_seconds": 86400,
-                    "reset_at": 1731033600
+                "metered_feature": "codex_other",
+                "rate_limit": {
+                    "allowed": true,
+                    "limit_reached": false,
+                    "primary_window": {
+                        "used_percent": 40.0,
+                        "limit_window_seconds": 86400,
+                        "reset_at": 1731033600
+                    }
                 }
             }
-        },
+        ],
         "credits": { "balance": 12.5 }
     });
 
@@ -65,8 +70,11 @@ fn usage_snapshot_parsed() {
         .expect("extra rate limits array");
     assert_eq!(extras.len(), 2);
     assert_eq!(extras[0]["source_key"], "code_review_rate_limit");
-    assert_eq!(extras[1]["source_key"], "spark_rate_limit");
+    assert_eq!(extras[1]["source_key"], "codex_other");
+    assert_eq!(extras[1]["limit_id"], "codex_other");
     assert_eq!(extras[1]["limit_name"], "Spark");
+    assert_eq!(extras[1]["allowed"], true);
+    assert_eq!(extras[1]["limit_reached"], false);
     assert_eq!(extras[1]["primary_window"]["used_percent"], 40.0);
 
     let url = usage_endpoint("https://chatgpt.com");

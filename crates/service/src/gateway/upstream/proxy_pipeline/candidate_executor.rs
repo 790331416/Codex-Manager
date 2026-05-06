@@ -3,8 +3,8 @@ use codexmanager_core::storage::{Account, Storage, Token};
 use std::time::Instant;
 use tiny_http::Request;
 
-use super::super::attempt_flow::candidate_flow::CandidateUpstreamDecision;
 use super::super::attempt_flow::transport::UpstreamRequestContext;
+use super::super::executor::CandidateUpstreamDecision;
 use super::super::support::candidates::{
     allow_openai_fallback_for_account, free_account_model_override,
 };
@@ -42,6 +42,10 @@ fn extract_prompt_cache_key_for_trace(body: &[u8]) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+fn should_forward_thread_anchor_as_prompt_cache_key(protocol_type: &str) -> bool {
+    protocol_type != crate::apikey_profile::PROTOCOL_GEMINI_NATIVE
 }
 
 pub(in super::super) enum CandidateExecutionResult {
@@ -218,15 +222,21 @@ pub(in super::super) fn execute_candidate_sequence(
         let attempt_allow_openai_fallback =
             allow_openai_fallback && allow_openai_fallback_for_account(storage, &account, &token);
         let attempt_model_for_log = attempt_model_override.as_deref().or(model_for_log);
+        let attempt_prompt_cache_key =
+            if should_forward_thread_anchor_as_prompt_cache_key(context.protocol_type()) {
+                attempt_thread
+                    .as_ref()
+                    .map(|thread| thread.thread_anchor.as_str())
+            } else {
+                None
+            };
         let body_for_attempt = state.body_for_attempt(
             path,
             body,
             strip_session_affinity,
             setup,
             attempt_model_override.as_deref(),
-            attempt_thread
-                .as_ref()
-                .map(|thread| thread.thread_anchor.as_str()),
+            attempt_prompt_cache_key,
         );
         context.log_candidate_start(&account.id, idx, strip_session_affinity);
         if let Some(skip_reason) = context.should_skip_candidate(&account.id, idx) {
@@ -246,7 +256,8 @@ pub(in super::super) fn execute_candidate_sequence(
         let request_ref = request
             .as_ref()
             .ok_or_else(|| "request already consumed".to_string())?;
-        let request_ctx = UpstreamRequestContext::from_request(request_ref);
+        let request_ctx =
+            UpstreamRequestContext::from_request(request_ref, context.protocol_type());
         let incoming_session_id = attempt_headers.session_id();
         let incoming_turn_state = attempt_headers.turn_state();
         let incoming_conversation_id = attempt_headers.conversation_id();
@@ -344,9 +355,7 @@ pub(in super::super) fn execute_candidate_sequence(
                         body,
                         setup,
                         attempt_model_override.as_deref(),
-                        attempt_thread
-                            .as_ref()
-                            .map(|thread| thread.thread_anchor.as_str()),
+                        attempt_prompt_cache_key,
                     );
                     let retry_decision = run_candidate_attempt(CandidateAttemptParams {
                         storage,
@@ -470,4 +479,26 @@ pub(in super::super) fn execute_candidate_sequence(
         last_attempt_url,
         last_attempt_error,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_forward_thread_anchor_as_prompt_cache_key;
+
+    #[test]
+    fn gemini_native_does_not_forward_thread_anchor_as_prompt_cache_key() {
+        assert!(!should_forward_thread_anchor_as_prompt_cache_key(
+            crate::apikey_profile::PROTOCOL_GEMINI_NATIVE
+        ));
+    }
+
+    #[test]
+    fn non_gemini_protocols_keep_thread_anchor_forwarding() {
+        assert!(should_forward_thread_anchor_as_prompt_cache_key(
+            crate::apikey_profile::PROTOCOL_ANTHROPIC_NATIVE
+        ));
+        assert!(should_forward_thread_anchor_as_prompt_cache_key(
+            crate::apikey_profile::PROTOCOL_OPENAI_COMPAT
+        ));
+    }
 }

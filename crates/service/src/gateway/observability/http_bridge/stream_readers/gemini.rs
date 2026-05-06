@@ -1,11 +1,12 @@
 use super::{
     append_output_text, classify_upstream_stream_read_error, collect_output_text_from_event_fields,
-    json, mark_collector_terminal_success, mark_first_response_ms, stream_idle_timed_out,
+    extract_error_hint_from_body, extract_error_message_from_json, json,
+    mark_collector_terminal_success, mark_first_response_ms, stream_idle_timed_out,
     stream_idle_timeout_message, stream_reader_disconnected_message, stream_wait_timeout,
     upstream_hint_or_stream_incomplete_message, Arc, Cursor, Map, Mutex, PassthroughSseCollector,
-    Read, ToolNameRestoreMap, UpstreamSseFramePump, UpstreamSseFramePumpItem, Value,
+    Read, UpstreamSseFramePump, UpstreamSseFramePumpItem, Value,
 };
-use crate::gateway::{build_gemini_error_body, GeminiStreamOutputMode};
+use crate::gateway::{build_gemini_error_body, GeminiStreamOutputMode, ToolNameRestoreMap};
 use std::collections::BTreeMap;
 use std::time::Instant;
 
@@ -26,12 +27,15 @@ struct GeminiSseState {
     finished: bool,
     response_id: Option<String>,
     model: Option<String>,
+    created_at: Option<i64>,
     input_tokens: i64,
     cached_input_tokens: i64,
     output_tokens: i64,
     total_tokens: Option<i64>,
     reasoning_output_tokens: i64,
     output_text: String,
+    reasoning_text: String,
+    reasoning_encrypted_content: Option<String>,
     completed_seen: bool,
     pending_tool_calls: BTreeMap<i64, PendingToolCall>,
     emitted_tool_calls: BTreeMap<i64, String>,
@@ -45,16 +49,19 @@ struct PendingToolCall {
 }
 
 impl GeminiSseReader {
-    pub(crate) fn new(
-        upstream: reqwest::blocking::Response,
+    pub(crate) fn from_reader<R>(
+        upstream: R,
         usage_collector: Arc<Mutex<PassthroughSseCollector>>,
         tool_name_restore_map: Option<ToolNameRestoreMap>,
         output_mode: GeminiStreamOutputMode,
         wrap_response_envelope: bool,
         request_started_at: Instant,
-    ) -> Self {
+    ) -> Self
+    where
+        R: Read + Send + 'static,
+    {
         Self {
-            upstream: UpstreamSseFramePump::new(upstream),
+            upstream: UpstreamSseFramePump::from_reader(upstream),
             out_cursor: Cursor::new(Vec::new()),
             state: GeminiSseState::default(),
             usage_collector,
@@ -64,6 +71,24 @@ impl GeminiSseReader {
             request_started_at,
             last_upstream_activity: Instant::now(),
         }
+    }
+
+    pub(crate) fn new(
+        upstream: reqwest::blocking::Response,
+        usage_collector: Arc<Mutex<PassthroughSseCollector>>,
+        tool_name_restore_map: Option<ToolNameRestoreMap>,
+        output_mode: GeminiStreamOutputMode,
+        wrap_response_envelope: bool,
+        request_started_at: Instant,
+    ) -> Self {
+        Self::from_reader(
+            upstream,
+            usage_collector,
+            tool_name_restore_map,
+            output_mode,
+            wrap_response_envelope,
+            request_started_at,
+        )
     }
 
     fn next_chunk(&mut self) -> std::io::Result<Vec<u8>> {
@@ -131,6 +156,7 @@ impl GeminiSseReader {
             }
         }
         if data_lines.is_empty() {
+            self.capture_raw_non_sse_error_frame(lines);
             return Vec::new();
         }
         let data = data_lines.join("\n");
@@ -143,6 +169,17 @@ impl GeminiSseReader {
             Err(_) => return Vec::new(),
         };
         self.consume_openai_event(&value)
+    }
+
+    fn capture_raw_non_sse_error_frame(&self, lines: &[String]) {
+        let raw = lines.iter().map(String::as_str).collect::<String>();
+        let Some(message) = raw_non_sse_error_hint(raw.as_str()) else {
+            return;
+        };
+        if let Ok(mut collector) = self.usage_collector.lock() {
+            collector.upstream_error_hint.get_or_insert(message.clone());
+            collector.terminal_error.get_or_insert(message);
+        }
     }
 
     fn consume_openai_event(&mut self, value: &Value) -> Vec<u8> {
@@ -176,6 +213,10 @@ impl GeminiSseReader {
                     return Vec::new();
                 };
                 let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
+                if item_type == "reasoning" {
+                    self.capture_reasoning_item(item);
+                    return Vec::new();
+                }
                 if !matches!(item_type, "function_call" | "custom_tool_call") {
                     collect_output_text_from_event_fields(value, &mut self.state.output_text);
                     return Vec::new();
@@ -189,12 +230,7 @@ impl GeminiSseReader {
                     .pending_tool_calls
                     .entry(output_index)
                     .or_default();
-                if let Some(call_id) = item
-                    .get("call_id")
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|current| !current.is_empty())
-                {
+                if let Some(call_id) = extract_tool_call_id(item_type, item) {
                     entry.call_id = Some(call_id.to_string());
                 }
                 if let Some(name) = item
@@ -211,7 +247,7 @@ impl GeminiSseReader {
                 if event_type == "response.output_item.done"
                     && has_meaningful_tool_arguments(&entry.arguments)
                 {
-                    self.emit_pending_tool_call(&mut out, output_index);
+                    self.state.emitted_tool_calls.remove(&output_index);
                 }
             }
             "response.function_call_arguments.delta" | "response.function_call_arguments.done" => {
@@ -243,7 +279,65 @@ impl GeminiSseReader {
                     && entry.call_id.is_some()
                     && has_meaningful_tool_arguments(&entry.arguments)
                 {
-                    self.emit_pending_tool_call(&mut out, output_index);
+                    self.state.emitted_tool_calls.remove(&output_index);
+                }
+            }
+            "response.custom_tool_call_input.delta" | "response.custom_tool_call_input.done" => {
+                let output_index = value
+                    .get("output_index")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0);
+                let entry = self
+                    .state
+                    .pending_tool_calls
+                    .entry(output_index)
+                    .or_default();
+                if let Some(call_id) = value
+                    .get("call_id")
+                    .or_else(|| value.get("item_id"))
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|current| !current.is_empty())
+                {
+                    entry.call_id = Some(call_id.to_string());
+                }
+                if let Some(input) = value
+                    .get("delta")
+                    .or_else(|| value.get("input"))
+                    .and_then(Value::as_str)
+                {
+                    merge_arguments(&mut entry.arguments, input);
+                }
+                if event_type == "response.custom_tool_call_input.done"
+                    && entry.call_id.is_some()
+                    && has_meaningful_tool_arguments(&entry.arguments)
+                {
+                    self.state.emitted_tool_calls.remove(&output_index);
+                }
+            }
+            "response.reasoning_summary_text.delta" => {
+                let fragment = value
+                    .get("delta")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if fragment.is_empty() {
+                    return Vec::new();
+                }
+                self.state.reasoning_text.push_str(fragment);
+                self.append_sse_event(
+                    &mut out,
+                    &self.build_chunk(
+                        vec![json!({ "text": fragment, "thought": true })],
+                        None,
+                        None,
+                    ),
+                );
+            }
+            "response.reasoning_summary_text.done" => {
+                if self.state.reasoning_text.trim().is_empty() {
+                    if let Some(text) = value.get("text").and_then(Value::as_str) {
+                        self.state.reasoning_text.push_str(text);
+                    }
                 }
             }
             _ if event_type.starts_with("response.output_item.")
@@ -263,48 +357,26 @@ impl GeminiSseReader {
         out.into_bytes()
     }
 
-    fn emit_pending_tool_call(&mut self, out: &mut String, output_index: i64) {
-        let Some(entry) = self.state.pending_tool_calls.get(&output_index) else {
-            return;
-        };
-        let Some(name) = entry.name.as_deref() else {
-            return;
-        };
-        let signature = format!(
-            "{}:{}",
-            entry.call_id.as_deref().unwrap_or(""),
-            entry.arguments
-        );
-        if self
-            .state
-            .emitted_tool_calls
-            .get(&output_index)
-            .is_some_and(|current| current == &signature)
-        {
-            return;
-        }
-        self.state
-            .emitted_tool_calls
-            .insert(output_index, signature);
-        let restored_name = restore_tool_name(name, self.tool_name_restore_map.as_ref());
-        let args = parse_json_object_or_empty(&entry.arguments);
-        let mut function_call = serde_json::Map::new();
-        function_call.insert("name".to_string(), Value::String(restored_name));
-        function_call.insert("args".to_string(), args);
-        if let Some(call_id) = entry.call_id.as_deref() {
-            function_call.insert("id".to_string(), Value::String(call_id.to_string()));
-        }
-        self.append_sse_event(
-            out,
-            &self.build_chunk(
-                vec![json!({ "functionCall": Value::Object(function_call) })],
-                None,
-                None,
-            ),
-        );
-    }
-
     fn emit_completed_response(&mut self, out: &mut String, response: &Value) {
+        let extracted_reasoning = extract_completed_response_reasoning(response);
+        if self.state.reasoning_text.trim().is_empty() {
+            if let Some(reasoning) = extracted_reasoning {
+                if let Some(signature) = reasoning.encrypted_content {
+                    self.state.reasoning_encrypted_content = Some(signature);
+                }
+                if !reasoning.text.trim().is_empty() {
+                    self.state.reasoning_text.push_str(reasoning.text.as_str());
+                    self.append_sse_event(
+                        out,
+                        &self.build_chunk(
+                            vec![self.build_reasoning_part(reasoning.text.as_str())],
+                            None,
+                            None,
+                        ),
+                    );
+                }
+            }
+        }
         let extracted_message_text = extract_completed_response_message_text(response);
         if self.state.output_text.trim().is_empty()
             && extracted_message_text
@@ -345,19 +417,13 @@ impl GeminiSseReader {
                         .map(str::to_string);
                 }
                 if entry.call_id.is_none() {
-                    entry.call_id = item_obj
-                        .get("call_id")
-                        .and_then(Value::as_str)
-                        .map(str::trim)
-                        .filter(|current| !current.is_empty())
-                        .map(str::to_string);
+                    entry.call_id = extract_tool_call_id(item_type, item_obj).map(str::to_string);
                 }
-                if !has_meaningful_tool_arguments(&entry.arguments) {
-                    if let Some(arguments) = extract_function_call_arguments(item_obj) {
+                if let Some(arguments) = extract_function_call_arguments(item_obj) {
+                    if should_use_completed_tool_arguments(&entry.arguments, arguments.as_str()) {
                         entry.arguments = arguments;
                     }
                 }
-                self.emit_pending_tool_call(out, output_index);
             }
         }
         let pending_indices = self
@@ -366,8 +432,11 @@ impl GeminiSseReader {
             .keys()
             .copied()
             .collect::<Vec<_>>();
+        let mut tool_parts = Vec::new();
         for output_index in pending_indices {
-            self.emit_pending_tool_call(out, output_index);
+            if let Some(part) = self.pending_tool_call_part(output_index) {
+                tool_parts.push(part);
+            }
         }
         let usage_metadata = response
             .get("usage")
@@ -375,7 +444,7 @@ impl GeminiSseReader {
             .and_then(build_gemini_usage_metadata);
         self.append_sse_event(
             out,
-            &self.build_chunk(Vec::new(), Some("STOP"), usage_metadata),
+            &self.build_chunk(tool_parts, Some("STOP"), usage_metadata),
         );
     }
 
@@ -396,6 +465,9 @@ impl GeminiSseReader {
             }
             if let Some(model) = response.get("model").and_then(Value::as_str) {
                 self.state.model = Some(model.to_string());
+            }
+            if let Some(created_at) = response.get("created_at").and_then(Value::as_i64) {
+                self.state.created_at = Some(created_at);
             }
             if let Some(usage) = response.get("usage").and_then(Value::as_object) {
                 self.state.input_tokens = usage
@@ -430,6 +502,41 @@ impl GeminiSseReader {
         }
     }
 
+    fn capture_reasoning_item(&mut self, item: &Map<String, Value>) {
+        if let Some(signature) = item
+            .get("encrypted_content")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            self.state.reasoning_encrypted_content = Some(signature.to_string());
+        }
+        if self.state.reasoning_text.trim().is_empty() {
+            if let Some(text) = reasoning_text_from_item(item) {
+                self.state.reasoning_text.push_str(text.as_str());
+            }
+        }
+    }
+
+    fn build_reasoning_part(&self, text: &str) -> Value {
+        let mut part = Map::new();
+        part.insert("text".to_string(), Value::String(text.to_string()));
+        part.insert("thought".to_string(), Value::Bool(true));
+        if let Some(signature) = self
+            .state
+            .reasoning_encrypted_content
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            part.insert(
+                "thoughtSignature".to_string(),
+                Value::String(signature.to_string()),
+            );
+        }
+        Value::Object(part)
+    }
+
     fn build_chunk(
         &self,
         parts: Vec<Value>,
@@ -449,24 +556,19 @@ impl GeminiSseReader {
             );
         }
         let mut payload = serde_json::Map::new();
-        payload.insert(
-            "responseId".to_string(),
-            Value::String(
-                self.state
-                    .response_id
-                    .clone()
-                    .unwrap_or_else(|| "resp_codexmanager".to_string()),
-            ),
-        );
-        payload.insert(
-            "modelVersion".to_string(),
-            Value::String(
-                self.state
-                    .model
-                    .clone()
-                    .unwrap_or_else(|| "unknown".to_string()),
-            ),
-        );
+        if let Some(model) = self.state.model.clone() {
+            payload.insert("modelVersion".to_string(), Value::String(model));
+        }
+        if let Some(response_id) = self.state.response_id.clone() {
+            payload.insert("responseId".to_string(), Value::String(response_id));
+        }
+        if let Some(create_time) = self
+            .state
+            .created_at
+            .and_then(format_unix_timestamp_rfc3339)
+        {
+            payload.insert("createTime".to_string(), Value::String(create_time));
+        }
         payload.insert(
             "candidates".to_string(),
             Value::Array(vec![Value::Object(candidate)]),
@@ -489,6 +591,8 @@ impl GeminiSseReader {
             return Vec::new();
         }
         self.state.finished = true;
+        let should_synthesize_stop =
+            !self.state.completed_seen && self.has_recoverable_partial_output();
         if let Ok(mut collector) = self.usage_collector.lock() {
             collector.usage.input_tokens = Some(self.state.input_tokens.max(0));
             collector.usage.cached_input_tokens = Some(self.state.cached_input_tokens.max(0));
@@ -499,6 +603,14 @@ impl GeminiSseReader {
             if !self.state.output_text.trim().is_empty() {
                 collector.usage.output_text = Some(self.state.output_text.clone());
             }
+        }
+        if should_synthesize_stop {
+            mark_collector_terminal_success(&self.usage_collector);
+            let mut out = String::new();
+            self.emit_synthetic_stop_response(&mut out);
+            return out.into_bytes();
+        }
+        if let Ok(collector) = self.usage_collector.lock() {
             if !collector.saw_terminal {
                 if let Some(message) = collector.terminal_error.clone() {
                     return build_terminal_error_event(
@@ -509,6 +621,26 @@ impl GeminiSseReader {
             }
         }
         Vec::new()
+    }
+
+    fn has_recoverable_partial_output(&self) -> bool {
+        !self.state.output_text.trim().is_empty() || !self.state.pending_tool_calls.is_empty()
+    }
+
+    fn emit_synthetic_stop_response(&mut self, out: &mut String) {
+        let pending_indices = self
+            .state
+            .pending_tool_calls
+            .keys()
+            .copied()
+            .collect::<Vec<_>>();
+        let mut tool_parts = Vec::new();
+        for output_index in pending_indices {
+            if let Some(part) = self.pending_tool_call_part(output_index) {
+                tool_parts.push(part);
+            }
+        }
+        self.append_sse_event(out, &self.build_chunk(tool_parts, Some("STOP"), None));
     }
 
     fn mark_stream_incomplete_if_needed(&self) {
@@ -537,6 +669,41 @@ impl GeminiSseReader {
             collector.last_event_type = Some(event_type.to_string());
         }
     }
+
+    fn pending_tool_call_part(&mut self, output_index: i64) -> Option<Value> {
+        let entry = self.state.pending_tool_calls.get(&output_index)?;
+        let name = entry.name.as_deref()?;
+        let signature = format!(
+            "{}:{}",
+            entry.call_id.as_deref().unwrap_or(""),
+            entry.arguments
+        );
+        if self
+            .state
+            .emitted_tool_calls
+            .get(&output_index)
+            .is_some_and(|current| current == &signature)
+        {
+            return None;
+        }
+        self.state
+            .emitted_tool_calls
+            .insert(output_index, signature);
+        let restored_name = restore_tool_name(name, self.tool_name_restore_map.as_ref());
+        let args = parse_json_object_or_empty(&entry.arguments);
+        let mut function_call = Map::new();
+        function_call.insert("name".to_string(), Value::String(restored_name));
+        function_call.insert("args".to_string(), args);
+        if let Some(call_id) = entry
+            .call_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|current| !current.is_empty())
+        {
+            function_call.insert("id".to_string(), Value::String(call_id.to_string()));
+        }
+        Some(json!({ "functionCall": Value::Object(function_call) }))
+    }
 }
 
 impl Read for GeminiSseReader {
@@ -555,15 +722,31 @@ impl Read for GeminiSseReader {
     }
 }
 
+fn raw_non_sse_error_hint(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.starts_with(':') || trimmed.starts_with("event:") {
+        return None;
+    }
+    if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+        extract_error_message_from_json(&value)?;
+        return extract_error_hint_from_body(502, trimmed.as_bytes());
+    }
+    let normalized = trimmed.to_ascii_lowercase();
+    if normalized.contains("<html")
+        || normalized.contains("<!doctype")
+        || normalized.contains("cloudflare")
+        || normalized.contains("just a moment")
+    {
+        return extract_error_hint_from_body(502, trimmed.as_bytes());
+    }
+    None
+}
+
 fn append_gemini_sse_event(buffer: &mut String, payload: &Value) {
     let data = serde_json::to_string(payload).unwrap_or_else(|_| "{}".to_string());
     buffer.push_str("data: ");
     buffer.push_str(&data);
     buffer.push_str("\n\n");
-}
-
-fn append_gemini_cli_sse_event(buffer: &mut String, payload: &Value) {
-    append_gemini_sse_event(buffer, &json!({ "response": payload }));
 }
 
 fn append_gemini_event(
@@ -572,15 +755,16 @@ fn append_gemini_event(
     output_mode: GeminiStreamOutputMode,
     wrap_response_envelope: bool,
 ) {
-    match (output_mode, wrap_response_envelope) {
-        (GeminiStreamOutputMode::Sse, true) => append_gemini_cli_sse_event(buffer, payload),
-        (GeminiStreamOutputMode::Sse, false) => append_gemini_sse_event(buffer, payload),
-        (GeminiStreamOutputMode::Raw, true) => {
-            let wrapped = json!({ "response": payload });
-            buffer.push_str(&serde_json::to_string(&wrapped).unwrap_or_else(|_| "{}".to_string()));
-        }
-        (GeminiStreamOutputMode::Raw, false) => {
-            buffer.push_str(&serde_json::to_string(payload).unwrap_or_else(|_| "{}".to_string()));
+    let payload = if wrap_response_envelope {
+        json!({ "response": payload })
+    } else {
+        payload.clone()
+    };
+    match output_mode {
+        GeminiStreamOutputMode::Sse => append_gemini_sse_event(buffer, &payload),
+        GeminiStreamOutputMode::Raw => {
+            buffer.push_str(&serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()));
+            buffer.push('\n');
         }
     }
 }
@@ -588,12 +772,24 @@ fn append_gemini_event(
 fn build_terminal_error_event(output_mode: GeminiStreamOutputMode, body: Vec<u8>) -> Vec<u8> {
     match output_mode {
         GeminiStreamOutputMode::Sse => {
-            let mut out = Vec::from("event: error\ndata: ".as_bytes());
-            out.extend_from_slice(&body);
-            out.extend_from_slice(b"\n\n");
-            out
+            let payload = serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| {
+                json!({
+                    "error": {
+                        "code": 500,
+                        "message": String::from_utf8_lossy(&body).trim(),
+                        "status": "INTERNAL"
+                    }
+                })
+            });
+            let mut out = String::new();
+            append_gemini_sse_event(&mut out, &payload);
+            out.into_bytes()
         }
-        GeminiStreamOutputMode::Raw => body,
+        GeminiStreamOutputMode::Raw => {
+            let mut body = body;
+            body.push(b'\n');
+            body
+        }
     }
 }
 
@@ -611,7 +807,7 @@ fn build_function_calls(parts: &[Value]) -> Option<Value> {
         else {
             continue;
         };
-        let mut item = serde_json::Map::new();
+        let mut item = Map::new();
         item.insert("name".to_string(), Value::String(name.to_string()));
         item.insert(
             "args".to_string(),
@@ -630,22 +826,32 @@ fn build_function_calls(parts: &[Value]) -> Option<Value> {
         }
         function_calls.push(Value::Object(item));
     }
-    if function_calls.is_empty() {
-        None
-    } else {
-        Some(Value::Array(function_calls))
-    }
+    (!function_calls.is_empty()).then(|| Value::Array(function_calls))
 }
 
 fn build_gemini_usage_metadata(usage: &Map<String, Value>) -> Option<Value> {
     let prompt = extract_usage_i64(usage, &["input_tokens", "prompt_tokens"])?;
     let candidates = extract_usage_i64(usage, &["output_tokens", "completion_tokens"]).unwrap_or(0);
     let total = extract_usage_i64(usage, &["total_tokens"]).unwrap_or(prompt + candidates);
-    Some(json!({
+    let mut metadata = json!({
+        "trafficType": "PROVISIONED_THROUGHPUT",
         "promptTokenCount": prompt,
         "candidatesTokenCount": candidates,
         "totalTokenCount": total,
-    }))
+    });
+    if let Some(reasoning) = usage
+        .get("output_tokens_details")
+        .and_then(Value::as_object)
+        .and_then(|details| details.get("reasoning_tokens"))
+        .and_then(Value::as_i64)
+    {
+        metadata["thoughtsTokenCount"] = Value::from(reasoning);
+    }
+    Some(metadata)
+}
+
+fn format_unix_timestamp_rfc3339(seconds: i64) -> Option<String> {
+    chrono::DateTime::<chrono::Utc>::from_timestamp(seconds, 0).map(|value| value.to_rfc3339())
 }
 
 fn extract_usage_i64(usage: &Map<String, Value>, keys: &[&str]) -> Option<i64> {
@@ -655,6 +861,25 @@ fn extract_usage_i64(usage: &Map<String, Value>, keys: &[&str]) -> Option<i64> {
         }
     }
     None
+}
+
+fn extract_tool_call_id<'a>(item_type: &str, item_obj: &'a Map<String, Value>) -> Option<&'a str> {
+    item_obj
+        .get("call_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|current| !current.is_empty())
+        .or_else(|| {
+            (item_type == "custom_tool_call")
+                .then(|| {
+                    item_obj
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|current| !current.is_empty())
+                })
+                .flatten()
+        })
 }
 
 fn extract_function_call_arguments(item_obj: &Map<String, Value>) -> Option<String> {
@@ -687,16 +912,50 @@ fn extract_function_call_arguments(item_obj: &Map<String, Value>) -> Option<Stri
 }
 
 fn parse_json_object_or_empty(raw: &str) -> Value {
-    serde_json::from_str::<Value>(raw)
-        .ok()
-        .filter(Value::is_object)
-        .unwrap_or_else(|| json!({}))
+    parse_json_object_lenient(raw).unwrap_or_else(|| json!({}))
+}
+
+fn parse_json_object_lenient(raw: &str) -> Option<Value> {
+    let mut current = raw.trim().to_string();
+    for _ in 0..3 {
+        let parsed = serde_json::from_str::<Value>(&current).ok()?;
+        match parsed {
+            Value::Object(_) => return Some(parsed),
+            Value::String(inner) => {
+                let trimmed = inner.trim();
+                if trimmed.is_empty() || trimmed == current {
+                    return None;
+                }
+                current = trimmed.to_string();
+            }
+            _ => return None,
+        }
+    }
+    None
 }
 
 fn has_meaningful_tool_arguments(raw: &str) -> bool {
     parse_json_object_or_empty(raw)
         .as_object()
         .is_some_and(|obj| !obj.is_empty())
+}
+
+fn should_use_completed_tool_arguments(existing: &str, completed: &str) -> bool {
+    let Some(completed_obj) = parse_json_object_lenient(completed).and_then(|value| {
+        value
+            .as_object()
+            .filter(|obj| !obj.is_empty())
+            .map(|obj| obj.len())
+    }) else {
+        return false;
+    };
+    let existing_obj_len = parse_json_object_lenient(existing).and_then(|value| {
+        value
+            .as_object()
+            .filter(|obj| !obj.is_empty())
+            .map(|obj| obj.len())
+    });
+    existing_obj_len.is_none_or(|len| completed_obj >= len) || completed.len() > existing.len()
 }
 
 fn merge_arguments(existing: &mut String, fragment: &str) {
@@ -720,7 +979,7 @@ fn merge_arguments(existing: &mut String, fragment: &str) {
 
 fn restore_tool_name(name: &str, tool_name_restore_map: Option<&ToolNameRestoreMap>) -> String {
     tool_name_restore_map
-        .and_then(|map| map.get(name))
+        .and_then(|map: &ToolNameRestoreMap| map.get(name))
         .cloned()
         .unwrap_or_else(|| name.to_string())
 }
@@ -774,4 +1033,136 @@ fn extract_completed_response_message_text(response: &Value) -> Option<String> {
         .map(str::trim)
         .filter(|text| !text.is_empty())
         .map(str::to_string)
+}
+
+struct CompletedReasoning {
+    text: String,
+    encrypted_content: Option<String>,
+}
+
+fn extract_completed_response_reasoning(response: &Value) -> Option<CompletedReasoning> {
+    let output_items = response.get("output").and_then(Value::as_array)?;
+    for item in output_items {
+        let item_obj = item.as_object()?;
+        if item_obj.get("type").and_then(Value::as_str) != Some("reasoning") {
+            continue;
+        }
+        let text = reasoning_text_from_item(item_obj).unwrap_or_default();
+        let encrypted_content = item_obj
+            .get("encrypted_content")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        if !text.trim().is_empty() || encrypted_content.is_some() {
+            return Some(CompletedReasoning {
+                text,
+                encrypted_content,
+            });
+        }
+    }
+    None
+}
+
+fn reasoning_text_from_item(item_obj: &Map<String, Value>) -> Option<String> {
+    item_obj
+        .get("summary")
+        .and_then(Value::as_array)
+        .map(|parts| {
+            parts
+                .iter()
+                .filter_map(|part| part.get("text").and_then(Value::as_str))
+                .collect::<String>()
+        })
+        .filter(|text| !text.trim().is_empty())
+        .or_else(|| {
+            item_obj
+                .get("content")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Read;
+    use std::time::Instant;
+
+    #[test]
+    fn responses_reasoning_summary_streams_as_gemini_thought() {
+        let upstream = concat!(
+            "event: response.created\n",
+            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_test\",\"model\":\"gpt-5.4\",\"created_at\":1775900000}}\n\n",
+            "event: response.reasoning_summary_text.delta\n",
+            "data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"plan details\"}\n\n",
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\",\"model\":\"gpt-5.4\",\"created_at\":1775900000,\"usage\":{\"input_tokens\":3,\"output_tokens\":4,\"output_tokens_details\":{\"reasoning_tokens\":2}}}}\n\n",
+        );
+        let usage_collector = Arc::new(Mutex::new(PassthroughSseCollector::default()));
+        let mut reader = GeminiSseReader::from_reader(
+            Cursor::new(upstream.as_bytes().to_vec()),
+            usage_collector,
+            None,
+            GeminiStreamOutputMode::Sse,
+            true,
+            Instant::now(),
+        );
+
+        let mut output = String::new();
+        reader
+            .read_to_string(&mut output)
+            .expect("read adapted gemini stream");
+
+        assert!(output.contains("\"thought\":true"));
+        assert!(output.contains("\"text\":\"plan details\""));
+        assert!(output.contains("\"thoughtsTokenCount\":2"));
+        assert!(output.contains("\"candidates\":"));
+        assert!(output.contains("\"response\":{"));
+    }
+
+    #[test]
+    fn gemini_cli_stream_wraps_payload_in_response_envelope() {
+        let upstream = concat!(
+            "event: response.created\n",
+            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_test\",\"model\":\"gpt-5.4\",\"created_at\":1775900000}}\n\n",
+            "event: response.output_text.delta\n",
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n",
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\",\"model\":\"gpt-5.4\",\"created_at\":1775900000,\"usage\":{\"input_tokens\":3,\"output_tokens\":4,\"total_tokens\":7}}}\n\n",
+        );
+        let usage_collector = Arc::new(Mutex::new(PassthroughSseCollector::default()));
+        let mut reader = GeminiSseReader::from_reader(
+            Cursor::new(upstream.as_bytes().to_vec()),
+            Arc::clone(&usage_collector),
+            None,
+            GeminiStreamOutputMode::Sse,
+            true,
+            Instant::now(),
+        );
+
+        let mut output = String::new();
+        reader
+            .read_to_string(&mut output)
+            .expect("read wrapped gemini stream");
+
+        assert!(output.starts_with("data: {\"response\":{"));
+        assert!(output.contains("\"candidates\":"));
+        assert!(output.contains("\"responseId\":\"resp_test\""));
+    }
+
+    #[test]
+    fn completed_reasoning_fallback_preserves_thought_signature() {
+        let response = json!({
+            "output": [{
+                "type": "reasoning",
+                "encrypted_content": "sig",
+                "summary": [{ "type": "summary_text", "text": "hidden plan" }]
+            }]
+        });
+
+        let reasoning = extract_completed_response_reasoning(&response).expect("reasoning");
+        assert_eq!(reasoning.text, "hidden plan");
+        assert_eq!(reasoning.encrypted_content.as_deref(), Some("sig"));
+    }
 }

@@ -296,7 +296,6 @@ pub(super) fn finalize_upstream_response(
             bridge.upstream_content_type.as_deref(),
         );
     }
-
     let bridge_ok = bridge.is_ok(client_is_stream);
     let bridge_error_message = (!bridge_ok).then(|| {
         bridge

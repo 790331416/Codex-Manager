@@ -9,7 +9,8 @@ use super::{
     APP_SETTING_GATEWAY_MODEL_FORWARD_RULES_KEY, APP_SETTING_GATEWAY_ORIGINATOR_KEY,
     APP_SETTING_GATEWAY_RESIDENCY_REQUIREMENT_KEY, APP_SETTING_GATEWAY_ROUTE_STRATEGY_KEY,
     APP_SETTING_GATEWAY_SSE_KEEPALIVE_INTERVAL_MS_KEY, APP_SETTING_GATEWAY_UPSTREAM_PROXY_URL_KEY,
-    APP_SETTING_GATEWAY_UPSTREAM_STREAM_TIMEOUT_MS_KEY, APP_SETTING_GATEWAY_USER_AGENT_VERSION_KEY,
+    APP_SETTING_GATEWAY_UPSTREAM_STREAM_TIMEOUT_MS_KEY,
+    APP_SETTING_GATEWAY_UPSTREAM_TOTAL_TIMEOUT_MS_KEY, APP_SETTING_GATEWAY_USER_AGENT_VERSION_KEY,
     SERVICE_BIND_MODE_SETTING_KEY,
 };
 
@@ -147,6 +148,15 @@ pub fn sync_runtime_settings_from_storage() {
             }
         }
     }
+    if !process_env_has_value("CODEXMANAGER_UPSTREAM_TOTAL_TIMEOUT_MS") {
+        if let Some(raw) = settings.get(APP_SETTING_GATEWAY_UPSTREAM_TOTAL_TIMEOUT_MS_KEY) {
+            if let Ok(timeout_ms) = raw.trim().parse::<u64>() {
+                gateway::set_upstream_total_timeout_ms(timeout_ms);
+            } else {
+                log::warn!("parse persisted upstream total timeout failed: {raw}");
+            }
+        }
+    }
     if !process_env_has_value("CODEXMANAGER_SSE_KEEPALIVE_INTERVAL_MS") {
         if let Some(raw) = settings.get(APP_SETTING_GATEWAY_SSE_KEEPALIVE_INTERVAL_MS_KEY) {
             if let Ok(interval_ms) = raw.trim().parse::<u64>() {
@@ -165,6 +175,7 @@ pub fn sync_runtime_settings_from_storage() {
         "CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS",
         "CODEXMANAGER_TOKEN_REFRESH_POLLING_ENABLED",
         "CODEXMANAGER_TOKEN_REFRESH_POLL_INTERVAL_SECS",
+        "CODEXMANAGER_USAGE_REFRESH_WORKERS",
         "CODEXMANAGER_HTTP_WORKER_FACTOR",
         "CODEXMANAGER_HTTP_WORKER_MIN",
         "CODEXMANAGER_HTTP_STREAM_WORKER_FACTOR",

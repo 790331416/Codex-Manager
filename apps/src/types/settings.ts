@@ -52,6 +52,7 @@ export interface AppSettings {
   pluginMarketSourceUrl: string;
   upstreamProxyUrl: string;
   upstreamStreamTimeoutMs: number;
+  upstreamTotalTimeoutMs: number;
   sseKeepaliveIntervalMs: number;
   backgroundTasks: BackgroundTaskSettings;
   envOverrides: Record<string, string>;

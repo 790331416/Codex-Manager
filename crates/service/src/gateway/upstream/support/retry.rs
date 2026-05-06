@@ -7,6 +7,40 @@ use super::super::attempt_flow::transport::send_upstream_request;
 use super::super::attempt_flow::transport::UpstreamRequestContext;
 use super::super::GatewayUpstreamResponse;
 
+fn value_contains_codex(value: Option<&str>) -> bool {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some_and(|value| value.to_ascii_lowercase().contains("codex"))
+}
+
+fn looks_like_native_codex_client(
+    incoming_headers: &super::super::super::IncomingHeaderSnapshot,
+) -> bool {
+    value_contains_codex(incoming_headers.user_agent())
+        || value_contains_codex(incoming_headers.originator())
+        || incoming_headers.client_request_id().is_some()
+        || incoming_headers.subagent().is_some()
+        || incoming_headers.beta_features().is_some()
+        || incoming_headers.window_id().is_some()
+        || incoming_headers.turn_metadata().is_some()
+        || incoming_headers.turn_state().is_some()
+        || incoming_headers.parent_thread_id().is_some()
+}
+
+fn should_skip_codex_v1_alt_for_api_client(
+    request_ctx: UpstreamRequestContext<'_>,
+    incoming_headers: &super::super::super::IncomingHeaderSnapshot,
+    alt_url: &str,
+) -> bool {
+    request_ctx.protocol_type == crate::apikey_profile::PROTOCOL_OPENAI_COMPAT
+        && request_ctx.request_path.starts_with("/v1/responses")
+        && alt_url
+            .to_ascii_lowercase()
+            .contains("/backend-api/codex/v1/")
+        && !looks_like_native_codex_client(incoming_headers)
+}
+
 pub(in super::super) enum AltPathRetryResult {
     NotTriggered,
     Upstream(GatewayUpstreamResponse),
@@ -50,6 +84,15 @@ where
         return AltPathRetryResult::NotTriggered;
     };
     if !matches!(status.as_u16(), 400 | 404) {
+        return AltPathRetryResult::NotTriggered;
+    }
+    if should_skip_codex_v1_alt_for_api_client(request_ctx, incoming_headers, alt_url) {
+        log::warn!(
+            "event=gateway_upstream_alt_retry_skipped path={} status={} reason=api_client_codex_v1_alt_blocked upstream_url={}",
+            request_ctx.request_path,
+            status.as_u16(),
+            alt_url
+        );
         return AltPathRetryResult::NotTriggered;
     }
     if debug {
@@ -110,5 +153,59 @@ where
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{should_skip_codex_v1_alt_for_api_client, UpstreamRequestContext};
+    use crate::gateway::IncomingHeaderSnapshot;
+    use axum::http::{HeaderMap, HeaderValue};
+
+    fn headers(user_agent: Option<&str>, originator: Option<&str>) -> IncomingHeaderSnapshot {
+        let mut headers = HeaderMap::new();
+        if let Some(user_agent) = user_agent {
+            headers.insert(
+                "user-agent",
+                HeaderValue::from_str(user_agent).expect("user agent header"),
+            );
+        }
+        if let Some(originator) = originator {
+            headers.insert(
+                "originator",
+                HeaderValue::from_str(originator).expect("originator header"),
+            );
+        }
+        IncomingHeaderSnapshot::from_http_headers(&headers)
+    }
+
+    #[test]
+    fn api_client_responses_request_skips_codex_v1_alt_retry() {
+        let request_ctx = UpstreamRequestContext {
+            request_path: "/v1/responses",
+            protocol_type: crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
+        };
+        let incoming_headers = headers(Some("CherryStudio/1.0"), None);
+
+        assert!(should_skip_codex_v1_alt_for_api_client(
+            request_ctx,
+            &incoming_headers,
+            "https://chatgpt.com/backend-api/codex/v1/responses"
+        ));
+    }
+
+    #[test]
+    fn native_codex_responses_request_keeps_codex_v1_alt_retry_available() {
+        let request_ctx = UpstreamRequestContext {
+            request_path: "/v1/responses",
+            protocol_type: crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
+        };
+        let incoming_headers = headers(Some("codex-cli/0.1.0"), Some("codex_cli_rs"));
+
+        assert!(!should_skip_codex_v1_alt_for_api_client(
+            request_ctx,
+            &incoming_headers,
+            "https://chatgpt.com/backend-api/codex/v1/responses"
+        ));
     }
 }

@@ -1,4 +1,7 @@
-use super::{build_backend_base_url, build_local_backend_client, proxy_handler, ProxyState};
+use super::{
+    build_backend_base_url, build_local_backend_client, front_proxy_max_blocking_threads,
+    front_proxy_worker_threads, proxy_handler, ProxyState,
+};
 use axum::body::{to_bytes, Body};
 use axum::extract::State;
 use axum::http::{Request as HttpRequest, StatusCode};
@@ -36,6 +39,12 @@ impl EnvGuard {
     fn set(key: &'static str, value: &str) -> Self {
         let original = std::env::var_os(key);
         std::env::set_var(key, value);
+        Self { key, original }
+    }
+
+    fn clear(key: &'static str) -> Self {
+        let original = std::env::var_os(key);
+        std::env::remove_var(key);
         Self { key, original }
     }
 }
@@ -94,6 +103,40 @@ fn backend_base_url_uses_http_scheme() {
 #[test]
 fn local_backend_client_builds_without_system_proxy() {
     build_local_backend_client().expect("local backend client");
+}
+
+#[test]
+fn front_proxy_blocking_threads_follow_storage_pool_default() {
+    let _guard = crate::test_env_guard();
+    let _front_guard = EnvGuard::clear("CODEXMANAGER_FRONT_PROXY_MAX_BLOCKING_THREADS");
+    let _storage_guard = EnvGuard::set("CODEXMANAGER_STORAGE_MAX_CONNECTIONS", "7");
+
+    assert_eq!(front_proxy_max_blocking_threads(), 7);
+}
+
+#[test]
+fn front_proxy_blocking_threads_allow_explicit_override() {
+    let _guard = crate::test_env_guard();
+    let _storage_guard = EnvGuard::set("CODEXMANAGER_STORAGE_MAX_CONNECTIONS", "7");
+    let _front_guard = EnvGuard::set("CODEXMANAGER_FRONT_PROXY_MAX_BLOCKING_THREADS", "5");
+
+    assert_eq!(front_proxy_max_blocking_threads(), 5);
+}
+
+#[test]
+fn front_proxy_worker_threads_default_to_small_runtime() {
+    let _guard = crate::test_env_guard();
+    let _worker_guard = EnvGuard::clear("CODEXMANAGER_FRONT_PROXY_WORKER_THREADS");
+
+    assert_eq!(front_proxy_worker_threads(), 2);
+}
+
+#[test]
+fn front_proxy_worker_threads_allow_explicit_override() {
+    let _guard = crate::test_env_guard();
+    let _worker_guard = EnvGuard::set("CODEXMANAGER_FRONT_PROXY_WORKER_THREADS", "3");
+
+    assert_eq!(front_proxy_worker_threads(), 3);
 }
 
 /// 函数 `request_without_content_length_over_limit_returns_413`
@@ -807,7 +850,7 @@ async fn official_responses_websocket_proxies_frames_and_headers() {
             .headers
             .get("x-responsesapi-include-timing-metrics")
             .map(String::as_str),
-        None
+        Some("true")
     );
     assert_eq!(capture.frames.len(), 2);
 
@@ -1006,6 +1049,7 @@ async fn official_responses_websocket_retries_current_request_after_terminal_fai
             serde_json::json!({
                 "type": "response.create",
                 "model": "gpt-4.1",
+                "previous_response_id": "resp_ws_old_account",
                 "input": "first request"
             })
             .to_string()
@@ -1021,6 +1065,7 @@ async fn official_responses_websocket_retries_current_request_after_terminal_fai
     let first_payload: serde_json::Value =
         serde_json::from_str(&first_upstream_frame).expect("parse first upstream frame");
     assert_eq!(first_payload["type"], "response.create");
+    assert_eq!(first_payload["previous_response_id"], "resp_ws_old_account");
 
     let second_upstream_frame =
         tokio::time::timeout(Duration::from_secs(5), upstream_events.recv())
@@ -1031,6 +1076,7 @@ async fn official_responses_websocket_retries_current_request_after_terminal_fai
         serde_json::from_str(&second_upstream_frame).expect("parse second upstream frame");
     assert_eq!(second_payload["type"], "response.create");
     assert_eq!(second_payload["input"], "first request");
+    assert!(second_payload.get("previous_response_id").is_none());
 
     let first_client_event = tokio::time::timeout(Duration::from_secs(5), client_ws.next())
         .await

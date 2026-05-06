@@ -1,12 +1,13 @@
 use rand::RngCore;
 use std::fs;
 use std::fs::OpenOptions;
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 const ENV_CANDIDATES: [&str; 3] = ["codexmanager.env", "CodexManager.env", ".env"];
 const DEFAULT_DB_FILENAME: &str = "codexmanager.db";
 const DEFAULT_RPC_TOKEN_FILENAME: &str = "codexmanager.rpc-token";
+const INSTALLATION_ID_FILENAME: &str = "installation_id";
 
 pub(crate) const ENV_DB_PATH: &str = "CODEXMANAGER_DB_PATH";
 pub(crate) const ENV_RPC_TOKEN: &str = "CODEXMANAGER_RPC_TOKEN";
@@ -224,6 +225,74 @@ pub(crate) fn db_dir() -> PathBuf {
 ///
 /// # 返回
 /// 返回函数执行结果
+pub(crate) fn resolve_installation_id() -> std::io::Result<String> {
+    let codex_home = db_dir();
+    fs::create_dir_all(&codex_home)?;
+    let path = codex_home.join(INSTALLATION_ID_FILENAME);
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(path)?;
+    file.lock()?;
+
+    let result = resolve_installation_id_from_locked_file(&mut file);
+    let unlock_result = file.unlock();
+    match (result, unlock_result) {
+        (Ok(installation_id), Ok(())) => Ok(installation_id),
+        (Err(err), _) => Err(err),
+        (Ok(_), Err(err)) => Err(err),
+    }
+}
+
+fn resolve_installation_id_from_locked_file(file: &mut fs::File) -> std::io::Result<String> {
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)?;
+    if let Some(existing) = canonical_uuid(contents.trim()) {
+        return Ok(existing);
+    }
+
+    let installation_id = random_uuid_v4();
+    file.set_len(0)?;
+    file.seek(SeekFrom::Start(0))?;
+    file.write_all(installation_id.as_bytes())?;
+    file.flush()?;
+    file.sync_all()?;
+    Ok(installation_id)
+}
+
+fn canonical_uuid(value: &str) -> Option<String> {
+    if value.len() != 36 {
+        return None;
+    }
+    let bytes = value.as_bytes();
+    for index in [8, 13, 18, 23] {
+        if bytes.get(index).copied() != Some(b'-') {
+            return None;
+        }
+    }
+    if bytes
+        .iter()
+        .enumerate()
+        .any(|(index, byte)| !matches!(index, 8 | 13 | 18 | 23) && !byte.is_ascii_hexdigit())
+    {
+        return None;
+    }
+    Some(value.to_ascii_lowercase())
+}
+
+fn random_uuid_v4() -> String {
+    let mut bytes = [0u8; 16];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7], bytes[8],
+        bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
+    )
+}
+
 pub(crate) fn rpc_token_file_path() -> PathBuf {
     if let Ok(raw) = std::env::var(ENV_RPC_TOKEN_FILE) {
         let trimmed = raw.trim();

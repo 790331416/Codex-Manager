@@ -52,6 +52,7 @@
 - `CODEXMANAGER_SERVICE_ADDR`
 - `CODEXMANAGER_ROUTE_STRATEGY`
 - `CODEXMANAGER_UPSTREAM_PROXY_URL`
+- `CODEXMANAGER_UPSTREAM_TOTAL_TIMEOUT_MS`
 - `CODEXMANAGER_UPSTREAM_STREAM_TIMEOUT_MS`
 - `CODEXMANAGER_SSE_KEEPALIVE_INTERVAL_MS`
 - 后台任务相关轮询 / worker 变量
@@ -81,10 +82,23 @@
 
 - `CODEXMANAGER_UPSTREAM_BASE_URL`
 - `CODEXMANAGER_UPSTREAM_PROXY_URL`
+- `CODEXMANAGER_UPSTREAM_TOTAL_TIMEOUT_MS`: gateway request total timeout in milliseconds. Default `0` means the service does not cut requests off by total duration.
 - `CODEXMANAGER_UPSTREAM_STREAM_TIMEOUT_MS`
 - `CODEXMANAGER_SSE_KEEPALIVE_INTERVAL_MS`
 - `CODEXMANAGER_PROXY_LIST`
 - `CODEXMANAGER_ROUTE_STRATEGY`
+
+### Codex image generation
+
+- `CODEXMANAGER_CODEX_IMAGE_GENERATION_ENABLED`: enables the image-generation compatibility path. Default `1`.
+- `CODEXMANAGER_CODEX_IMAGE_GENERATION_AUTO_INJECT_TOOL`: automatically injects the `image_generation` tool into normal `/v1/responses` requests. Default `1` to match the official Codex client behavior; explicit client-provided tools are not duplicated.
+- `CODEXMANAGER_CODEX_IMAGE_MAIN_MODEL`: main conversation model used internally by Images API compatibility endpoints. Default `gpt-5.4-mini`.
+- `CODEXMANAGER_CODEX_IMAGE_TOOL_MODEL`: image tool model. Default `gpt-image-2`.
+
+Notes:
+
+- `/v1/images/generations` and `/v1/images/edits` are converted internally to `/v1/responses + image_generation tool`.
+- When Codex CLI sends `tools[].type = "image_generation"` natively, the gateway forwards it and does not affect the existing text request path.
 
 ## 迁移中的弃用项
 
@@ -146,6 +160,10 @@ CODEXMANAGER_WEB_ADDR=localhost:48761
 CODEXMANAGER_UPSTREAM_BASE_URL=https://chatgpt.com/backend-api/codex
 CODEXMANAGER_USAGE_POLL_INTERVAL_SECS=600
 CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS=180
+CODEXMANAGER_UPSTREAM_TOTAL_TIMEOUT_MS=0
+CODEXMANAGER_CODEX_IMAGE_GENERATION_ENABLED=1
+CODEXMANAGER_CODEX_IMAGE_GENERATION_AUTO_INJECT_TOOL=1
+CODEXMANAGER_CODEX_IMAGE_TOOL_MODEL=gpt-image-2
 # CODEXMANAGER_RPC_TOKEN=replace_with_your_static_token
 ```
 
@@ -167,8 +185,9 @@ CodexManager/
 ```dotenv
 CODEXMANAGER_SERVICE_ADDR=localhost:48760
 CODEXMANAGER_UPSTREAM_PROXY_URL=http://127.0.0.1:7890
+CODEXMANAGER_UPSTREAM_TOTAL_TIMEOUT_MS=0
 CODEXMANAGER_UPSTREAM_STREAM_TIMEOUT_MS=600000
-CODEXMANAGER_SSE_KEEPALIVE_INTERVAL_MS=180
+CODEXMANAGER_SSE_KEEPALIVE_INTERVAL_MS=15000
 ```
 
 补充说明：
@@ -263,9 +282,10 @@ codexmanager-service-bundle/
 
 优先检查：
 
-1. `CODEXMANAGER_UPSTREAM_STREAM_TIMEOUT_MS` 是否过短，导致长时流式请求提前超时
-2. `CODEXMANAGER_SSE_KEEPALIVE_INTERVAL_MS` 是否过长，导致中间链路把 SSE 误判为空闲断开
-3. 客户端本身是否还有自己的超时或代理空闲断开限制
+1. Check whether `CODEXMANAGER_UPSTREAM_STREAM_TIMEOUT_MS` is too short and ends long streaming requests early.
+2. Check whether `CODEXMANAGER_UPSTREAM_TOTAL_TIMEOUT_MS` is set to a short non-zero value and cuts requests off by total duration.
+3. Check whether `CODEXMANAGER_SSE_KEEPALIVE_INTERVAL_MS` is too long and lets an intermediate proxy treat SSE as idle.
+4. Check client-side timeout or proxy idle limits. In request logs, `120s/1.8s` means total duration / first-response duration; it does not necessarily mean the service total-timeout setting is `120s`.
 
 ### 本地回环请求异常
 

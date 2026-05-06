@@ -6,6 +6,14 @@ import type {
 } from "@/types";
 
 export const ENV_DESCRIPTION_MAP: Record<string, string> = {
+  CODEXMANAGER_CODEX_IMAGE_GENERATION_ENABLED:
+    "控制 OpenAI Images 兼容入口是否启用；默认 1，填 0 会关闭 /v1/images/generations 和 /v1/images/edits。",
+  CODEXMANAGER_CODEX_IMAGE_GENERATION_AUTO_INJECT_TOOL:
+    "控制普通 Responses 请求是否自动注入 image_generation tool；默认 1，填 0 时仅客户端显式传入 tool 才启用。",
+  CODEXMANAGER_CODEX_IMAGE_MAIN_MODEL:
+    "控制 Images API 兼容入口内部使用的 Codex 主模型；默认 gpt-5.4-mini。",
+  CODEXMANAGER_CODEX_IMAGE_TOOL_MODEL:
+    "控制 Images API 兼容入口注入的图片工具模型；默认 gpt-image-2。",
   CODEXMANAGER_UPSTREAM_TOTAL_TIMEOUT_MS:
     "控制单次上游请求允许持续的最长时间，单位毫秒；超过后会主动结束请求并返回超时错误。",
   CODEXMANAGER_UPSTREAM_STREAM_TIMEOUT_MS:

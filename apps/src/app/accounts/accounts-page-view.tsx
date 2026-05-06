@@ -9,6 +9,7 @@ import {
   Download,
   FileUp,
   FolderOpen,
+  KeyRound,
   Loader2,
   MoreVertical,
   PencilLine,
@@ -98,6 +99,13 @@ interface StatusFilterOption {
   label: string;
 }
 
+interface CleanupStatusOption {
+  id: string;
+  label: string;
+  description: string;
+  count: number;
+}
+
 export interface AccountsPageViewProps {
   accounts: Account[];
   planTypes: PlanTypeOption[];
@@ -120,6 +128,9 @@ export interface AccountsPageViewProps {
   exportModeDraft: AccountExportMode;
   exportTargetCount: number;
   exportScopeText: string;
+  cleanupDialogOpen: boolean;
+  cleanupStatusDraft: string[];
+  cleanupStatusOptions: CleanupStatusOption[];
   selectedAccount: Account | null;
   accountEditorState: AccountEditorState | null;
   deleteDialogState: DeleteDialogState;
@@ -130,9 +141,12 @@ export interface AccountsPageViewProps {
   sortDraft: string;
   isRefreshingAllAccounts: boolean;
   isRefreshingAccountId: string | null;
+  isRefreshingRtAccountId: string | null;
+  isRefreshingAllRtAccounts: boolean;
   isExporting: boolean;
   isWarmingUpAccounts: boolean;
   isDeletingMany: boolean;
+  isCleaningAccountsByStatus: boolean;
   isUpdatingPreferred: boolean;
   isReorderingAccounts: boolean;
   isUpdatingProfileAccountId: string | null;
@@ -146,6 +160,7 @@ export interface AccountsPageViewProps {
   setExportDialogOpen: Dispatch<SetStateAction<boolean>>;
   setExportModeDraft: Dispatch<SetStateAction<AccountExportMode>>;
   setDeleteDialogState: Dispatch<SetStateAction<DeleteDialogState>>;
+  setCleanupDialogOpen: Dispatch<SetStateAction<boolean>>;
   setAccountEditorState: Dispatch<SetStateAction<AccountEditorState | null>>;
   setLabelDraft: Dispatch<SetStateAction<string>>;
   setTagsDraft: Dispatch<SetStateAction<string>>;
@@ -161,7 +176,9 @@ export interface AccountsPageViewProps {
   openUsage: (account: Account) => void;
   handleUsageModalOpenChange: (open: boolean) => void;
   handleDeleteSelected: () => void;
-  handleDeleteBanned: () => void;
+  openCleanupDialog: () => void;
+  toggleCleanupStatus: (status: string) => void;
+  handleConfirmCleanupStatuses: () => Promise<void>;
   handleWarmupAccounts: () => Promise<void>;
   openExportDialog: () => void;
   handleConfirmExport: () => Promise<void>;
@@ -175,10 +192,11 @@ export interface AccountsPageViewProps {
   handleConfirmAccountEditor: () => Promise<void>;
   handleConfirmDelete: () => void;
   refreshAllAccounts: () => void;
+  refreshAllAccountRt: () => void;
   refreshAccountList: () => void;
+  refreshAccountRt: (accountId: string) => void;
   importByFile: () => void;
   importByDirectory: () => void;
-  deleteUnavailableFree: () => void;
   refreshAccount: (accountId: string) => void;
   clearPreferredAccount: (accountId: string) => void;
   setPreferredAccount: (accountId: string) => void;
@@ -213,6 +231,9 @@ export function AccountsPageView(props: AccountsPageViewProps) {
     exportModeDraft,
     exportTargetCount,
     exportScopeText,
+    cleanupDialogOpen,
+    cleanupStatusDraft,
+    cleanupStatusOptions,
     selectedAccount,
     accountEditorState,
     deleteDialogState,
@@ -223,9 +244,12 @@ export function AccountsPageView(props: AccountsPageViewProps) {
     sortDraft,
     isRefreshingAllAccounts,
     isRefreshingAccountId,
+    isRefreshingRtAccountId,
+    isRefreshingAllRtAccounts,
     isExporting,
     isWarmingUpAccounts,
     isDeletingMany,
+    isCleaningAccountsByStatus,
     isUpdatingPreferred,
     isReorderingAccounts,
     isUpdatingProfileAccountId,
@@ -239,6 +263,7 @@ export function AccountsPageView(props: AccountsPageViewProps) {
     setExportDialogOpen,
     setExportModeDraft,
     setDeleteDialogState,
+    setCleanupDialogOpen,
     setAccountEditorState,
     setLabelDraft,
     setTagsDraft,
@@ -254,7 +279,9 @@ export function AccountsPageView(props: AccountsPageViewProps) {
     openUsage,
     handleUsageModalOpenChange,
     handleDeleteSelected,
-    handleDeleteBanned,
+    openCleanupDialog,
+    toggleCleanupStatus,
+    handleConfirmCleanupStatuses,
     handleWarmupAccounts,
     openExportDialog,
     handleConfirmExport,
@@ -265,15 +292,21 @@ export function AccountsPageView(props: AccountsPageViewProps) {
     handleConfirmAccountEditor,
     handleConfirmDelete,
     refreshAllAccounts,
+    refreshAllAccountRt,
     refreshAccountList,
+    refreshAccountRt,
     importByFile,
     importByDirectory,
-    deleteUnavailableFree,
     refreshAccount,
     clearPreferredAccount,
     setPreferredAccount,
     toggleAccountStatus,
   } = props;
+  const cleanupSelectedCount = cleanupStatusOptions.reduce(
+    (total, option) =>
+      cleanupStatusDraft.includes(option.id) ? total + option.count : total,
+    0,
+  );
 
   return (
     <div className="space-y-6">
@@ -410,6 +443,20 @@ export function AccountsPageView(props: AccountsPageViewProps) {
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className="h-9 rounded-lg px-2"
+                    disabled={!isServiceReady || isRefreshingAllRtAccounts}
+                    onClick={refreshAllAccountRt}
+                  >
+                    <KeyRound
+                      className={cn(
+                        "mr-2 h-4 w-4",
+                        isRefreshingAllRtAccounts && "animate-pulse",
+                      )}
+                    />
+                    {t("刷新全部 AT/RT")}
+                    <DropdownMenuShortcut>RT</DropdownMenuShortcut>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="h-9 rounded-lg px-2"
                     disabled={!isServiceReady}
                     onClick={refreshAccountList}
                   >
@@ -516,19 +563,14 @@ export function AccountsPageView(props: AccountsPageViewProps) {
                   <DropdownMenuItem
                     variant="destructive"
                     className="h-9 rounded-lg px-2"
-                    disabled={!isServiceReady}
-                    onClick={deleteUnavailableFree}
+                    disabled={
+                      !isServiceReady ||
+                      isCleaningAccountsByStatus ||
+                      accounts.length === 0
+                    }
+                    onClick={openCleanupDialog}
                   >
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    {t("清理免费不可用账号")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    variant="destructive"
-                    className="h-9 rounded-lg px-2"
-                    disabled={!isServiceReady}
-                    onClick={handleDeleteBanned}
-                  >
-                    <Trash2 className="mr-2 h-4 w-4" /> {t("一键清理封禁账号")}
+                    <Trash2 className="mr-2 h-4 w-4" /> {t("按状态清理账号")}
                   </DropdownMenuItem>
                 </DropdownMenuGroup>
               </DropdownMenuContent>
@@ -607,6 +649,97 @@ export function AccountsPageView(props: AccountsPageViewProps) {
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        open={isPageActive && cleanupDialogOpen}
+        onOpenChange={(open) => {
+          if (!isCleaningAccountsByStatus) {
+            setCleanupDialogOpen(open);
+          }
+        }}
+      >
+        <DialogContent className="glass-card border-border/70 sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>{t("按状态清理账号")}</DialogTitle>
+            <DialogDescription>
+              {t("选择要删除的账号状态；删除后不可恢复。")}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+              {t("将删除所有匹配所选状态的账号，不再额外限制账号套餐。")}
+            </div>
+            <div className="grid gap-2">
+              {cleanupStatusOptions.map((option) => {
+                const checked = cleanupStatusDraft.includes(option.id);
+                return (
+                  <div
+                    key={option.id}
+                    className={cn(
+                      "flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left transition-colors",
+                      checked
+                        ? "border-primary/40 bg-primary/10"
+                        : "border-border/70 bg-background/45",
+                    )}
+                  >
+                    <Checkbox
+                      checked={checked}
+                      disabled={isCleaningAccountsByStatus}
+                      onCheckedChange={() => toggleCleanupStatus(option.id)}
+                      aria-label={option.label}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">
+                          {option.label}
+                        </span>
+                        <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                          {option.count}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {option.description}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="rounded-xl bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              {t("预计删除")}{" "}
+              <span className="font-semibold text-foreground">
+                {cleanupSelectedCount}
+              </span>{" "}
+              {t("个账号")}
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <DialogClose
+              className={buttonVariants({ variant: "outline" })}
+              type="button"
+              disabled={isCleaningAccountsByStatus}
+            >
+              {t("取消")}
+            </DialogClose>
+            <Button
+              variant="destructive"
+              disabled={
+                isCleaningAccountsByStatus ||
+                cleanupStatusDraft.length === 0 ||
+                cleanupSelectedCount <= 0
+              }
+              onClick={() => void handleConfirmCleanupStatuses()}
+            >
+              {isCleaningAccountsByStatus ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="mr-2 h-4 w-4" />
+              )}
+              {t("确认清理")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Card className="glass-card overflow-hidden border-none py-0 shadow-xl backdrop-blur-md">
         <CardContent className="p-0">
           <Table>
@@ -676,6 +809,10 @@ export function AccountsPageView(props: AccountsPageViewProps) {
                   const quotaItems = buildQuotaSummaryItems(account, t);
                   const statusAction = getAccountStatusAction(account, t);
                   const StatusActionIcon = statusAction.icon;
+                  const isRefreshingCurrentAccount =
+                    isRefreshingAccountId === account.id;
+                  const isRefreshingCurrentRt =
+                    isRefreshingRtAccountId === account.id;
                   const filteredIndex =
                     filteredAccountIndexMap.get(account.id) ?? -1;
                   const canMoveUp = filteredIndex > 0;
@@ -781,6 +918,7 @@ export function AccountsPageView(props: AccountsPageViewProps) {
                             disabled={!isServiceReady}
                             onClick={() => openUsage(account)}
                             title={t("用量详情")}
+                            aria-label={t("用量详情")}
                           >
                             <BarChart3 className="h-4 w-4" />
                           </Button>
@@ -793,11 +931,48 @@ export function AccountsPageView(props: AccountsPageViewProps) {
                                 render={<span />}
                                 nativeButton={false}
                                 disabled={!isServiceReady}
+                                title={t("更多账号操作")}
+                                aria-label={t("更多账号操作")}
                               >
                                 <MoreVertical className="h-4 w-4" />
+                                <span className="sr-only">
+                                  {t("更多账号操作")}
+                                </span>
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                className="gap-2"
+                                disabled={
+                                  !isServiceReady ||
+                                  isRefreshingAllAccounts ||
+                                  isRefreshingCurrentAccount
+                                }
+                                onClick={() => refreshAccount(account.id)}
+                              >
+                                <RefreshCw
+                                  className={cn(
+                                    "h-4 w-4",
+                                    isRefreshingCurrentAccount && "animate-spin",
+                                  )}
+                                />
+                                {t("刷新用量")}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className="gap-2"
+                                disabled={!isServiceReady || isRefreshingCurrentRt}
+                                onClick={() => refreshAccountRt(account.id)}
+                              >
+                                <KeyRound
+                                  className={cn(
+                                    "h-4 w-4",
+                                    isRefreshingCurrentRt && "animate-pulse",
+                                  )}
+                                />
+                                {t("刷新 AT/RT")}
+                                <DropdownMenuShortcut>RT</DropdownMenuShortcut>
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
                               <DropdownMenuItem
                                 className="gap-2"
                                 disabled={!isServiceReady || isUpdatingPreferred}
@@ -916,9 +1091,13 @@ export function AccountsPageView(props: AccountsPageViewProps) {
         open={isPageActive && usageModalOpen}
         onOpenChange={handleUsageModalOpenChange}
         onRefresh={refreshAccount}
+        onRefreshRt={refreshAccountRt}
         isRefreshing={
           isRefreshingAllAccounts ||
           (!!selectedAccount && isRefreshingAccountId === selectedAccount.id)
+        }
+        isRefreshingRt={
+          !!selectedAccount && isRefreshingRtAccountId === selectedAccount.id
         }
       />
       <ConfirmDialog

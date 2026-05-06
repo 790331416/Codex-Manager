@@ -82,6 +82,10 @@ fn reload_from_env_updates_timeout_and_proxy() {
     let _inflight_guard = EnvGuard::set(ENV_ACCOUNT_MAX_INFLIGHT, "4");
     let _strict_allowlist_guard = EnvGuard::set(ENV_STRICT_REQUEST_PARAM_ALLOWLIST, "0");
     let _request_compression_guard = EnvGuard::set(ENV_ENABLE_REQUEST_COMPRESSION, "0");
+    let _image_enabled_guard = EnvGuard::set(ENV_CODEX_IMAGE_GENERATION_ENABLED, "0");
+    let _image_auto_inject_guard = EnvGuard::set(ENV_CODEX_IMAGE_GENERATION_AUTO_INJECT_TOOL, "1");
+    let _image_main_model_guard = EnvGuard::set(ENV_CODEX_IMAGE_MAIN_MODEL, "gpt-5.4");
+    let _image_tool_model_guard = EnvGuard::set(ENV_CODEX_IMAGE_TOOL_MODEL, "gpt-image-2");
     let _client_id_guard = EnvGuard::set(ENV_TOKEN_EXCHANGE_CLIENT_ID, "client-id-123");
     let _issuer_guard = EnvGuard::set(ENV_TOKEN_EXCHANGE_ISSUER, "https://issuer.example");
     let _proxy_guard = EnvGuard::set(ENV_UPSTREAM_PROXY_URL, "socks5://127.0.0.1:7890");
@@ -93,6 +97,10 @@ fn reload_from_env_updates_timeout_and_proxy() {
     assert_eq!(account_max_inflight_limit(), 4);
     assert!(!strict_request_param_allowlist_enabled());
     assert!(!request_compression_enabled());
+    assert!(!codex_image_generation_enabled());
+    assert!(codex_image_generation_auto_inject_tool_enabled());
+    assert_eq!(current_codex_image_main_model(), "gpt-5.4");
+    assert_eq!(current_codex_image_tool_model(), "gpt-image-2");
     assert_eq!(token_exchange_client_id(), "client-id-123");
     assert_eq!(
         token_exchange_default_issuer(),
@@ -124,6 +132,10 @@ fn reload_from_env_defaults_limits_to_unbounded_codex_friendly_values() {
     let _front_proxy_guard = EnvGuard::clear(ENV_FRONT_PROXY_MAX_BODY_BYTES);
     let _stream_guard = EnvGuard::clear(ENV_UPSTREAM_STREAM_TIMEOUT_MS);
     let _request_compression_guard = EnvGuard::clear(ENV_ENABLE_REQUEST_COMPRESSION);
+    let _image_enabled_guard = EnvGuard::clear(ENV_CODEX_IMAGE_GENERATION_ENABLED);
+    let _image_auto_inject_guard = EnvGuard::clear(ENV_CODEX_IMAGE_GENERATION_AUTO_INJECT_TOOL);
+    let _image_main_model_guard = EnvGuard::clear(ENV_CODEX_IMAGE_MAIN_MODEL);
+    let _image_tool_model_guard = EnvGuard::clear(ENV_CODEX_IMAGE_TOOL_MODEL);
 
     reload_from_env();
 
@@ -136,6 +148,10 @@ fn reload_from_env_defaults_limits_to_unbounded_codex_friendly_values() {
         Some(Duration::from_millis(300_000))
     );
     assert!(request_compression_enabled());
+    assert!(codex_image_generation_enabled());
+    assert!(codex_image_generation_auto_inject_tool_enabled());
+    assert_eq!(current_codex_image_main_model(), "gpt-5.4-mini");
+    assert_eq!(current_codex_image_tool_model(), "gpt-image-2");
 }
 
 /// 函数 `parse_proxy_list_env_limits_to_five_entries`
@@ -297,6 +313,25 @@ fn set_upstream_stream_timeout_ms_updates_env_and_cache() {
             .ok()
             .as_deref(),
         Some("432100")
+    );
+}
+
+#[test]
+fn set_upstream_total_timeout_ms_updates_env_and_cache() {
+    let _guard = crate::test_env_guard();
+    let _guard = EnvGuard::set(ENV_UPSTREAM_TOTAL_TIMEOUT_MS, "0");
+
+    let applied = set_upstream_total_timeout_ms(120000);
+
+    assert_eq!(applied, 120000);
+    assert_eq!(current_upstream_total_timeout_ms(), 120000);
+    assert_eq!(
+        upstream_total_timeout(),
+        Some(Duration::from_millis(120000))
+    );
+    assert_eq!(
+        std::env::var(ENV_UPSTREAM_TOTAL_TIMEOUT_MS).ok().as_deref(),
+        Some("120000")
     );
 }
 

@@ -3,19 +3,18 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ResponseAdapter {
     Passthrough,
-    AnthropicJson,
-    AnthropicSse,
+    AnthropicMessagesFromResponses,
+    ChatCompletionsFromResponses,
+    ImagesB64JsonFromResponses,
+    ImagesUrlFromResponses,
     GeminiJson,
     GeminiSse,
     GeminiCliJson,
     GeminiCliSse,
-    OpenAIChatCompletionsJson,
-    OpenAIChatCompletionsSse,
-    OpenAICompletionsJson,
-    OpenAICompletionsSse,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub(crate) enum GeminiStreamOutputMode {
     Sse,
     Raw,

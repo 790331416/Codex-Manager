@@ -20,10 +20,13 @@ const REFRESH_TOKEN_REUSED_MESSAGE: &str =
     "Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.";
 const REFRESH_TOKEN_INVALIDATED_MESSAGE: &str =
     "Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.";
+const REFRESH_TOKEN_INVALID_GRANT_MESSAGE: &str =
+    "Your access token could not be refreshed because your refresh token is no longer valid. Please log out and sign in again.";
 const REFRESH_TOKEN_UNKNOWN_MESSAGE: &str =
     "Your access token could not be refreshed. Please log out and sign in again.";
 const REFRESH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
 const REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR: &str = "CODEX_REFRESH_TOKEN_URL_OVERRIDE";
+const REFRESH_TOKEN_SCOPES: &str = "openid profile email";
 const RESIDENCY_HEADER_NAME: &str = "x-openai-internal-codex-residency";
 const CHATGPT_ACCOUNT_ID_HEADER_NAME: &str = "ChatGPT-Account-ID";
 const REQUEST_ID_HEADER: &str = "x-request-id";
@@ -36,6 +39,7 @@ pub(crate) enum RefreshTokenAuthErrorReason {
     Expired,
     Reused,
     Invalidated,
+    InvalidGrant,
     Unknown401,
 }
 
@@ -56,6 +60,7 @@ impl RefreshTokenAuthErrorReason {
             Self::Expired => "refresh_token_expired",
             Self::Reused => "refresh_token_reused",
             Self::Invalidated => "refresh_token_invalidated",
+            Self::InvalidGrant => "invalid_grant",
             Self::Unknown401 => "refresh_token_unknown_401",
         }
     }
@@ -76,6 +81,7 @@ impl RefreshTokenAuthErrorReason {
             Self::Expired => REFRESH_TOKEN_EXPIRED_MESSAGE,
             Self::Reused => REFRESH_TOKEN_REUSED_MESSAGE,
             Self::Invalidated => REFRESH_TOKEN_INVALIDATED_MESSAGE,
+            Self::InvalidGrant => REFRESH_TOKEN_INVALID_GRANT_MESSAGE,
             Self::Unknown401 => REFRESH_TOKEN_UNKNOWN_MESSAGE,
         }
     }
@@ -286,6 +292,7 @@ fn classify_refresh_token_auth_error_reason_from_code(
         Some("refresh_token_expired") => RefreshTokenAuthErrorReason::Expired,
         Some("refresh_token_reused") => RefreshTokenAuthErrorReason::Reused,
         Some("refresh_token_invalidated") => RefreshTokenAuthErrorReason::Invalidated,
+        Some("invalid_grant") => RefreshTokenAuthErrorReason::InvalidGrant,
         _ => RefreshTokenAuthErrorReason::Unknown401,
     }
 }
@@ -350,8 +357,14 @@ pub(crate) fn refresh_token_auth_error_reason_from_message(
     message: &str,
 ) -> Option<RefreshTokenAuthErrorReason> {
     let normalized = message.trim();
-    if !normalized.contains("refresh token failed with status 401") {
+    let is_401 = normalized.contains("refresh token failed with status 401");
+    let is_400_invalid_grant = normalized.contains("refresh token failed with status 400")
+        && normalized.contains("invalid_grant");
+    if !is_401 && !is_400_invalid_grant {
         return None;
+    }
+    if is_400_invalid_grant {
+        return Some(RefreshTokenAuthErrorReason::InvalidGrant);
     }
     if normalized.contains(REFRESH_TOKEN_EXPIRED_MESSAGE) {
         return Some(RefreshTokenAuthErrorReason::Expired);
@@ -361,6 +374,9 @@ pub(crate) fn refresh_token_auth_error_reason_from_message(
     }
     if normalized.contains(REFRESH_TOKEN_INVALIDATED_MESSAGE) {
         return Some(RefreshTokenAuthErrorReason::Invalidated);
+    }
+    if normalized.contains(REFRESH_TOKEN_INVALID_GRANT_MESSAGE) {
+        return Some(RefreshTokenAuthErrorReason::InvalidGrant);
     }
     Some(RefreshTokenAuthErrorReason::Unknown401)
 }
@@ -1194,6 +1210,7 @@ fn build_refresh_token_body(client_id: &str, refresh_token: &str) -> String {
     serializer.append_pair("client_id", client_id);
     serializer.append_pair("grant_type", "refresh_token");
     serializer.append_pair("refresh_token", refresh_token);
+    serializer.append_pair("scope", REFRESH_TOKEN_SCOPES);
     serializer.finish()
 }
 

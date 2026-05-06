@@ -85,6 +85,13 @@ pub(crate) fn resolve_socket_addrs(addr: &str) -> Result<Vec<SocketAddr>, String
             "Invalid service address {addr}: no address resolved"
         ));
     }
+    if addr
+        .rsplit_once(':')
+        .map(|(host, _)| host.eq_ignore_ascii_case("localhost"))
+        .unwrap_or(false)
+    {
+        out.sort_by_key(|sock| if sock.is_ipv4() { 0 } else { 1 });
+    }
     Ok(out)
 }
 

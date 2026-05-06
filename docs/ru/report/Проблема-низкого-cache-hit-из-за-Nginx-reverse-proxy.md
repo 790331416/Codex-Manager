@@ -91,6 +91,29 @@ proxy_send_timeout 3600s;
 
 Это не создает cache hit само по себе, но уменьшает вмешательство proxy для Responses, SSE и WebSocket-трафика.
 
+### 4. Выделить `/v1/images/` в отдельный консервативный proxy-блок
+
+CodexManager поддерживает совместимые endpoints `/v1/images/generations` и `/v1/images/edits`. Для этого пути риски proxy отличаются от обычных текстовых запросов:
+
+- `/v1/images/edits` может загружать multipart-изображения с большим request body
+- генерация изображений может занимать больше времени, чем первый токен текстового ответа
+- ответы `b64_json` могут быть большими, а стандартная буферизация proxy увеличивает риск задержек или обрыва
+
+Для `/v1/images/` рекомендуется как минимум:
+
+```nginx
+client_max_body_size 0;
+proxy_buffering off;
+proxy_request_buffering off;
+gzip off;
+add_header X-Accel-Buffering no;
+proxy_read_timeout 3600s;
+proxy_send_timeout 3600s;
+send_timeout 3600s;
+```
+
+Текущий `docker/nginx/nginx.conf` уже содержит блок `location ^~ /v1/images/` и может использоваться как базовая конфигурация для image generation.
+
 ## Рекомендуемый пример конфигурации
 
 Смотрите:
@@ -105,6 +128,7 @@ proxy_send_timeout 3600s;
 - поддержку заголовков с подчеркиванием
 - явную передачу session-заголовков
 - настройки API proxy для streaming-сценариев
+- настройки proxy для `/v1/images/generations` и `/v1/images/edits`
 
 ## Как проверять после деплоя
 

@@ -1,42 +1,54 @@
-use codexmanager_core::rpc::types::ModelsResponse;
+use codexmanager_core::rpc::types::{ModelInfo, ModelsResponse};
 const MODEL_CACHE_SCOPE_DEFAULT: &str = "default";
 
-/// 函数 `serialize_models_response`
-///
-/// 作者: gaohongshun
-///
-/// 时间: 2026-04-12
-///
-/// # 参数
-/// - models: 参数 models
-///
-/// # 返回
-/// 返回函数执行结果
+#[derive(serde::Serialize)]
+struct CompatibleModelsResponse<'a> {
+    object: &'static str,
+    data: Vec<ApiModelInfo<'a>>,
+    models: &'a [ModelInfo],
+}
+
+#[derive(serde::Serialize)]
+struct ApiModelInfo<'a> {
+    id: &'a str,
+    object: &'static str,
+    created: i64,
+    owned_by: &'static str,
+    display_name: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<&'a str>,
+}
+
 fn serialize_models_response(models: &ModelsResponse) -> String {
-    serde_json::to_string(models).unwrap_or_else(|_| "{\"models\":[]}".to_string())
-}
-
-fn should_hide_model_descriptions_for_request(request: &tiny_http::Request) -> bool {
-    request.headers().iter().any(|header| {
-        header.field.equiv("User-Agent")
-            && header
-                .value
-                .as_str()
-                .to_ascii_lowercase()
-                .contains("codex_cli_rs")
+    let models = crate::apikey_models::ensure_codex_image_tool_model_listed(models);
+    let data = models
+        .models
+        .iter()
+        .filter(|model| model.supported_in_api)
+        .map(|model| ApiModelInfo {
+            id: model.slug.as_str(),
+            object: "model",
+            created: 0,
+            owned_by: "codexmanager",
+            display_name: model.display_name.as_str(),
+            description: model.description.as_deref(),
+        })
+        .collect::<Vec<_>>();
+    serde_json::to_string(&CompatibleModelsResponse {
+        object: "list",
+        data,
+        models: &models.models,
     })
+    .unwrap_or_else(|_| "{\"object\":\"list\",\"data\":[],\"models\":[]}".to_string())
 }
 
-fn response_models_for_client(models: &ModelsResponse, hide_descriptions: bool) -> ModelsResponse {
-    if !hide_descriptions {
-        return models.clone();
-    }
-
-    let mut response = models.clone();
-    for model in &mut response.models {
-        model.description = None;
-    }
-    response
+fn models_etag_header(models: &ModelsResponse) -> Result<Option<tiny_http::Header>, String> {
+    let Some(etag) = models.extra.get("etag").and_then(serde_json::Value::as_str) else {
+        return Ok(None);
+    };
+    let header = tiny_http::Header::from_bytes(b"etag".as_slice(), etag.as_bytes())
+        .map_err(|_| "build etag header failed".to_string())?;
+    Ok(Some(header))
 }
 
 /// 函数 `read_cached_models_response`
@@ -97,8 +109,6 @@ pub(super) fn maybe_respond_local_models(
         reasoning_for_log,
         storage,
     };
-    let hide_descriptions = should_hide_model_descriptions_for_request(&request);
-
     let cached = match read_cached_models_response(storage) {
         Ok(models) => models,
         Err(err) => {
@@ -151,13 +161,15 @@ pub(super) fn maybe_respond_local_models(
         }
     };
 
-    let response_models = response_models_for_client(&models, hide_descriptions);
-    let output = serialize_models_response(&response_models);
-    super::local_response::respond_local_json(
+    let output_models = crate::apikey_models::ensure_codex_image_tool_model_listed(&models);
+    let output = serialize_models_response(&output_models);
+    let extra_headers = models_etag_header(&output_models)?.into_iter().collect();
+    super::local_response::respond_local_json_with_headers(
         request,
         &context,
         output,
         super::request_log::RequestLogUsage::default(),
+        extra_headers,
     )?;
     Ok(None)
 }

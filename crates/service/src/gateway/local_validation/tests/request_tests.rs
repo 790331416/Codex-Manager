@@ -419,6 +419,32 @@ fn aggregate_passthrough_applies_model_reasoning_and_service_tier_overrides_with
 }
 
 #[test]
+fn aggregate_passthrough_openai_responses_defaults_omitted_stream_to_sse() {
+    let api_key = sample_api_key(
+        crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
+        None,
+        None,
+        None,
+    );
+    let body = br#"{"model":"gpt-5.4","input":"hi"}"#.to_vec();
+
+    let (rewritten_body, ..) =
+        apply_passthrough_request_overrides("/v1/responses", body, &api_key, None);
+    let defaulted_body = default_omitted_responses_stream_to_true(rewritten_body);
+    let payload: Value = serde_json::from_slice(&defaulted_body).expect("json body");
+    let is_stream = resolve_client_is_stream(
+        crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
+        "/v1/responses",
+        false,
+        false,
+        false,
+    );
+
+    assert_eq!(payload.get("stream").and_then(Value::as_bool), Some(true));
+    assert!(is_stream);
+}
+
+#[test]
 fn native_codex_client_detection_uses_codex_signals_instead_of_client_brand() {
     let native_headers = sample_incoming_headers(
         None,
@@ -449,17 +475,87 @@ fn native_codex_client_detection_uses_codex_signals_instead_of_client_brand() {
 }
 
 #[test]
-fn non_native_responses_requests_force_codex_compat_rewrite() {
-    assert!(should_force_codex_compat_rewrite("/v1/responses", false));
-    assert!(!should_force_codex_compat_rewrite(
-        "/v1/chat/completions",
-        false
+fn openai_responses_api_clients_use_codex_compat_rewrite_but_native_codex_does_not() {
+    assert!(allow_codex_compat_rewrite_for_client(
+        crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
+        "/v1/responses",
+        false,
     ));
-    assert!(!should_force_codex_compat_rewrite("/v1/responses", true));
+    assert!(allow_codex_compat_rewrite_for_client(
+        crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
+        "/v1/chat/completions",
+        false,
+    ));
+    assert!(!allow_codex_compat_rewrite_for_client(
+        crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
+        "/v1/responses",
+        true,
+    ));
+    assert!(!allow_codex_compat_rewrite_for_client(
+        crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
+        "/v1/chat/completions",
+        true,
+    ));
 }
 
 #[test]
-fn opencode_headers_with_only_session_id_still_force_compat_rewrite() {
+fn openai_chat_completions_api_body_is_adapted_to_responses_for_codex_backend() {
+    let body = serde_json::json!({
+        "model": "gpt-5.5",
+        "stream": true,
+        "messages": [{ "role": "user", "content": "你好" }],
+        "tools": [{
+            "type": "function",
+            "function": {
+                "name": "ping",
+                "description": "Ping",
+                "parameters": { "type": "object", "properties": {} }
+            }
+        }],
+        "tool_choice": { "type": "function", "function": { "name": "ping" } }
+    });
+    let adapted = adapt_openai_chat_completions_body_to_responses(
+        serde_json::to_vec(&body).expect("serialize chat body"),
+    )
+    .expect("adapt chat body");
+    let payload: Value = serde_json::from_slice(&adapted).expect("json body");
+
+    assert_eq!(
+        payload.get("model").and_then(Value::as_str),
+        Some("gpt-5.5")
+    );
+    assert_eq!(
+        payload
+            .get("input")
+            .and_then(Value::as_array)
+            .and_then(|items| items.first())
+            .and_then(|item| item.get("content"))
+            .and_then(Value::as_array)
+            .and_then(|parts| parts.first())
+            .and_then(|part| part.get("text"))
+            .and_then(Value::as_str),
+        Some("你好")
+    );
+    assert_eq!(
+        payload
+            .get("tools")
+            .and_then(Value::as_array)
+            .and_then(|tools| tools.first())
+            .and_then(|tool| tool.get("name"))
+            .and_then(Value::as_str),
+        Some("ping")
+    );
+    assert_eq!(
+        payload
+            .get("tool_choice")
+            .and_then(|choice| choice.get("name"))
+            .and_then(Value::as_str),
+        Some("ping")
+    );
+}
+
+#[test]
+fn opencode_headers_with_only_session_id_are_not_treated_as_native_codex_clients() {
     let opencode_headers = sample_incoming_headers_with_session_id(
         None,
         None,
@@ -468,10 +564,6 @@ fn opencode_headers_with_only_session_id_still_force_compat_rewrite() {
         Some("affinity-1"),
         Some("session-1"),
     );
-    assert!(should_force_codex_compat_rewrite(
-        "/v1/responses",
-        is_native_codex_client_request(&opencode_headers),
-    ));
     assert!(!is_native_codex_client_request(&opencode_headers));
 }
 

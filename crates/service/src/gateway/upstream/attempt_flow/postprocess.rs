@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use crate::account_status::mark_account_unavailable_for_refresh_token_error;
 use crate::gateway::error_log::GatewayErrorLogInput;
+use crate::usage_token_refresh::token_refresh_ahead_secs;
 
 use super::super::support::backoff;
 use super::super::support::outcome::{decide_upstream_outcome, UpstreamOutcomeDecision};
@@ -76,6 +77,7 @@ fn try_refresh_chatgpt_access_token(
         token,
         issuer.as_str(),
         client_id.as_str(),
+        token_refresh_ahead_secs(),
     )?;
     let refreshed = token.access_token.trim();
     if refreshed.is_empty() {
@@ -273,7 +275,7 @@ fn retry_chatgpt_challenge_without_compression(
     }
 }
 
-pub(super) enum PostRetryFlowDecision {
+pub(in crate::gateway::upstream) enum PostRetryFlowDecision {
     Failover,
     Terminal { status_code: u16, message: String },
     RespondUpstream(GatewayUpstreamResponse),
@@ -291,7 +293,7 @@ pub(super) enum PostRetryFlowDecision {
 /// # 返回
 /// 返回函数执行结果
 #[allow(clippy::too_many_arguments)]
-pub(super) fn process_upstream_post_retry_flow<F>(
+pub(in crate::gateway::upstream) fn process_upstream_post_retry_flow<F>(
     client: &reqwest::blocking::Client,
     storage: &Storage,
     method: &reqwest::Method,
@@ -717,6 +719,7 @@ mod tests {
         let incoming_headers = IncomingHeaderSnapshot::default();
         let request_ctx = UpstreamRequestContext {
             request_path: "/v1/responses",
+            protocol_type: crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
         };
         let body = Bytes::from_static(br#"{"model":"gpt-5.3-codex","input":"hello"}"#);
         let upstream = super::super::transport::send_upstream_request(
@@ -816,6 +819,7 @@ mod tests {
         let incoming_headers = IncomingHeaderSnapshot::default();
         let request_ctx = UpstreamRequestContext {
             request_path: "/v1/responses",
+            protocol_type: crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
         };
         let body = Bytes::from_static(br#"{"model":"gpt-5.3-codex","input":"hello"}"#);
         let upstream = super::super::transport::send_upstream_request(
@@ -908,6 +912,7 @@ mod tests {
         let incoming_headers = IncomingHeaderSnapshot::default();
         let request_ctx = UpstreamRequestContext {
             request_path: "/v1/responses",
+            protocol_type: crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
         };
         let body = Bytes::from_static(br#"{"model":"gpt-5.3-codex","input":"hello"}"#);
         let upstream = super::super::transport::send_upstream_request(
@@ -995,6 +1000,7 @@ mod tests {
         let incoming_headers = IncomingHeaderSnapshot::default();
         let request_ctx = UpstreamRequestContext {
             request_path: "/v1/responses",
+            protocol_type: crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
         };
         let body = Bytes::from_static(br#"{"model":"gpt-5.3-codex","input":"hello"}"#);
         let upstream = super::super::transport::send_upstream_request(

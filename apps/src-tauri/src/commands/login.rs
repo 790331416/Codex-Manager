@@ -177,6 +177,7 @@ pub async fn service_account_logout(addr: Option<String>) -> Result<serde_json::
 /// # 参数
 /// - addr: 参数 addr
 /// - reason: 参数 reason
+/// - account_id: 参数 account_id
 /// - previous_account_id: 参数 previous_account_id
 ///
 /// # 返回
@@ -185,11 +186,31 @@ pub async fn service_account_logout(addr: Option<String>) -> Result<serde_json::
 pub async fn service_chatgpt_auth_tokens_refresh(
     addr: Option<String>,
     reason: Option<String>,
+    account_id: Option<String>,
     previous_account_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let params = serde_json::json!({
       "reason": reason.unwrap_or_else(|| "unauthorized".to_string()),
+      "accountId": account_id,
       "previousAccountId": previous_account_id
     });
     rpc_call_in_background("account/chatgptAuthTokens/refresh", addr, Some(params)).await
+}
+
+/// 函数 `service_chatgpt_auth_tokens_refresh_all`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-05-03
+///
+/// # 参数
+/// - addr: 参数 addr
+///
+/// # 返回
+/// 返回函数执行结果
+#[tauri::command]
+pub async fn service_chatgpt_auth_tokens_refresh_all(
+    addr: Option<String>,
+) -> Result<serde_json::Value, String> {
+    rpc_call_in_background("account/chatgptAuthTokens/refreshAll", addr, None).await
 }

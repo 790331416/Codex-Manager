@@ -14,6 +14,7 @@ use crate::storage_helpers::{generate_aggregate_api_id, open_storage};
 
 pub(crate) const AGGREGATE_API_PROVIDER_CODEX: &str = "codex";
 pub(crate) const AGGREGATE_API_PROVIDER_CLAUDE: &str = "claude";
+pub(crate) const AGGREGATE_API_PROVIDER_GEMINI: &str = "gemini";
 pub(crate) const AGGREGATE_API_AUTH_APIKEY: &str = "apikey";
 pub(crate) const AGGREGATE_API_AUTH_USERPASS: &str = "userpass";
 
@@ -246,7 +247,11 @@ fn normalize_action_override(
 mod tests {
     use codexmanager_core::storage::AggregateApi;
 
-    use super::{action_path_or_default, normalize_action_override};
+    use super::{
+        action_path_or_default, build_codex_models_probe_url, normalize_action_override,
+        normalize_provider_type, normalize_provider_type_value, provider_default_url,
+        AGGREGATE_API_PROVIDER_CLAUDE, AGGREGATE_API_PROVIDER_GEMINI,
+    };
 
     fn aggregate_api_with_action(action: Option<&str>) -> AggregateApi {
         AggregateApi {
@@ -285,6 +290,58 @@ mod tests {
         let api = aggregate_api_with_action(Some(""));
         let path = action_path_or_default(&api, "/v1/messages?beta=true");
         assert_eq!(path, "/v1/messages?beta=true");
+    }
+
+    #[test]
+    fn codex_models_probe_url_appends_client_version() {
+        let _guard = crate::test_env_guard();
+        crate::gateway::set_codex_user_agent_version("0.101.0")
+            .expect("set default codex user agent version");
+        let mut api = aggregate_api_with_action(None);
+        api.url = "https://api.openai.com/v1".to_string();
+
+        let url = build_codex_models_probe_url(&api);
+
+        assert_eq!(
+            url,
+            "https://api.openai.com/v1/models?client_version=0.101.0"
+        );
+    }
+
+    #[test]
+    fn codex_models_probe_url_preserves_custom_action_with_client_version() {
+        let _guard = crate::test_env_guard();
+        crate::gateway::set_codex_user_agent_version("0.101.0")
+            .expect("set default codex user agent version");
+        let mut api = aggregate_api_with_action(Some("/models?limit=20"));
+        api.url = "https://api.openai.com/v1".to_string();
+
+        let url = build_codex_models_probe_url(&api);
+
+        assert_eq!(
+            url,
+            "https://api.openai.com/v1/models?limit=20&client_version=0.101.0"
+        );
+    }
+
+    #[test]
+    fn gemini_provider_type_is_normalized_independently() {
+        assert_eq!(
+            normalize_provider_type(Some("gemini_native".to_string())).unwrap(),
+            AGGREGATE_API_PROVIDER_GEMINI
+        );
+        assert_eq!(
+            normalize_provider_type_value("google_gemini"),
+            AGGREGATE_API_PROVIDER_GEMINI
+        );
+        assert_eq!(
+            provider_default_url(AGGREGATE_API_PROVIDER_GEMINI),
+            "https://generativelanguage.googleapis.com"
+        );
+        assert_eq!(
+            normalize_provider_type(Some("claude".to_string())).unwrap(),
+            AGGREGATE_API_PROVIDER_CLAUDE
+        );
     }
 }
 
@@ -421,8 +478,11 @@ fn normalize_provider_type(value: Option<String>) -> Result<String, String> {
         Some(raw) => {
             let normalized = raw.trim().to_ascii_lowercase().replace('-', "_");
             match normalized.as_str() {
-                "codex" | "openai" | "openai_compat" | "gpt" | "gemini" | "gemini_native" => {
+                "codex" | "openai" | "openai_compat" | "gpt" => {
                     Ok(AGGREGATE_API_PROVIDER_CODEX.to_string())
+                }
+                "gemini" | "gemini_native" | "google" | "google_ai" | "google_gemini" => {
+                    Ok(AGGREGATE_API_PROVIDER_GEMINI.to_string())
                 }
                 "claude" | "anthropic" | "anthropic_native" | "claude_code" => {
                     Ok(AGGREGATE_API_PROVIDER_CLAUDE.to_string())
@@ -451,6 +511,9 @@ fn normalize_provider_type_value(value: &str) -> String {
         "claude" | "anthropic" | "anthropic_native" | "claude_code" => {
             AGGREGATE_API_PROVIDER_CLAUDE.to_string()
         }
+        "gemini" | "gemini_native" | "google" | "google_ai" | "google_gemini" => {
+            AGGREGATE_API_PROVIDER_GEMINI.to_string()
+        }
         _ => AGGREGATE_API_PROVIDER_CODEX.to_string(),
     }
 }
@@ -469,6 +532,7 @@ fn normalize_provider_type_value(value: &str) -> String {
 fn provider_default_url(provider_type: &str) -> &'static str {
     match provider_type {
         AGGREGATE_API_PROVIDER_CLAUDE => "https://api.anthropic.com/v1",
+        AGGREGATE_API_PROVIDER_GEMINI => "https://generativelanguage.googleapis.com",
         _ => "https://api.openai.com/v1",
     }
 }
@@ -566,17 +630,20 @@ fn build_codex_probe_body() -> serde_json::Value {
     })
 }
 
-/// 函数 `append_client_version_query`
-///
-/// 作者: gaohongshun
-///
-/// 时间: 2026-04-02
-///
-/// # 参数
-/// - url: 参数 url
-///
-/// # 返回
-/// 返回函数执行结果
+fn build_gemini_probe_body() -> serde_json::Value {
+    json!({
+        "contents": [{
+            "role": "user",
+            "parts": [{
+                "text": "Who are you?"
+            }]
+        }],
+        "generationConfig": {
+            "maxOutputTokens": 1
+        }
+    })
+}
+
 fn append_client_version_query(url: &str) -> String {
     if url.contains("client_version=") {
         return url.to_string();
@@ -600,7 +667,10 @@ fn append_client_version_query(url: &str) -> String {
 /// # 返回
 /// 返回函数执行结果
 fn probe_codex_only_for_provider(provider_type: &str) -> bool {
-    provider_type != AGGREGATE_API_PROVIDER_CLAUDE
+    !matches!(
+        provider_type,
+        AGGREGATE_API_PROVIDER_CLAUDE | AGGREGATE_API_PROVIDER_GEMINI
+    )
 }
 
 /// 函数 `add_codex_probe_headers`
@@ -625,6 +695,12 @@ fn add_codex_probe_headers(
         .header("accept-encoding", "identity"))
 }
 
+fn build_codex_models_probe_url(api: &AggregateApi) -> String {
+    let probe_path = action_path_or_default(api, "/models");
+    let url = normalize_probe_url(api.url.as_str(), probe_path.as_str());
+    append_client_version_query(url.as_str())
+}
+
 /// 函数 `probe_codex_models_endpoint`
 ///
 /// 作者: gaohongshun
@@ -643,9 +719,7 @@ fn probe_codex_models_endpoint(
     api: &AggregateApi,
     secret: &str,
 ) -> Result<i64, String> {
-    let probe_path = action_path_or_default(api, "/models");
-    let base_url = normalize_probe_url(api.url.as_str(), probe_path.as_str());
-    let url = append_client_version_query(base_url.as_str());
+    let url = build_codex_models_probe_url(api);
     let builder = client.get(url.as_str());
     let (builder, updated_url) = apply_probe_auth(builder, url.clone(), api, secret)?;
     let builder = if updated_url != url {
@@ -817,6 +891,38 @@ fn probe_claude_endpoint(
     let status_code = response.status().as_u16() as i64;
     if !response.status().is_success() {
         return Err(format!("claude probe http_status={status_code}"));
+    }
+    read_first_chunk(response)?;
+    Ok(status_code)
+}
+
+fn probe_gemini_endpoint(
+    client: &reqwest::blocking::Client,
+    api: &AggregateApi,
+    secret: &str,
+) -> Result<i64, String> {
+    let probe_path = action_path_or_default(api, "/v1beta/models/gemini-2.5-flash:generateContent");
+    let url = normalize_probe_url(api.url.as_str(), probe_path.as_str());
+    let builder = client.post(url.as_str());
+    let (builder, updated_url) = apply_probe_auth(builder, url.clone(), api, secret)?;
+    let builder = if updated_url != url {
+        let rebuilt = client.post(updated_url.as_str());
+        let (rebuilt, _) = apply_probe_auth(rebuilt, updated_url, api, secret)?;
+        rebuilt
+    } else {
+        builder
+    };
+    let response = builder
+        .header("content-type", "application/json")
+        .header("accept", "application/json")
+        .header("accept-encoding", "identity")
+        .json(&build_gemini_probe_body())
+        .send()
+        .map_err(|err| err.to_string())?;
+
+    let status_code = response.status().as_u16() as i64;
+    if !response.status().is_success() {
+        return Err(format!("gemini probe http_status={status_code}"));
     }
     read_first_chunk(response)?;
     Ok(status_code)
@@ -1195,10 +1301,13 @@ pub(crate) fn test_aggregate_api_connection(
     let client = gateway::fresh_upstream_client();
     let started_at = Instant::now();
     let provider_type = normalize_provider_type_value(api.provider_type.as_str());
-    let result = if probe_codex_only_for_provider(provider_type.as_str()) {
-        probe_codex_endpoint(&client, &api, &secret)
-    } else {
-        probe_claude_endpoint(&client, &api, &secret)
+    let result = match provider_type.as_str() {
+        AGGREGATE_API_PROVIDER_CLAUDE => probe_claude_endpoint(&client, &api, &secret),
+        AGGREGATE_API_PROVIDER_GEMINI => probe_gemini_endpoint(&client, &api, &secret),
+        _ if probe_codex_only_for_provider(provider_type.as_str()) => {
+            probe_codex_endpoint(&client, &api, &secret)
+        }
+        _ => probe_codex_endpoint(&client, &api, &secret),
     };
     let (ok, status_code, last_error) = match result {
         Ok(code) => (true, Some(code), None),

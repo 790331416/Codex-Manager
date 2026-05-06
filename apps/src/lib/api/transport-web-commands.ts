@@ -234,6 +234,9 @@ export function createWebCommandMap(
     service_account_list: { rpcMethod: "account/list" },
     service_account_delete: { rpcMethod: "account/delete" },
     service_account_delete_many: { rpcMethod: "account/deleteMany" },
+    service_account_delete_by_statuses: {
+      rpcMethod: "account/deleteByStatuses",
+    },
     service_account_delete_unavailable_free: {
       rpcMethod: "account/deleteUnavailableFree",
     },
@@ -286,6 +289,9 @@ export function createWebCommandMap(
     service_account_logout: { rpcMethod: "account/logout" },
     service_chatgpt_auth_tokens_refresh: {
       rpcMethod: "account/chatgptAuthTokens/refresh",
+    },
+    service_chatgpt_auth_tokens_refresh_all: {
+      rpcMethod: "account/chatgptAuthTokens/refreshAll",
     },
     service_apikey_list: { rpcMethod: "apikey/list" },
     service_apikey_create: { rpcMethod: "apikey/create" },

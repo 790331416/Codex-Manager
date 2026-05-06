@@ -237,6 +237,7 @@ pub(crate) fn current_route_strategy() -> &'static str {
 /// # 返回
 /// 返回函数执行结果
 pub(crate) fn set_route_strategy(strategy: &str) -> Result<&'static str, String> {
+    ensure_route_config_loaded();
     let Some(mode) = parse_route_mode(strategy) else {
         return Err(
             "invalid strategy; use ordered or balanced (aliases: round_robin/round-robin/rr)"

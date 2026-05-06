@@ -683,6 +683,7 @@ export const KO_MESSAGES: MessageCatalog = {
   任务间隔已更新: "작업 간격이 업데이트되었습니다",
   任务已执行: "작업이 실행되었습니다",
   "上游代理 (Proxy)": "업스트림 프록시 (Proxy)",
+  "上游总超时 (ms，0 为关闭)": "업스트림 전체 타임아웃(ms, 0=비활성)",
   "上游流式空闲超时 (ms)": "업스트림 스트리밍 유휴 타임아웃(ms)",
   设置优先账号失败: "우선 계정 설정 실패",
   社区插件: "커뮤니티 플러그인",
@@ -1044,8 +1045,12 @@ export const KO_MESSAGES: MessageCatalog = {
   "Codex CLI 首次接入引导": "Codex CLI 첫 연결 안내",
   "先看左侧步骤，再复制右侧模板去写 `config.toml`。只要没有勾选“不再显示”，你下次进入软件时仍会看到它。":
     "먼저 왼쪽의 단계를 읽고, 오른쪽 템플릿을 복사해 `config.toml`에 넣으세요. “다시 표시하지 않기”를 체크하지 않으면 다음에 앱을 열 때도 이 안내가 다시 표시됩니다.",
+  "先看左侧步骤，再按顺序准备 `auth.json` 和 `config.toml`。只要没有勾选“不再显示”，你下次进入软件时仍会看到它。":
+    "먼저 왼쪽 단계를 읽고, 순서대로 `auth.json`과 `config.toml`을 준비하세요. “다시 표시하지 않기”를 체크하지 않으면 다음에 앱을 열 때도 이 안내가 다시 표시됩니다.",
   "推荐先完整读一遍，再复制模板；这比自己手写 provider 名称和地址更不容易出错。":
     "먼저 전체를 한 번 읽은 뒤 템플릿을 복사하는 것을 권장합니다. provider 이름과 주소를 직접 입력하는 것보다 실수가 훨씬 적습니다.",
+  "推荐先完整读一遍，再复制模板；这比自己手写平台 Key、provider 名称和地址更不容易出错。":
+    "먼저 전체를 한 번 읽은 뒤 템플릿을 복사하는 것을 권장합니다. 플랫폼 Key, provider 이름, 주소를 직접 입력하는 것보다 실수가 훨씬 적습니다.",
   "如果你要把当前模型目录替换到本地 Codex 缓存，可以去模型管理页点击“导出到本地 Codex 缓存”；桌面端会直接写入 `~/.codex/models_cache.json`，浏览器模式会下载同名文件。":
     "현재 모델 목록을 로컬 Codex 캐시로 교체하려면 모델 관리 페이지에서 “로컬 Codex 캐시로 내보내기”를 클릭하세요. 데스크톱 모드는 `~/.codex/models_cache.json`에 직접 기록하고, 브라우저 모드는 같은 이름의 파일을 다운로드합니다.",
   "如果你在 Web 端部署并访问，可以去模型管理页点击“导出到本地 Codex 缓存”；浏览器会下载同名 `models_cache.json`，你再手动放入本地 `~/.codex/models_cache.json`。":
@@ -1067,8 +1072,22 @@ export const KO_MESSAGES: MessageCatalog = {
     "리슨 포트를 변경했다면 아래 `base_url`도 같은 포트를 사용해야 합니다.",
   "服务没启动、证书异常或端口不一致时，CLI 配置不会生效。":
     "서비스가 시작되지 않았거나 인증서에 문제가 있거나 포트가 다르면 CLI 설정은 적용되지 않습니다.",
+  "第二步：配置 Codex CLI 的 auth.json":
+    "2단계: Codex CLI의 auth.json 설정",
+  "Codex CLI 需要从 `auth.json` 读取 API Key。这里填的是 CodexManager 平台密钥，不是账号里的 access token、refresh token 或 OpenAI 登录 token。":
+    "Codex CLI는 `auth.json`에서 API Key를 읽습니다. 여기에는 계정 access token, refresh token, OpenAI 로그인 token이 아니라 CodexManager 플랫폼 Key를 넣어야 합니다.",
+  "先到“平台密钥”页面创建或复制一个可用 Key。":
+    "먼저 플랫폼 Key 페이지에서 사용할 Key를 만들거나 복사하세요.",
+  "通常放在 `~/.codex/auth.json`，和 `config.toml` 在同一个目录。":
+    "보통 `~/.codex/auth.json`에 두며, `config.toml`과 같은 디렉터리입니다.",
+  "在 Windows 上一般是 `%USERPROFILE%\\\\.codex\\\\auth.json`。":
+    "Windows에서는 보통 `%USERPROFILE%\\\\.codex\\\\auth.json`입니다.",
+  "如果文件不存在就新建；如果已有 `OPENAI_API_KEY`，替换成 CodexManager 生成的平台 Key。":
+    "파일이 없으면 새로 만들고, 이미 `OPENAI_API_KEY`가 있다면 CodexManager가 생성한 플랫폼 Key로 교체하세요.",
   "第二步：把下面这份配置写入 Codex CLI 配置文件":
     "2단계: 아래 설정을 Codex CLI 설정 파일에 기록",
+  "第三步：把下面这份配置写入 Codex CLI 配置文件":
+    "3단계: 아래 설정을 Codex CLI 설정 파일에 기록",
   "推荐先复制右侧模板，再按你的实际端口或运行习惯微调。不要手敲 provider 名称，最容易在这里拼错。":
     "먼저 오른쪽 템플릿을 복사한 다음 실제 포트와 작업 습관에 맞게 조정하세요. provider 이름은 직접 타이핑하지 마세요. 가장 자주 오타가 나는 부분입니다.",
   "通常放在 `~/.codex/config.toml`。":
@@ -1079,8 +1098,14 @@ export const KO_MESSAGES: MessageCatalog = {
     "이미 기존 설정이 있다면 먼저 백업한 뒤 이 블록을 병합하는 것을 권장합니다.",
   "第三步：保存后重新启动 Codex CLI 并验证 provider":
     "3단계: 저장 후 Codex CLI를 다시 시작하고 provider를 확인",
+  "第四步：保存后重新启动 Codex CLI 并验证 provider":
+    "4단계: 저장 후 Codex CLI를 다시 시작하고 provider를 확인",
   "最后只检查两件关键事：provider 名称一致，和 `base_url` 指向本软件的本地网关。只要这两项错一个，CLI 就不会走 CodexManager。":
     "마지막으로 두 가지만 확인하세요. provider 이름이 정확히 일치하는지, 그리고 `base_url`이 이 앱의 로컬 게이트웨이를 가리키는지입니다. 둘 중 하나라도 틀리면 CLI는 CodexManager를 통하지 않습니다.",
+  "先确认 `auth.json` 能提供 API Key，再检查 provider 名称一致，和 `base_url` 指向本软件的本地网关。只要任意一项错了，CLI 就不会走 CodexManager。":
+    "먼저 `auth.json`이 API Key를 제공하는지 확인한 뒤 provider 이름과 `base_url`이 이 앱의 로컬 게이트웨이를 가리키는지 확인하세요. 하나라도 틀리면 CLI가 CodexManager를 거치지 않습니다.",
+  "`auth.json` 里的 `OPENAI_API_KEY` 应填写平台密钥页面生成的 Key，不要填账号 token。":
+    "`auth.json`의 `OPENAI_API_KEY`에는 플랫폼 Key 페이지에서 생성한 Key를 넣어야 하며, 계정 token을 넣으면 안 됩니다.",
   '`model_provider = "cm"` 必须和 `[model_providers.cm]` 完全一致。':
     '`model_provider = "cm"`는 `[model_providers.cm]`와 완전히 일치해야 합니다.',
   "`base_url` 默认应指向 `http://localhost:48760/v1`。":
@@ -1089,9 +1114,12 @@ export const KO_MESSAGES: MessageCatalog = {
     "현재 모델 카탈로그를 로컬 Codex 캐시로 교체하려면 모델 관리 페이지에서 “로컬 Codex 캐시로 내보내기”를 클릭하세요. 데스크톱 모드는 `~/.codex/models_cache.json`에 직접 쓰고, 브라우저 모드는 같은 이름의 파일을 다운로드하여 `.codex` 디렉터리에 수동으로 넣을 수 있습니다.",
   "如果你在 Web 端想手动替换本地 Codex 缓存，优先用模型管理页右上角的导出按钮；它会下载同名 `models_cache.json` 供你手动放入本地 `.codex` 目录。":
     "웹에서 로컬 Codex 캐시를 수동으로 교체하려면 모델 관리 페이지 우측 상단의 내보내기 버튼을 사용하세요. 같은 이름의 `models_cache.json` 파일이 다운로드되며, 이를 로컬 `.codex` 디렉터리에 직접 넣을 수 있습니다.",
+  "修改 `auth.json` 后请重新启动 Codex CLI，避免旧认证缓存继续生效。":
+    "`auth.json`을 수정한 뒤에는 이전 인증 캐시가 계속 적용되지 않도록 Codex CLI를 다시 시작하세요.",
   "如果你在设置里换过端口，把这里同步改掉后再重新打开 CLI 测试。":
     "설정에서 포트를 바꿨다면 이곳도 같은 값으로 바꾼 뒤 CLI를 다시 열어 테스트하세요.",
   "使用时最容易忽略的 3 个点": "사용할 때 가장 놓치기 쉬운 3가지",
+  使用时最容易忽略的几个点: "놓치기 쉬운 항목",
   "如果你在设置页改过服务端口，记得同步修改 `base_url`，否则 CLI 会连到旧端口。":
     "설정 페이지에서 서비스 포트를 바꿨다면 `base_url`도 함께 바꾸세요. 그렇지 않으면 CLI가 이전 포트에 연결됩니다.",
   "如果 CLI 已经有其它 `model_providers` 配置，不需要全删，只要保证 `cm` 这一段完整且名字一致即可。":
@@ -1101,6 +1129,17 @@ export const KO_MESSAGES: MessageCatalog = {
   推荐配置示例: "권장 설정 예시",
   "已为每一行补充中文注释，可以直接复制后再按你的环境微调。":
     "각 줄에 설명을 덧붙였으므로 그대로 복사한 뒤 환경에 맞게 미세 조정하면 됩니다.",
+  "已包含 `auth.json` 与 `config.toml`，可以直接复制后再按你的环境微调。":
+    "`auth.json`과 `config.toml`이 모두 포함되어 있으므로 그대로 복사한 뒤 환경에 맞게 조정하면 됩니다.",
+  "已包含 `auth.json` 与 `config.toml`，可以按文件分别复制，或一键复制完整参考模板。":
+    "`auth.json`과 `config.toml`이 모두 포함되어 있으므로 파일별로 복사하거나 전체 참고 템플릿을 한 번에 복사할 수 있습니다.",
+  "auth.json 示例": "auth.json 예시",
+  "config.toml 示例": "config.toml 예시",
+  "这个 Key 来自 CodexManager 的“平台密钥”页面":
+    "이 Key는 CodexManager의 플랫폼 Key 페이지에서 가져옵니다",
+  "复制 auth.json": "auth.json 복사",
+  "复制 config.toml": "config.toml 복사",
+  配置片段已复制: "설정 조각이 복사되었습니다",
   复制配置: "설정 복사",
   配置模板已复制: "설정 템플릿이 복사되었습니다",
   下次不再显示这份引导: "다음부터 이 안내를 표시하지 않기",

@@ -1,22 +1,20 @@
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use std::sync::{Arc, Mutex};
 use tiny_http::{Header, Request, Response, StatusCode};
 
 use crate::gateway::error_log::GatewayErrorLogInput;
 use crate::gateway::upstream::GatewayStreamResponse;
 
-use super::super::{
-    adapt_upstream_response_with_tool_name_restore_map, build_anthropic_error_body,
-    build_gemini_error_body, GeminiStreamOutputMode, ResponseAdapter, ToolNameRestoreMap,
-};
+use super::super::{GeminiStreamOutputMode, ResponseAdapter, ToolNameRestoreMap};
 use super::{
+    build_images_api_response, collect_image_generation_chat_images,
     collect_non_stream_json_from_sse_bytes, extract_error_hint_from_body,
     extract_error_message_from_json, looks_like_sse_payload, merge_usage, parse_usage_from_json,
-    push_trace_id_header, usage_has_signal, AnthropicSseReader, GeminiSseReader,
-    OpenAIChatCompletionsSseReader, OpenAICompletionsSseReader,
-    OpenAIResponsesPassthroughSseReader, PassthroughSseCollector, PassthroughSseProtocol,
-    PassthroughSseUsageReader, SseKeepAliveFrame, UpstreamResponseBridgeResult,
-    UpstreamResponseUsage,
+    push_trace_id_header, usage_has_signal, AnthropicSseReader,
+    ChatCompletionsFromResponsesSseReader, GeminiSseReader, ImagesFromResponsesSseReader,
+    ImagesResponseFormat, OpenAIResponsesPassthroughSseReader, PassthroughSseCollector,
+    PassthroughSseProtocol, PassthroughSseUsageReader, SseKeepAliveFrame,
+    UpstreamResponseBridgeResult, UpstreamResponseUsage,
 };
 
 const REQUEST_ID_HEADER_CANDIDATES: &[&str] = &["x-request-id", "x-oai-request-id"];
@@ -217,6 +215,408 @@ fn body_looks_like_cloudflare_challenge(status_code: u16, body: &[u8]) -> bool {
     })
 }
 
+fn anthropic_usage_from_responses(value: &Value) -> Value {
+    let usage = value.get("usage").cloned().unwrap_or(Value::Null);
+    let input_tokens = usage
+        .get("input_tokens")
+        .and_then(Value::as_i64)
+        .unwrap_or_default();
+    let output_tokens = usage
+        .get("output_tokens")
+        .and_then(Value::as_i64)
+        .unwrap_or_default();
+    let cache_read_input_tokens = usage
+        .get("input_tokens_details")
+        .and_then(Value::as_object)
+        .and_then(|details| details.get("cached_tokens"))
+        .and_then(Value::as_i64);
+    let reasoning_output_tokens = usage
+        .get("output_tokens_details")
+        .and_then(Value::as_object)
+        .and_then(|details| details.get("reasoning_tokens"))
+        .and_then(Value::as_i64);
+
+    let mut obj = serde_json::Map::new();
+    obj.insert("input_tokens".to_string(), Value::from(input_tokens));
+    obj.insert("output_tokens".to_string(), Value::from(output_tokens));
+    if let Some(value) = cache_read_input_tokens {
+        obj.insert("cache_read_input_tokens".to_string(), Value::from(value));
+    }
+    if let Some(value) = reasoning_output_tokens {
+        obj.insert("reasoning_output_tokens".to_string(), Value::from(value));
+    }
+    Value::Object(obj)
+}
+
+fn gemini_usage_from_responses(value: &Value) -> Value {
+    let usage = value.get("usage").cloned().unwrap_or(Value::Null);
+    let prompt = usage
+        .get("input_tokens")
+        .and_then(Value::as_i64)
+        .unwrap_or_default();
+    let candidates = usage
+        .get("output_tokens")
+        .and_then(Value::as_i64)
+        .unwrap_or_default();
+    let total = usage
+        .get("total_tokens")
+        .and_then(Value::as_i64)
+        .unwrap_or(prompt + candidates);
+    let cached = usage
+        .get("input_tokens_details")
+        .and_then(Value::as_object)
+        .and_then(|details| details.get("cached_tokens"))
+        .and_then(Value::as_i64);
+    let reasoning = usage
+        .get("output_tokens_details")
+        .and_then(Value::as_object)
+        .and_then(|details| details.get("reasoning_tokens"))
+        .and_then(Value::as_i64);
+    let mut obj = serde_json::Map::new();
+    obj.insert("promptTokenCount".to_string(), Value::from(prompt));
+    obj.insert("candidatesTokenCount".to_string(), Value::from(candidates));
+    obj.insert("totalTokenCount".to_string(), Value::from(total));
+    if let Some(value) = cached {
+        obj.insert("cachedContentTokenCount".to_string(), Value::from(value));
+    }
+    if let Some(value) = reasoning {
+        obj.insert("thoughtsTokenCount".to_string(), Value::from(value));
+    }
+    Value::Object(obj)
+}
+
+fn restore_tool_name(name: &str, tool_name_restore_map: Option<&ToolNameRestoreMap>) -> String {
+    tool_name_restore_map
+        .and_then(|map| map.get(name))
+        .cloned()
+        .unwrap_or_else(|| name.to_string())
+}
+
+fn convert_responses_body_to_anthropic_messages(
+    body: &[u8],
+    tool_name_restore_map: Option<&ToolNameRestoreMap>,
+) -> Option<Vec<u8>> {
+    let value = serde_json::from_slice::<Value>(body).ok()?;
+    let response_id = value
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("msg_codexmanager");
+    let model = value.get("model").and_then(Value::as_str).unwrap_or("");
+    let mut content = Vec::new();
+    let mut stop_reason = "end_turn";
+    if let Some(output_items) = value.get("output").and_then(Value::as_array) {
+        for item in output_items {
+            let Some(item_obj) = item.as_object() else {
+                continue;
+            };
+            match item_obj
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+            {
+                "reasoning" => {
+                    let thinking = item_obj
+                        .get("summary")
+                        .and_then(Value::as_array)
+                        .map(|parts| {
+                            parts
+                                .iter()
+                                .filter_map(|part| part.get("text").and_then(Value::as_str))
+                                .collect::<String>()
+                        })
+                        .filter(|text| !text.trim().is_empty())
+                        .or_else(|| {
+                            item_obj
+                                .get("content")
+                                .and_then(Value::as_str)
+                                .map(str::to_string)
+                        })
+                        .unwrap_or_default();
+                    if !thinking.trim().is_empty() {
+                        let mut block = json!({
+                            "type": "thinking",
+                            "thinking": thinking,
+                        });
+                        if let Some(signature) = item_obj
+                            .get("encrypted_content")
+                            .and_then(Value::as_str)
+                            .filter(|value| !value.trim().is_empty())
+                        {
+                            block["signature"] = Value::String(signature.to_string());
+                        }
+                        content.push(block);
+                    }
+                }
+                "message" => {
+                    if let Some(parts) = item_obj.get("content").and_then(Value::as_array) {
+                        for part in parts {
+                            if matches!(
+                                part.get("type").and_then(Value::as_str),
+                                Some("output_text" | "text")
+                            ) {
+                                if let Some(text) = part.get("text").and_then(Value::as_str) {
+                                    if !text.trim().is_empty() {
+                                        content.push(json!({
+                                            "type": "text",
+                                            "text": text,
+                                        }));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                "function_call" | "custom_tool_call" => {
+                    stop_reason = "tool_use";
+                    content.push(json!({
+                        "type": "tool_use",
+                        "id": item_obj
+                            .get("call_id")
+                            .or_else(|| item_obj.get("id"))
+                            .and_then(Value::as_str)
+                            .unwrap_or("toolu_unknown"),
+                        "name": item_obj
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .map(|name| restore_tool_name(name, tool_name_restore_map))
+                            .unwrap_or_else(|| "tool".to_string()),
+                        "input": parse_json_string_or_value(
+                            item_obj.get("arguments").or_else(|| item_obj.get("input"))
+                        ),
+                    }));
+                }
+                _ => {}
+            }
+        }
+    }
+    let payload = json!({
+        "id": response_id,
+        "type": "message",
+        "role": "assistant",
+        "model": model,
+        "content": content,
+        "stop_reason": stop_reason,
+        "stop_sequence": Value::Null,
+        "usage": anthropic_usage_from_responses(&value),
+    });
+    serde_json::to_vec(&payload).ok()
+}
+
+fn convert_responses_body_to_gemini_generate_content(
+    body: &[u8],
+    wrap_response_envelope: bool,
+    tool_name_restore_map: Option<&ToolNameRestoreMap>,
+) -> Option<Vec<u8>> {
+    let value = serde_json::from_slice::<Value>(body).ok()?;
+    let mut parts = Vec::new();
+    if let Some(output_items) = value.get("output").and_then(Value::as_array) {
+        for item in output_items {
+            let Some(item_obj) = item.as_object() else {
+                continue;
+            };
+            match item_obj
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+            {
+                "reasoning" => {
+                    let thinking = item_obj
+                        .get("summary")
+                        .and_then(Value::as_array)
+                        .map(|items| {
+                            items
+                                .iter()
+                                .filter_map(|part| part.get("text").and_then(Value::as_str))
+                                .collect::<String>()
+                        })
+                        .filter(|text| !text.trim().is_empty());
+                    if let Some(text) = thinking {
+                        parts.push(json!({ "text": text, "thought": true }));
+                    }
+                }
+                "message" => {
+                    if let Some(content_items) = item_obj.get("content").and_then(Value::as_array) {
+                        for content_item in content_items {
+                            if matches!(
+                                content_item.get("type").and_then(Value::as_str),
+                                Some("output_text" | "text")
+                            ) {
+                                if let Some(text) = content_item.get("text").and_then(Value::as_str)
+                                {
+                                    if !text.trim().is_empty() {
+                                        parts.push(json!({ "text": text }));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                "function_call" | "custom_tool_call" => {
+                    let mut function_call = Map::new();
+                    function_call.insert(
+                        "name".to_string(),
+                        Value::String(
+                            item_obj
+                                .get("name")
+                                .and_then(Value::as_str)
+                                .map(|name| restore_tool_name(name, tool_name_restore_map))
+                                .unwrap_or_else(|| "tool".to_string()),
+                        ),
+                    );
+                    function_call.insert(
+                        "args".to_string(),
+                        parse_json_string_or_value(
+                            item_obj.get("arguments").or_else(|| item_obj.get("input")),
+                        ),
+                    );
+                    let id_key = if item_obj.get("type").and_then(Value::as_str)
+                        == Some("custom_tool_call")
+                    {
+                        "id"
+                    } else {
+                        "call_id"
+                    };
+                    if let Some(call_id) = item_obj
+                        .get(id_key)
+                        .or_else(|| item_obj.get("call_id"))
+                        .or_else(|| item_obj.get("id"))
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|current| !current.is_empty())
+                    {
+                        function_call.insert("id".to_string(), Value::String(call_id.to_string()));
+                    }
+                    parts.push(json!({ "functionCall": Value::Object(function_call) }));
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut payload = json!({
+        "candidates": [{
+            "content": {
+                "role": "model",
+                "parts": parts,
+            },
+            "finishReason": "STOP",
+            "index": 0,
+        }],
+        "usageMetadata": gemini_usage_from_responses(&value),
+    });
+    if let Some(model) = value.get("model").and_then(Value::as_str) {
+        payload["modelVersion"] = Value::String(model.to_string());
+    }
+    if let Some(response_id) = value.get("id").and_then(Value::as_str) {
+        payload["responseId"] = Value::String(response_id.to_string());
+    }
+    if let Some(create_time) = value
+        .get("created_at")
+        .and_then(Value::as_i64)
+        .and_then(format_unix_timestamp_rfc3339)
+    {
+        payload["createTime"] = Value::String(create_time);
+    }
+    if let Some(function_calls) = build_gemini_function_calls(&parts) {
+        payload["functionCalls"] = function_calls;
+    }
+    let body = if wrap_response_envelope {
+        json!({ "response": payload })
+    } else {
+        payload
+    };
+    serde_json::to_vec(&body).ok()
+}
+
+fn build_gemini_function_calls(parts: &[Value]) -> Option<Value> {
+    let mut function_calls = Vec::new();
+    for part in parts {
+        let Some(function_call) = part.get("functionCall").and_then(Value::as_object) else {
+            continue;
+        };
+        let Some(name) = function_call
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|current| !current.is_empty())
+        else {
+            continue;
+        };
+        let mut item = Map::new();
+        item.insert("name".to_string(), Value::String(name.to_string()));
+        item.insert(
+            "args".to_string(),
+            function_call
+                .get("args")
+                .cloned()
+                .unwrap_or_else(|| json!({})),
+        );
+        if let Some(call_id) = function_call
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|current| !current.is_empty())
+        {
+            item.insert("id".to_string(), Value::String(call_id.to_string()));
+        }
+        function_calls.push(Value::Object(item));
+    }
+    (!function_calls.is_empty()).then(|| Value::Array(function_calls))
+}
+
+fn format_unix_timestamp_rfc3339(seconds: i64) -> Option<String> {
+    chrono::DateTime::<chrono::Utc>::from_timestamp(seconds, 0).map(|value| value.to_rfc3339())
+}
+
+fn parse_json_string_or_value(value: Option<&Value>) -> Value {
+    match value {
+        Some(Value::String(text)) => {
+            parse_json_string_lenient(text).unwrap_or_else(|| Value::String(text.clone()))
+        }
+        Some(other) => other.clone(),
+        None => json!({}),
+    }
+}
+
+fn parse_json_string_lenient(raw: &str) -> Option<Value> {
+    let mut current = raw.trim().to_string();
+    for _ in 0..3 {
+        let parsed = serde_json::from_str::<Value>(&current).ok()?;
+        if let Value::String(inner) = parsed {
+            let trimmed = inner.trim();
+            if trimmed.is_empty() || trimmed == current {
+                return Some(Value::String(inner));
+            }
+            current = trimmed.to_string();
+        } else {
+            return Some(parsed);
+        }
+    }
+    None
+}
+
+fn convert_upstream_error_to_anthropic_body(message: &str) -> Vec<u8> {
+    serde_json::to_vec(&json!({
+        "type": "error",
+        "error": {
+            "type": "api_error",
+            "message": message,
+        }
+    }))
+    .unwrap_or_else(|_| {
+        b"{\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"unknown error\"}}"
+            .to_vec()
+    })
+}
+
+fn convert_upstream_error_to_gemini_body(message: &str) -> Vec<u8> {
+    crate::gateway::build_gemini_error_body(message)
+}
+
+fn extract_error_message_from_json_bytes(body: &[u8]) -> Option<String> {
+    let value = serde_json::from_slice::<Value>(body).ok()?;
+    extract_error_message_from_json(&value)
+}
+
 fn replace_content_type_header(headers: &mut Vec<Header>, content_type: &str) {
     headers.retain(|header| {
         !header
@@ -238,6 +638,301 @@ fn force_openai_responses_stream_content_type(
     if is_stream && request_path.starts_with("/v1/responses") {
         replace_content_type_header(headers, "text/event-stream");
     }
+}
+
+fn convert_success_body_for_adapter(
+    response_adapter: ResponseAdapter,
+    body: &[u8],
+    _request_path: &str,
+    tool_name_restore_map: Option<&ToolNameRestoreMap>,
+) -> Option<Vec<u8>> {
+    match response_adapter {
+        ResponseAdapter::AnthropicMessagesFromResponses => {
+            convert_responses_body_to_anthropic_messages(body, tool_name_restore_map)
+        }
+        ResponseAdapter::ChatCompletionsFromResponses => {
+            convert_responses_body_to_chat_completions(body)
+        }
+        ResponseAdapter::ImagesB64JsonFromResponses => {
+            convert_responses_body_to_images(body, ImagesResponseFormat::B64Json)
+        }
+        ResponseAdapter::ImagesUrlFromResponses => {
+            convert_responses_body_to_images(body, ImagesResponseFormat::Url)
+        }
+        ResponseAdapter::GeminiJson => {
+            convert_responses_body_to_gemini_generate_content(body, false, tool_name_restore_map)
+        }
+        ResponseAdapter::GeminiCliJson => {
+            convert_responses_body_to_gemini_generate_content(body, true, tool_name_restore_map)
+        }
+        ResponseAdapter::GeminiSse | ResponseAdapter::GeminiCliSse => None,
+        ResponseAdapter::Passthrough => None,
+    }
+}
+
+fn collect_chat_output_text(value: &Value, out: &mut String) {
+    match value {
+        Value::String(text) => out.push_str(text),
+        Value::Array(items) => {
+            for item in items {
+                collect_chat_output_text(item, out);
+            }
+        }
+        Value::Object(obj) => {
+            if let Some(text) = obj.get("text").and_then(Value::as_str) {
+                out.push_str(text);
+            }
+            if let Some(content) = obj.get("content") {
+                collect_chat_output_text(content, out);
+            }
+            if let Some(output) = obj.get("output") {
+                collect_chat_output_text(output, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn responses_usage_to_chat_usage(usage: &Value) -> Value {
+    let prompt_tokens = usage
+        .get("prompt_tokens")
+        .or_else(|| usage.get("input_tokens"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let completion_tokens = usage
+        .get("completion_tokens")
+        .or_else(|| usage.get("output_tokens"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let total_tokens = usage
+        .get("total_tokens")
+        .and_then(Value::as_i64)
+        .unwrap_or(prompt_tokens + completion_tokens);
+    let mut mapped = json!({
+        "prompt_tokens": prompt_tokens.max(0),
+        "completion_tokens": completion_tokens.max(0),
+        "total_tokens": total_tokens.max(0)
+    });
+    if let Some(details) = usage
+        .get("prompt_tokens_details")
+        .or_else(|| usage.get("input_tokens_details"))
+    {
+        mapped["prompt_tokens_details"] = details.clone();
+    }
+    if let Some(details) = usage
+        .get("completion_tokens_details")
+        .or_else(|| usage.get("output_tokens_details"))
+    {
+        mapped["completion_tokens_details"] = details.clone();
+    }
+    mapped
+}
+
+fn convert_responses_body_to_chat_completions(body: &[u8]) -> Option<Vec<u8>> {
+    let value = serde_json::from_slice::<Value>(body).ok()?;
+    let response = value.get("response").unwrap_or(&value);
+    let mut text = String::new();
+    if let Some(output_text) = response.get("output_text").and_then(Value::as_str) {
+        text.push_str(output_text);
+    }
+    if text.is_empty() {
+        if let Some(output) = response.get("output") {
+            collect_chat_output_text(output, &mut text);
+        }
+    }
+    let id = response
+        .get("id")
+        .or_else(|| value.get("id"))
+        .and_then(Value::as_str)
+        .unwrap_or("chatcmpl_codexmanager");
+    let model = response
+        .get("model")
+        .or_else(|| value.get("model"))
+        .and_then(Value::as_str)
+        .unwrap_or("gpt-5.4");
+    let created = response
+        .get("created_at")
+        .or_else(|| response.get("created"))
+        .or_else(|| value.get("created_at"))
+        .or_else(|| value.get("created"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let usage = response
+        .get("usage")
+        .or_else(|| value.get("usage"))
+        .map(responses_usage_to_chat_usage);
+    let mut completion = json!({
+        "id": id,
+        "object": "chat.completion",
+        "created": created,
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": text
+            },
+            "finish_reason": "stop"
+        }]
+    });
+    if let Some(usage) = usage {
+        completion["usage"] = usage;
+    }
+    let images = collect_image_generation_chat_images(response);
+    if !images.is_empty() {
+        completion["choices"][0]["message"]["images"] = Value::Array(images);
+    }
+    serde_json::to_vec(&completion).ok()
+}
+
+fn convert_responses_body_to_images(
+    body: &[u8],
+    response_format: ImagesResponseFormat,
+) -> Option<Vec<u8>> {
+    let value = serde_json::from_slice::<Value>(body).ok()?;
+    let response = value.get("response").unwrap_or(&value);
+    serde_json::to_vec(&build_images_api_response(response, response_format)).ok()
+}
+
+fn images_response_body_to_sse(body: &[u8], response_format: ImagesResponseFormat) -> Vec<u8> {
+    let value = serde_json::from_slice::<Value>(body).unwrap_or_else(|_| json!({}));
+    let response = value.get("response").unwrap_or(&value);
+    let api_response = build_images_api_response(response, response_format);
+    let mut out = Vec::new();
+    if let Some(items) = api_response.get("data").and_then(Value::as_array) {
+        for item in items {
+            let mut payload = item.clone();
+            if let Some(payload_obj) = payload.as_object_mut() {
+                payload_obj.insert(
+                    "type".to_string(),
+                    Value::String("image_generation.completed".to_string()),
+                );
+                if let Some(usage) = api_response.get("usage") {
+                    payload_obj.insert("usage".to_string(), usage.clone());
+                }
+            }
+            out.extend_from_slice(
+                format!(
+                    "event: image_generation.completed\ndata: {}\n\n",
+                    serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())
+                )
+                .as_bytes(),
+            );
+        }
+    }
+    out
+}
+
+fn chat_completion_body_to_single_sse(body: &[u8]) -> Vec<u8> {
+    let value = serde_json::from_slice::<Value>(body).unwrap_or_else(|_| json!({}));
+    let id = value
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("chatcmpl_codexmanager");
+    let model = value
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or("gpt-5.4");
+    let created = value.get("created").and_then(Value::as_i64).unwrap_or(0);
+    let content = value
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let usage = value.get("usage").cloned();
+    let chunk = json!({
+        "id": id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "delta": { "content": content },
+            "finish_reason": null
+        }]
+    });
+    let mut final_chunk = json!({
+        "id": id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "delta": {},
+            "finish_reason": "stop"
+        }]
+    });
+    if let Some(usage) = usage {
+        final_chunk["usage"] = usage;
+    }
+    format!(
+        "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+        serde_json::to_string(&chunk).unwrap_or_else(|_| "{}".to_string()),
+        serde_json::to_string(&final_chunk).unwrap_or_else(|_| "{}".to_string())
+    )
+    .into_bytes()
+}
+
+fn convert_error_body_for_adapter(response_adapter: ResponseAdapter, message: &str) -> Vec<u8> {
+    match response_adapter {
+        ResponseAdapter::AnthropicMessagesFromResponses => {
+            convert_upstream_error_to_anthropic_body(message)
+        }
+        ResponseAdapter::ChatCompletionsFromResponses => serde_json::to_vec(&json!({
+            "error": {
+                "message": message,
+                "type": "upstream_error",
+                "code": "upstream_error"
+            }
+        }))
+        .unwrap_or_else(|_| message.as_bytes().to_vec()),
+        ResponseAdapter::ImagesB64JsonFromResponses | ResponseAdapter::ImagesUrlFromResponses => {
+            serde_json::to_vec(&json!({
+                "error": {
+                    "message": message,
+                    "type": "upstream_error",
+                    "code": "upstream_error"
+                }
+            }))
+            .unwrap_or_else(|_| message.as_bytes().to_vec())
+        }
+        ResponseAdapter::GeminiJson
+        | ResponseAdapter::GeminiCliJson
+        | ResponseAdapter::GeminiSse
+        | ResponseAdapter::GeminiCliSse => convert_upstream_error_to_gemini_body(message),
+        ResponseAdapter::Passthrough => message.as_bytes().to_vec(),
+    }
+}
+
+fn compatibility_stream_content_type(
+    response_adapter: ResponseAdapter,
+    gemini_stream_output_mode: Option<GeminiStreamOutputMode>,
+) -> &'static str {
+    match response_adapter {
+        ResponseAdapter::AnthropicMessagesFromResponses => "text/event-stream",
+        ResponseAdapter::ChatCompletionsFromResponses => "text/event-stream",
+        ResponseAdapter::ImagesB64JsonFromResponses | ResponseAdapter::ImagesUrlFromResponses => {
+            "text/event-stream"
+        }
+        ResponseAdapter::GeminiJson | ResponseAdapter::GeminiCliJson => "application/json",
+        ResponseAdapter::GeminiSse | ResponseAdapter::GeminiCliSse => {
+            match gemini_stream_output_mode {
+                Some(GeminiStreamOutputMode::Raw) => "application/json",
+                _ => "text/event-stream",
+            }
+        }
+        ResponseAdapter::Passthrough => "text/event-stream",
+    }
+}
+
+fn gemini_cli_wrap_response_envelope(response_adapter: ResponseAdapter) -> bool {
+    matches!(
+        response_adapter,
+        ResponseAdapter::GeminiCliJson | ResponseAdapter::GeminiCliSse
+    )
 }
 
 /// 函数 `classify_compact_invalid_success_kind`
@@ -876,6 +1571,327 @@ pub(crate) fn respond_with_upstream(
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .map(|v| v.to_string());
+    if response_adapter != ResponseAdapter::Passthrough {
+        let status = StatusCode(upstream.status().as_u16());
+        let mut headers = Vec::new();
+        for (name, value) in upstream.headers().iter() {
+            let name_str = name.as_str();
+            if name_str.eq_ignore_ascii_case("transfer-encoding")
+                || name_str.eq_ignore_ascii_case("content-length")
+                || name_str.eq_ignore_ascii_case("connection")
+            {
+                continue;
+            }
+            if let Ok(header) = Header::from_bytes(name_str.as_bytes(), value.as_bytes()) {
+                headers.push(header);
+            }
+        }
+        if let Some(trace_id) = trace_id {
+            push_trace_id_header(&mut headers, trace_id);
+        }
+        let is_sse = upstream_content_type
+            .as_deref()
+            .map(|value| value.to_ascii_lowercase().starts_with("text/event-stream"))
+            .unwrap_or(false);
+        let is_json = upstream_content_type
+            .as_deref()
+            .map(|value| value.to_ascii_lowercase().contains("application/json"))
+            .unwrap_or(false);
+
+        if !is_stream {
+            let upstream_body = upstream
+                .bytes()
+                .map_err(|err| format!("read upstream body failed: {err}"))?;
+            let detected_sse =
+                is_sse || (!is_json && looks_like_sse_payload(upstream_body.as_ref()));
+            let (body, usage) = if detected_sse {
+                let (synthesized, mut usage) =
+                    collect_non_stream_json_from_sse_bytes(upstream_body.as_ref());
+                let body = synthesized.unwrap_or_else(|| upstream_body.to_vec());
+                if let Ok(value) = serde_json::from_slice::<Value>(&body) {
+                    merge_usage(&mut usage, parse_usage_from_json(&value));
+                }
+                (body, usage)
+            } else {
+                let usage = serde_json::from_slice::<Value>(upstream_body.as_ref())
+                    .ok()
+                    .map(|value| parse_usage_from_json(&value))
+                    .unwrap_or_default();
+                (upstream_body.to_vec(), usage)
+            };
+            let response_body = if status.0 >= 400 {
+                let message = with_upstream_debug_suffix(
+                    extract_error_hint_from_body(status.0, &body)
+                        .or_else(|| extract_error_message_from_json_bytes(&body)),
+                    None,
+                    upstream_request_id.as_deref(),
+                    upstream_cf_ray.as_deref(),
+                    upstream_auth_error.as_deref(),
+                    upstream_identity_error_code.as_deref(),
+                )
+                .unwrap_or_else(|| "upstream compatibility bridge failed".to_string());
+                convert_error_body_for_adapter(response_adapter, &message)
+            } else {
+                convert_success_body_for_adapter(
+                    response_adapter,
+                    &body,
+                    request_path,
+                    tool_name_restore_map,
+                )
+                .unwrap_or_else(|| body.clone())
+            };
+            replace_content_type_header(&mut headers, "application/json");
+            let len = Some(response_body.len());
+            let response = Response::new(
+                status,
+                headers,
+                std::io::Cursor::new(response_body),
+                len,
+                None,
+            );
+            let delivery_error = request.respond(response).err().map(|err| err.to_string());
+            return Ok(with_bridge_debug_meta(
+                UpstreamResponseBridgeResult {
+                    usage,
+                    stream_terminal_seen: true,
+                    stream_terminal_error: None,
+                    delivery_error,
+                    upstream_error_hint: None,
+                    delivered_status_code: None,
+                    upstream_request_id: None,
+                    upstream_cf_ray: None,
+                    upstream_auth_error: None,
+                    upstream_identity_error_code: None,
+                    upstream_content_type: None,
+                    last_sse_event_type: None,
+                },
+                &upstream_request_id,
+                &upstream_cf_ray,
+                &upstream_auth_error,
+                &upstream_identity_error_code,
+                &upstream_content_type,
+                None,
+            ));
+        }
+
+        if status.0 >= 400 && !is_sse {
+            let upstream_body = upstream
+                .bytes()
+                .map_err(|err| format!("read upstream body failed: {err}"))?;
+            let message = with_upstream_debug_suffix(
+                extract_error_hint_from_body(status.0, upstream_body.as_ref())
+                    .or_else(|| extract_error_message_from_json_bytes(upstream_body.as_ref())),
+                None,
+                upstream_request_id.as_deref(),
+                upstream_cf_ray.as_deref(),
+                upstream_auth_error.as_deref(),
+                upstream_identity_error_code.as_deref(),
+            )
+            .unwrap_or_else(|| "upstream compatibility bridge failed".to_string());
+            let response_body = convert_error_body_for_adapter(response_adapter, &message);
+            replace_content_type_header(&mut headers, "application/json");
+            let len = Some(response_body.len());
+            let response = Response::new(
+                status,
+                headers,
+                std::io::Cursor::new(response_body),
+                len,
+                None,
+            );
+            let delivery_error = request.respond(response).err().map(|err| err.to_string());
+            return Ok(with_bridge_debug_meta(
+                UpstreamResponseBridgeResult {
+                    usage: UpstreamResponseUsage::default(),
+                    stream_terminal_seen: true,
+                    stream_terminal_error: None,
+                    delivery_error,
+                    upstream_error_hint: Some(message),
+                    delivered_status_code: None,
+                    upstream_request_id: None,
+                    upstream_cf_ray: None,
+                    upstream_auth_error: None,
+                    upstream_identity_error_code: None,
+                    upstream_content_type: None,
+                    last_sse_event_type: None,
+                },
+                &upstream_request_id,
+                &upstream_cf_ray,
+                &upstream_auth_error,
+                &upstream_identity_error_code,
+                &upstream_content_type,
+                None,
+            ));
+        }
+
+        replace_content_type_header(
+            &mut headers,
+            compatibility_stream_content_type(response_adapter, gemini_stream_output_mode),
+        );
+        match response_adapter {
+            ResponseAdapter::AnthropicMessagesFromResponses => {
+                let usage_collector = Arc::new(Mutex::new(UpstreamResponseUsage::default()));
+                let response_body: Box<dyn std::io::Read + Send> =
+                    Box::new(AnthropicSseReader::new(
+                        upstream,
+                        Arc::clone(&usage_collector),
+                        fallback_model,
+                        tool_name_restore_map.cloned(),
+                        request_started_at,
+                    ));
+                let response = Response::new(status, headers, response_body, None, None);
+                let delivery_error = request.respond(response).err().map(|err| err.to_string());
+                let usage = usage_collector
+                    .lock()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
+                return Ok(with_bridge_debug_meta(
+                    UpstreamResponseBridgeResult {
+                        usage,
+                        stream_terminal_seen: true,
+                        stream_terminal_error: None,
+                        delivery_error,
+                        upstream_error_hint: None,
+                        delivered_status_code: None,
+                        upstream_request_id: None,
+                        upstream_cf_ray: None,
+                        upstream_auth_error: None,
+                        upstream_identity_error_code: None,
+                        upstream_content_type: None,
+                        last_sse_event_type: None,
+                    },
+                    &upstream_request_id,
+                    &upstream_cf_ray,
+                    &upstream_auth_error,
+                    &upstream_identity_error_code,
+                    &upstream_content_type,
+                    None,
+                ));
+            }
+            ResponseAdapter::ChatCompletionsFromResponses => {
+                let usage_collector = Arc::new(Mutex::new(PassthroughSseCollector::default()));
+                let response_body: Box<dyn std::io::Read + Send> =
+                    Box::new(ChatCompletionsFromResponsesSseReader::new(
+                        upstream,
+                        Arc::clone(&usage_collector),
+                        request_started_at,
+                    ));
+                let response = Response::new(status, headers, response_body, None, None);
+                let delivery_error = request.respond(response).err().map(|err| err.to_string());
+                let collector = usage_collector
+                    .lock()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
+                return Ok(with_bridge_debug_meta(
+                    UpstreamResponseBridgeResult {
+                        usage: collector.usage,
+                        stream_terminal_seen: collector.saw_terminal,
+                        stream_terminal_error: collector.terminal_error,
+                        delivery_error,
+                        upstream_error_hint: collector.upstream_error_hint,
+                        delivered_status_code: None,
+                        upstream_request_id: None,
+                        upstream_cf_ray: None,
+                        upstream_auth_error: None,
+                        upstream_identity_error_code: None,
+                        upstream_content_type: None,
+                        last_sse_event_type: collector.last_event_type,
+                    },
+                    &upstream_request_id,
+                    &upstream_cf_ray,
+                    &upstream_auth_error,
+                    &upstream_identity_error_code,
+                    &upstream_content_type,
+                    None,
+                ));
+            }
+            ResponseAdapter::ImagesB64JsonFromResponses
+            | ResponseAdapter::ImagesUrlFromResponses => {
+                let response_format = if response_adapter == ResponseAdapter::ImagesUrlFromResponses
+                {
+                    ImagesResponseFormat::Url
+                } else {
+                    ImagesResponseFormat::B64Json
+                };
+                let usage_collector = Arc::new(Mutex::new(PassthroughSseCollector::default()));
+                let response_body: Box<dyn std::io::Read + Send> =
+                    Box::new(ImagesFromResponsesSseReader::new(
+                        upstream,
+                        Arc::clone(&usage_collector),
+                        request_started_at,
+                        response_format,
+                    ));
+                let response = Response::new(status, headers, response_body, None, None);
+                let delivery_error = request.respond(response).err().map(|err| err.to_string());
+                let collector = usage_collector
+                    .lock()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
+                return Ok(with_bridge_debug_meta(
+                    UpstreamResponseBridgeResult {
+                        usage: collector.usage,
+                        stream_terminal_seen: collector.saw_terminal,
+                        stream_terminal_error: collector.terminal_error,
+                        delivery_error,
+                        upstream_error_hint: collector.upstream_error_hint,
+                        delivered_status_code: None,
+                        upstream_request_id: None,
+                        upstream_cf_ray: None,
+                        upstream_auth_error: None,
+                        upstream_identity_error_code: None,
+                        upstream_content_type: None,
+                        last_sse_event_type: collector.last_event_type,
+                    },
+                    &upstream_request_id,
+                    &upstream_cf_ray,
+                    &upstream_auth_error,
+                    &upstream_identity_error_code,
+                    &upstream_content_type,
+                    None,
+                ));
+            }
+            ResponseAdapter::GeminiJson | ResponseAdapter::GeminiCliJson => unreachable!(),
+            ResponseAdapter::GeminiSse | ResponseAdapter::GeminiCliSse => {
+                let usage_collector = Arc::new(Mutex::new(PassthroughSseCollector::default()));
+                let response_body: Box<dyn std::io::Read + Send> = Box::new(GeminiSseReader::new(
+                    upstream,
+                    Arc::clone(&usage_collector),
+                    tool_name_restore_map.cloned(),
+                    gemini_stream_output_mode.unwrap_or(GeminiStreamOutputMode::Sse),
+                    gemini_cli_wrap_response_envelope(response_adapter),
+                    request_started_at,
+                ));
+                let response = Response::new(status, headers, response_body, None, None);
+                let delivery_error = request.respond(response).err().map(|err| err.to_string());
+                let collector = usage_collector
+                    .lock()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
+                return Ok(with_bridge_debug_meta(
+                    UpstreamResponseBridgeResult {
+                        usage: collector.usage,
+                        stream_terminal_seen: collector.saw_terminal,
+                        stream_terminal_error: collector.terminal_error,
+                        delivery_error,
+                        upstream_error_hint: collector.upstream_error_hint,
+                        delivered_status_code: None,
+                        upstream_request_id: None,
+                        upstream_cf_ray: None,
+                        upstream_auth_error: None,
+                        upstream_identity_error_code: None,
+                        upstream_content_type: None,
+                        last_sse_event_type: collector.last_event_type,
+                    },
+                    &upstream_request_id,
+                    &upstream_cf_ray,
+                    &upstream_auth_error,
+                    &upstream_identity_error_code,
+                    &upstream_content_type,
+                    None,
+                ));
+            }
+            ResponseAdapter::Passthrough => {}
+        }
+    }
     match response_adapter {
         ResponseAdapter::Passthrough => {
             let status = StatusCode(upstream.status().as_u16());
@@ -1346,238 +2362,131 @@ pub(crate) fn respond_with_upstream(
                 None,
             ))
         }
-        ResponseAdapter::OpenAIChatCompletionsJson
-        | ResponseAdapter::OpenAIChatCompletionsSse
-        | ResponseAdapter::OpenAICompletionsJson
-        | ResponseAdapter::OpenAICompletionsSse => {
-            let status = StatusCode(upstream.status().as_u16());
-            let mut headers = Vec::new();
-            for (name, value) in upstream.headers().iter() {
-                let name_str = name.as_str();
-                if name_str.eq_ignore_ascii_case("transfer-encoding")
-                    || name_str.eq_ignore_ascii_case("content-length")
-                    || name_str.eq_ignore_ascii_case("connection")
-                    || name_str.eq_ignore_ascii_case("content-type")
-                {
-                    continue;
-                }
-                if let Ok(header) = Header::from_bytes(name_str.as_bytes(), value.as_bytes()) {
-                    headers.push(header);
-                }
-            }
-            if let Some(trace_id) = trace_id {
-                push_trace_id_header(&mut headers, trace_id);
-            }
-            let is_sse = upstream_content_type
-                .as_deref()
-                .map(|value| value.to_ascii_lowercase().starts_with("text/event-stream"))
-                .unwrap_or(false);
-            let use_openai_sse_adapter = matches!(
-                response_adapter,
-                ResponseAdapter::OpenAIChatCompletionsSse | ResponseAdapter::OpenAICompletionsSse
-            );
+        ResponseAdapter::AnthropicMessagesFromResponses
+        | ResponseAdapter::ChatCompletionsFromResponses
+        | ResponseAdapter::ImagesB64JsonFromResponses
+        | ResponseAdapter::ImagesUrlFromResponses
+        | ResponseAdapter::GeminiJson
+        | ResponseAdapter::GeminiCliJson
+        | ResponseAdapter::GeminiSse
+        | ResponseAdapter::GeminiCliSse => unreachable!(),
+    }
+}
 
-            if use_openai_sse_adapter && is_stream && !is_sse {
-                log::warn!(
-                    "event=gateway_openai_stream_content_type_mismatch adapter={:?} upstream_content_type={}",
-                    response_adapter,
-                    upstream_content_type
-                        .as_deref()
-                        .filter(|value| !value.trim().is_empty())
-                        .unwrap_or("-")
-                );
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn respond_with_stream_upstream(
+    request: Request,
+    upstream: GatewayStreamResponse,
+    _inflight_guard: super::super::AccountInFlightGuard,
+    response_adapter: ResponseAdapter,
+    _passthrough_sse_protocol: Option<PassthroughSseProtocol>,
+    gemini_stream_output_mode: Option<GeminiStreamOutputMode>,
+    request_path: &str,
+    tool_name_restore_map: Option<&ToolNameRestoreMap>,
+    is_stream: bool,
+    _allow_failover_for_deactivation: bool,
+    trace_id: Option<&str>,
+    fallback_model: Option<&str>,
+    request_started_at: std::time::Instant,
+) -> Result<UpstreamResponseBridgeResult, String> {
+    let keepalive_frame = resolve_stream_keepalive_frame(response_adapter, request_path);
+    let upstream_request_id =
+        first_upstream_header(upstream.headers(), REQUEST_ID_HEADER_CANDIDATES);
+    let upstream_cf_ray = first_upstream_header(upstream.headers(), &[CF_RAY_HEADER_NAME]);
+    let upstream_auth_error = first_upstream_header(upstream.headers(), &[AUTH_ERROR_HEADER_NAME]);
+    let upstream_identity_error_code =
+        crate::gateway::extract_identity_error_code_from_headers(upstream.headers());
+    let upstream_content_type = upstream
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.to_string());
+    if response_adapter != ResponseAdapter::Passthrough {
+        let status = StatusCode(upstream.status().as_u16());
+        let mut headers = Vec::new();
+        for (name, value) in upstream.headers().iter() {
+            let name_str = name.as_str();
+            if name_str.eq_ignore_ascii_case("transfer-encoding")
+                || name_str.eq_ignore_ascii_case("content-length")
+                || name_str.eq_ignore_ascii_case("connection")
+            {
+                continue;
             }
-
-            if use_openai_sse_adapter && (is_stream || is_sse) && is_sse {
-                if let Ok(content_type_header) =
-                    Header::from_bytes(b"Content-Type".as_slice(), b"text/event-stream".as_slice())
-                {
-                    headers.push(content_type_header);
-                }
-                let usage_collector = Arc::new(Mutex::new(PassthroughSseCollector::default()));
-                let delivery_error =
-                    if response_adapter == ResponseAdapter::OpenAIChatCompletionsSse {
-                        let response = Response::new(
-                            status,
-                            headers,
-                            OpenAIChatCompletionsSseReader::new(
-                                upstream,
-                                Arc::clone(&usage_collector),
-                                tool_name_restore_map.cloned(),
-                                request_started_at,
-                            ),
-                            None,
-                            None,
-                        );
-                        request.respond(response).err().map(|err| err.to_string())
-                    } else {
-                        let response = Response::new(
-                            status,
-                            headers,
-                            OpenAICompletionsSseReader::new(
-                                upstream,
-                                Arc::clone(&usage_collector),
-                                request_started_at,
-                            ),
-                            None,
-                            None,
-                        );
-                        request.respond(response).err().map(|err| err.to_string())
-                    };
-                let collector = usage_collector
-                    .lock()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                let last_sse_event_type = collector.last_event_type.clone();
-                let output_text_empty = collector
-                    .usage
-                    .output_text
-                    .as_deref()
-                    .map(str::trim)
-                    .is_none_or(str::is_empty);
-                if output_text_empty {
-                    log::warn!(
-                        "event=gateway_openai_stream_empty_output adapter={:?} terminal_seen={} terminal_error={} output_tokens={:?}",
-                        response_adapter,
-                        collector.saw_terminal,
-                        collector.terminal_error.as_deref().unwrap_or("-"),
-                        collector.usage.output_tokens
-                    );
-                }
-                let result = with_bridge_debug_meta(
-                    UpstreamResponseBridgeResult {
-                        usage: collector.usage,
-                        stream_terminal_seen: collector.saw_terminal,
-                        stream_terminal_error: collector.terminal_error,
-                        delivery_error,
-                        upstream_error_hint: None,
-                        delivered_status_code: None,
-                        upstream_request_id: None,
-                        upstream_cf_ray: None,
-                        upstream_auth_error: None,
-                        upstream_identity_error_code: None,
-                        upstream_content_type: None,
-                        last_sse_event_type: None,
-                    },
-                    &upstream_request_id,
-                    &upstream_cf_ray,
-                    &upstream_auth_error,
-                    &upstream_identity_error_code,
-                    &upstream_content_type,
-                    last_sse_event_type,
-                );
-                log_bridge_stream_diagnostics(response_adapter, request_path, &result);
-                return Ok(result);
+            if let Ok(header) = Header::from_bytes(name_str.as_bytes(), value.as_bytes()) {
+                headers.push(header);
             }
+        }
+        if let Some(trace_id) = trace_id {
+            push_trace_id_header(&mut headers, trace_id);
+        }
+        let is_sse = upstream_content_type
+            .as_deref()
+            .map(|value| value.to_ascii_lowercase().starts_with("text/event-stream"))
+            .unwrap_or(false);
+        let is_json = upstream_content_type
+            .as_deref()
+            .map(|value| value.to_ascii_lowercase().contains("application/json"))
+            .unwrap_or(false);
 
+        if !is_stream {
             let upstream_body = upstream
-                .bytes()
+                .read_all_bytes()
                 .map_err(|err| format!("read upstream body failed: {err}"))?;
-            let mut usage = if is_sse {
-                let (_, parsed) = collect_non_stream_json_from_sse_bytes(upstream_body.as_ref());
-                parsed
-            } else {
-                UpstreamResponseUsage::default()
-            };
-            if let Ok(value) = serde_json::from_slice::<Value>(upstream_body.as_ref()) {
-                merge_usage(&mut usage, parse_usage_from_json(&value));
-            }
-            let (mut body, mut content_type) =
-                match adapt_upstream_response_with_tool_name_restore_map(
-                    response_adapter,
-                    upstream_content_type.as_deref(),
-                    upstream_body.as_ref(),
-                    tool_name_restore_map,
-                ) {
-                    Ok(result) => result,
-                    Err(err) => (
-                        serde_json::to_vec(&json!({
-                            "error": {
-                                "message": format!("response conversion failed: {err}"),
-                                "type": "server_error"
-                            }
-                        }))
-                        .unwrap_or_else(|_| {
-                            b"{\"error\":{\"message\":\"response conversion failed\",\"type\":\"server_error\"}}"
-                                .to_vec()
-                        }),
-                        "application/json",
-                    ),
-                };
-            if use_openai_sse_adapter
-                && is_stream
-                && status.0 < 400
-                && !content_type.eq_ignore_ascii_case("text/event-stream")
-            {
-                if let Ok(mapped_json) = serde_json::from_slice::<Value>(body.as_ref()) {
-                    merge_usage(&mut usage, parse_usage_from_json(&mapped_json));
-                    body = if response_adapter == ResponseAdapter::OpenAIChatCompletionsSse {
-                        super::synthesize_chat_completion_sse_from_json(&mapped_json)
-                    } else {
-                        super::synthesize_completions_sse_from_json(&mapped_json)
-                    };
-                    content_type = "text/event-stream";
-                    log::warn!(
-                        "event=gateway_openai_stream_synthetic_sse adapter={:?} status={} upstream_content_type={}",
-                        response_adapter,
-                        status.0,
-                        upstream_content_type
-                            .as_deref()
-                            .filter(|value| !value.trim().is_empty())
-                            .unwrap_or("-")
-                    );
+            let detected_sse =
+                is_sse || (!is_json && looks_like_sse_payload(upstream_body.as_ref()));
+            let (body, usage) = if detected_sse {
+                let (synthesized, mut usage) =
+                    collect_non_stream_json_from_sse_bytes(upstream_body.as_ref());
+                let body = synthesized.unwrap_or_else(|| upstream_body.to_vec());
+                if let Ok(value) = serde_json::from_slice::<Value>(&body) {
+                    merge_usage(&mut usage, parse_usage_from_json(&value));
                 }
-            }
-            if let Ok(content_type_header) =
-                Header::from_bytes(b"Content-Type".as_slice(), content_type.as_bytes())
-            {
-                headers.push(content_type_header);
-            }
-            let upstream_error_hint = with_upstream_debug_suffix(
-                extract_error_hint_from_body(status.0, upstream_body.as_ref()),
-                None,
-                upstream_request_id.as_deref(),
-                upstream_cf_ray.as_deref(),
-                upstream_auth_error.as_deref(),
-                upstream_identity_error_code.as_deref(),
-            );
-            if should_suppress_deactivation_delivery(
-                upstream_error_hint.as_deref(),
-                allow_failover_for_deactivation,
-            ) {
-                return Ok(with_bridge_debug_meta(
-                    UpstreamResponseBridgeResult {
-                        usage,
-                        stream_terminal_seen: true,
-                        stream_terminal_error: None,
-                        delivery_error: None,
-                        upstream_error_hint,
-                        delivered_status_code: None,
-                        upstream_request_id: None,
-                        upstream_cf_ray: None,
-                        upstream_auth_error: None,
-                        upstream_identity_error_code: None,
-                        upstream_content_type: None,
-                        last_sse_event_type: None,
-                    },
-                    &upstream_request_id,
-                    &upstream_cf_ray,
-                    &upstream_auth_error,
-                    &upstream_identity_error_code,
-                    &upstream_content_type,
+                (body, usage)
+            } else {
+                let usage = serde_json::from_slice::<Value>(upstream_body.as_ref())
+                    .ok()
+                    .map(|value| parse_usage_from_json(&value))
+                    .unwrap_or_default();
+                (upstream_body.to_vec(), usage)
+            };
+            let response_body = if status.0 >= 400 {
+                let message = with_upstream_debug_suffix(
+                    extract_error_hint_from_body(status.0, &body)
+                        .or_else(|| extract_error_message_from_json_bytes(&body)),
                     None,
-                ));
-            }
-            let len = Some(body.len());
-            let response = Response::new(status, headers, std::io::Cursor::new(body), len, None);
+                    upstream_request_id.as_deref(),
+                    upstream_cf_ray.as_deref(),
+                    upstream_auth_error.as_deref(),
+                    upstream_identity_error_code.as_deref(),
+                )
+                .unwrap_or_else(|| "upstream compatibility bridge failed".to_string());
+                convert_error_body_for_adapter(response_adapter, &message)
+            } else {
+                convert_success_body_for_adapter(
+                    response_adapter,
+                    &body,
+                    request_path,
+                    tool_name_restore_map,
+                )
+                .unwrap_or_else(|| body.clone())
+            };
+            replace_content_type_header(&mut headers, "application/json");
+            let len = Some(response_body.len());
+            let response = Response::new(
+                status,
+                headers,
+                std::io::Cursor::new(response_body),
+                len,
+                None,
+            );
             let delivery_error = request.respond(response).err().map(|err| err.to_string());
-            Ok(with_bridge_debug_meta(
+            return Ok(with_bridge_debug_meta(
                 UpstreamResponseBridgeResult {
                     usage,
                     stream_terminal_seen: true,
                     stream_terminal_error: None,
                     delivery_error,
-                    upstream_error_hint,
+                    upstream_error_hint: None,
                     delivered_status_code: None,
                     upstream_request_id: None,
                     upstream_cf_ray: None,
@@ -1592,57 +2501,77 @@ pub(crate) fn respond_with_upstream(
                 &upstream_identity_error_code,
                 &upstream_content_type,
                 None,
-            ))
+            ));
         }
-        ResponseAdapter::AnthropicJson
-        | ResponseAdapter::AnthropicSse
-        | ResponseAdapter::GeminiJson
-        | ResponseAdapter::GeminiSse
-        | ResponseAdapter::GeminiCliJson
-        | ResponseAdapter::GeminiCliSse => {
-            let status = StatusCode(upstream.status().as_u16());
-            let mut headers = Vec::new();
-            for (name, value) in upstream.headers().iter() {
-                let name_str = name.as_str();
-                if name_str.eq_ignore_ascii_case("transfer-encoding")
-                    || name_str.eq_ignore_ascii_case("content-length")
-                    || name_str.eq_ignore_ascii_case("connection")
-                    || name_str.eq_ignore_ascii_case("content-type")
-                {
-                    continue;
-                }
-                if let Ok(header) = Header::from_bytes(name_str.as_bytes(), value.as_bytes()) {
-                    headers.push(header);
-                }
-            }
-            if let Some(trace_id) = trace_id {
-                push_trace_id_header(&mut headers, trace_id);
-            }
-            if response_adapter == ResponseAdapter::AnthropicSse
-                && (is_stream
-                    || upstream_content_type
-                        .as_deref()
-                        .map(|value| value.to_ascii_lowercase().starts_with("text/event-stream"))
-                        .unwrap_or(false))
-            {
-                if let Ok(content_type_header) =
-                    Header::from_bytes(b"Content-Type".as_slice(), b"text/event-stream".as_slice())
-                {
-                    headers.push(content_type_header);
-                }
+
+        if status.0 >= 400 && !is_sse {
+            let upstream_body = upstream
+                .read_all_bytes()
+                .map_err(|err| format!("read upstream body failed: {err}"))?;
+            let message = with_upstream_debug_suffix(
+                extract_error_hint_from_body(status.0, upstream_body.as_ref())
+                    .or_else(|| extract_error_message_from_json_bytes(upstream_body.as_ref())),
+                None,
+                upstream_request_id.as_deref(),
+                upstream_cf_ray.as_deref(),
+                upstream_auth_error.as_deref(),
+                upstream_identity_error_code.as_deref(),
+            )
+            .unwrap_or_else(|| "upstream compatibility bridge failed".to_string());
+            let response_body = convert_error_body_for_adapter(response_adapter, &message);
+            replace_content_type_header(&mut headers, "application/json");
+            let len = Some(response_body.len());
+            let response = Response::new(
+                status,
+                headers,
+                std::io::Cursor::new(response_body),
+                len,
+                None,
+            );
+            let delivery_error = request.respond(response).err().map(|err| err.to_string());
+            return Ok(with_bridge_debug_meta(
+                UpstreamResponseBridgeResult {
+                    usage: UpstreamResponseUsage::default(),
+                    stream_terminal_seen: true,
+                    stream_terminal_error: None,
+                    delivery_error,
+                    upstream_error_hint: Some(message),
+                    delivered_status_code: None,
+                    upstream_request_id: None,
+                    upstream_cf_ray: None,
+                    upstream_auth_error: None,
+                    upstream_identity_error_code: None,
+                    upstream_content_type: None,
+                    last_sse_event_type: None,
+                },
+                &upstream_request_id,
+                &upstream_cf_ray,
+                &upstream_auth_error,
+                &upstream_identity_error_code,
+                &upstream_content_type,
+                None,
+            ));
+        }
+
+        replace_content_type_header(
+            &mut headers,
+            compatibility_stream_content_type(response_adapter, gemini_stream_output_mode),
+        );
+        match response_adapter {
+            ResponseAdapter::AnthropicMessagesFromResponses => {
+                let upstream_body = upstream
+                    .read_all_bytes()
+                    .map_err(|err| format!("read upstream body failed: {err}"))?;
                 let usage_collector = Arc::new(Mutex::new(UpstreamResponseUsage::default()));
-                let response = Response::new(
-                    status,
-                    headers,
-                    AnthropicSseReader::new(
-                        upstream,
+                let response_body: Box<dyn std::io::Read + Send> =
+                    Box::new(AnthropicSseReader::from_reader(
+                        std::io::Cursor::new(upstream_body.to_vec()),
                         Arc::clone(&usage_collector),
                         fallback_model,
+                        tool_name_restore_map.cloned(),
                         request_started_at,
-                    ),
-                    None,
-                    None,
-                );
+                    ));
+                let response = Response::new(status, headers, response_body, None, None);
                 let delivery_error = request.respond(response).err().map(|err| err.to_string());
                 let usage = usage_collector
                     .lock()
@@ -1671,130 +2600,35 @@ pub(crate) fn respond_with_upstream(
                     None,
                 ));
             }
-            if matches!(
-                response_adapter,
-                ResponseAdapter::GeminiSse | ResponseAdapter::GeminiCliSse
-            ) && (is_stream
-                || upstream_content_type
-                    .as_deref()
-                    .map(|value| value.to_ascii_lowercase().starts_with("text/event-stream"))
-                    .unwrap_or(false))
-            {
-                let gemini_stream_output_mode =
-                    gemini_stream_output_mode.unwrap_or(GeminiStreamOutputMode::Sse);
-                if gemini_stream_output_mode == GeminiStreamOutputMode::Sse {
-                    if let Ok(content_type_header) = Header::from_bytes(
-                        b"Content-Type".as_slice(),
-                        b"text/event-stream".as_slice(),
-                    ) {
-                        headers.push(content_type_header);
-                    }
-                } else if let Ok(content_type_header) =
-                    Header::from_bytes(b"Content-Type".as_slice(), b"application/json".as_slice())
-                {
-                    headers.push(content_type_header);
+            ResponseAdapter::ChatCompletionsFromResponses => {
+                let upstream_body = upstream
+                    .read_all_bytes()
+                    .map_err(|err| format!("read upstream body failed: {err}"))?;
+                let (synthesized, mut usage) =
+                    collect_non_stream_json_from_sse_bytes(upstream_body.as_ref());
+                let body = synthesized.unwrap_or_else(|| upstream_body.to_vec());
+                if let Ok(value) = serde_json::from_slice::<Value>(&body) {
+                    merge_usage(&mut usage, parse_usage_from_json(&value));
                 }
-                let usage_collector = Arc::new(Mutex::new(PassthroughSseCollector::default()));
+                let chat_body =
+                    convert_responses_body_to_chat_completions(&body).unwrap_or_else(|| body);
+                let response_body = chat_completion_body_to_single_sse(&chat_body);
+                let len = Some(response_body.len());
                 let response = Response::new(
                     status,
                     headers,
-                    GeminiSseReader::new(
-                        upstream,
-                        Arc::clone(&usage_collector),
-                        tool_name_restore_map.cloned(),
-                        gemini_stream_output_mode,
-                        response_adapter == ResponseAdapter::GeminiCliSse,
-                        request_started_at,
-                    ),
-                    None,
+                    std::io::Cursor::new(response_body),
+                    len,
                     None,
                 );
                 let delivery_error = request.respond(response).err().map(|err| err.to_string());
-                let collector = usage_collector
-                    .lock()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                let last_sse_event_type = collector.last_event_type.clone();
-                let result = with_bridge_debug_meta(
-                    UpstreamResponseBridgeResult {
-                        usage: collector.usage,
-                        stream_terminal_seen: collector.saw_terminal,
-                        stream_terminal_error: collector.terminal_error,
-                        delivery_error,
-                        upstream_error_hint: collector.upstream_error_hint,
-                        delivered_status_code: None,
-                        upstream_request_id: None,
-                        upstream_cf_ray: None,
-                        upstream_auth_error: None,
-                        upstream_identity_error_code: None,
-                        upstream_content_type: None,
-                        last_sse_event_type: last_sse_event_type.clone(),
-                    },
-                    &upstream_request_id,
-                    &upstream_cf_ray,
-                    &upstream_auth_error,
-                    &upstream_identity_error_code,
-                    &upstream_content_type,
-                    last_sse_event_type,
-                );
-                log_bridge_stream_diagnostics(response_adapter, request_path, &result);
-                return Ok(result);
-            }
-
-            let upstream_body = upstream
-                .bytes()
-                .map_err(|err| format!("read upstream body failed: {err}"))?;
-            let usage = serde_json::from_slice::<Value>(upstream_body.as_ref())
-                .ok()
-                .map(|value| parse_usage_from_json(&value))
-                .unwrap_or_default();
-
-            let (body, content_type) = match adapt_upstream_response_with_tool_name_restore_map(
-                response_adapter,
-                upstream_content_type.as_deref(),
-                upstream_body.as_ref(),
-                tool_name_restore_map,
-            ) {
-                Ok(result) => result,
-                Err(err) => (
-                    if matches!(
-                        response_adapter,
-                        ResponseAdapter::GeminiJson
-                            | ResponseAdapter::GeminiSse
-                            | ResponseAdapter::GeminiCliJson
-                            | ResponseAdapter::GeminiCliSse
-                    ) {
-                        build_gemini_error_body(&format!("response conversion failed: {err}"))
-                    } else {
-                        build_anthropic_error_body(&format!("response conversion failed: {err}"))
-                    },
-                    "application/json",
-                ),
-            };
-            if let Ok(content_type_header) =
-                Header::from_bytes(b"Content-Type".as_slice(), content_type.as_bytes())
-            {
-                headers.push(content_type_header);
-            }
-            let upstream_error_hint = with_upstream_debug_suffix(
-                extract_error_hint_from_body(status.0, upstream_body.as_ref()),
-                None,
-                upstream_request_id.as_deref(),
-                upstream_cf_ray.as_deref(),
-                upstream_auth_error.as_deref(),
-                upstream_identity_error_code.as_deref(),
-            );
-            if should_suppress_deactivation_delivery(
-                upstream_error_hint.as_deref(),
-                allow_failover_for_deactivation,
-            ) {
                 return Ok(with_bridge_debug_meta(
                     UpstreamResponseBridgeResult {
                         usage,
                         stream_terminal_seen: true,
                         stream_terminal_error: None,
-                        delivery_error: None,
-                        upstream_error_hint,
+                        delivery_error,
+                        upstream_error_hint: None,
                         delivered_status_code: None,
                         upstream_request_id: None,
                         upstream_cf_ray: None,
@@ -1811,63 +2645,103 @@ pub(crate) fn respond_with_upstream(
                     None,
                 ));
             }
-            let len = Some(body.len());
-            let response = Response::new(status, headers, std::io::Cursor::new(body), len, None);
-            let delivery_error = request.respond(response).err().map(|err| err.to_string());
-            Ok(with_bridge_debug_meta(
-                UpstreamResponseBridgeResult {
-                    usage,
-                    stream_terminal_seen: true,
-                    stream_terminal_error: None,
-                    delivery_error,
-                    upstream_error_hint,
-                    delivered_status_code: None,
-                    upstream_request_id: None,
-                    upstream_cf_ray: None,
-                    upstream_auth_error: None,
-                    upstream_identity_error_code: None,
-                    upstream_content_type: None,
-                    last_sse_event_type: None,
-                },
-                &upstream_request_id,
-                &upstream_cf_ray,
-                &upstream_auth_error,
-                &upstream_identity_error_code,
-                &upstream_content_type,
-                None,
-            ))
+            ResponseAdapter::ImagesB64JsonFromResponses
+            | ResponseAdapter::ImagesUrlFromResponses => {
+                let response_format = if response_adapter == ResponseAdapter::ImagesUrlFromResponses
+                {
+                    ImagesResponseFormat::Url
+                } else {
+                    ImagesResponseFormat::B64Json
+                };
+                let upstream_body = upstream
+                    .read_all_bytes()
+                    .map_err(|err| format!("read upstream body failed: {err}"))?;
+                let (synthesized, mut usage) =
+                    collect_non_stream_json_from_sse_bytes(upstream_body.as_ref());
+                let body = synthesized.unwrap_or_else(|| upstream_body.to_vec());
+                if let Ok(value) = serde_json::from_slice::<Value>(&body) {
+                    merge_usage(&mut usage, parse_usage_from_json(&value));
+                }
+                let response_body = images_response_body_to_sse(&body, response_format);
+                let len = Some(response_body.len());
+                let response = Response::new(
+                    status,
+                    headers,
+                    std::io::Cursor::new(response_body),
+                    len,
+                    None,
+                );
+                let delivery_error = request.respond(response).err().map(|err| err.to_string());
+                return Ok(with_bridge_debug_meta(
+                    UpstreamResponseBridgeResult {
+                        usage,
+                        stream_terminal_seen: true,
+                        stream_terminal_error: None,
+                        delivery_error,
+                        upstream_error_hint: None,
+                        delivered_status_code: None,
+                        upstream_request_id: None,
+                        upstream_cf_ray: None,
+                        upstream_auth_error: None,
+                        upstream_identity_error_code: None,
+                        upstream_content_type: None,
+                        last_sse_event_type: None,
+                    },
+                    &upstream_request_id,
+                    &upstream_cf_ray,
+                    &upstream_auth_error,
+                    &upstream_identity_error_code,
+                    &upstream_content_type,
+                    None,
+                ));
+            }
+            ResponseAdapter::GeminiJson | ResponseAdapter::GeminiCliJson => unreachable!(),
+            ResponseAdapter::GeminiSse | ResponseAdapter::GeminiCliSse => {
+                let upstream_body = upstream
+                    .read_all_bytes()
+                    .map_err(|err| format!("read upstream body failed: {err}"))?;
+                let usage_collector = Arc::new(Mutex::new(PassthroughSseCollector::default()));
+                let response_body: Box<dyn std::io::Read + Send> =
+                    Box::new(GeminiSseReader::from_reader(
+                        std::io::Cursor::new(upstream_body.to_vec()),
+                        Arc::clone(&usage_collector),
+                        tool_name_restore_map.cloned(),
+                        gemini_stream_output_mode.unwrap_or(GeminiStreamOutputMode::Sse),
+                        gemini_cli_wrap_response_envelope(response_adapter),
+                        request_started_at,
+                    ));
+                let response = Response::new(status, headers, response_body, None, None);
+                let delivery_error = request.respond(response).err().map(|err| err.to_string());
+                let collector = usage_collector
+                    .lock()
+                    .map(|guard| guard.clone())
+                    .unwrap_or_default();
+                return Ok(with_bridge_debug_meta(
+                    UpstreamResponseBridgeResult {
+                        usage: collector.usage,
+                        stream_terminal_seen: collector.saw_terminal,
+                        stream_terminal_error: collector.terminal_error,
+                        delivery_error,
+                        upstream_error_hint: collector.upstream_error_hint,
+                        delivered_status_code: None,
+                        upstream_request_id: None,
+                        upstream_cf_ray: None,
+                        upstream_auth_error: None,
+                        upstream_identity_error_code: None,
+                        upstream_content_type: None,
+                        last_sse_event_type: collector.last_event_type,
+                    },
+                    &upstream_request_id,
+                    &upstream_cf_ray,
+                    &upstream_auth_error,
+                    &upstream_identity_error_code,
+                    &upstream_content_type,
+                    None,
+                ));
+            }
+            ResponseAdapter::Passthrough => {}
         }
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn respond_with_stream_upstream(
-    request: Request,
-    upstream: GatewayStreamResponse,
-    _inflight_guard: super::super::AccountInFlightGuard,
-    response_adapter: ResponseAdapter,
-    _passthrough_sse_protocol: Option<PassthroughSseProtocol>,
-    _gemini_stream_output_mode: Option<GeminiStreamOutputMode>,
-    request_path: &str,
-    _tool_name_restore_map: Option<&ToolNameRestoreMap>,
-    is_stream: bool,
-    _allow_failover_for_deactivation: bool,
-    trace_id: Option<&str>,
-    _fallback_model: Option<&str>,
-    request_started_at: std::time::Instant,
-) -> Result<UpstreamResponseBridgeResult, String> {
-    let keepalive_frame = resolve_stream_keepalive_frame(response_adapter, request_path);
-    let upstream_request_id =
-        first_upstream_header(upstream.headers(), REQUEST_ID_HEADER_CANDIDATES);
-    let upstream_cf_ray = first_upstream_header(upstream.headers(), &[CF_RAY_HEADER_NAME]);
-    let upstream_auth_error = first_upstream_header(upstream.headers(), &[AUTH_ERROR_HEADER_NAME]);
-    let upstream_identity_error_code =
-        crate::gateway::extract_identity_error_code_from_headers(upstream.headers());
-    let upstream_content_type = upstream
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v.to_string());
 
     match response_adapter {
         ResponseAdapter::Passthrough => {
@@ -2304,9 +3178,14 @@ pub(crate) fn respond_with_stream_upstream(
                 None,
             ))
         }
-        _ => Err(format!(
-            "stream upstream response is not supported for adapter {response_adapter:?}"
-        )),
+        ResponseAdapter::AnthropicMessagesFromResponses
+        | ResponseAdapter::ChatCompletionsFromResponses
+        | ResponseAdapter::ImagesB64JsonFromResponses
+        | ResponseAdapter::ImagesUrlFromResponses
+        | ResponseAdapter::GeminiJson
+        | ResponseAdapter::GeminiCliJson
+        | ResponseAdapter::GeminiSse
+        | ResponseAdapter::GeminiCliSse => unreachable!(),
     }
 }
 
@@ -2334,15 +3213,14 @@ fn resolve_stream_keepalive_frame(
                 SseKeepAliveFrame::Comment
             }
         }
-        ResponseAdapter::OpenAIChatCompletionsSse => SseKeepAliveFrame::OpenAIChatCompletions,
-        ResponseAdapter::OpenAICompletionsSse => SseKeepAliveFrame::OpenAICompletions,
-        ResponseAdapter::AnthropicSse => SseKeepAliveFrame::Anthropic,
-        ResponseAdapter::GeminiSse | ResponseAdapter::GeminiCliSse => SseKeepAliveFrame::Comment,
-        ResponseAdapter::OpenAIChatCompletionsJson
-        | ResponseAdapter::OpenAICompletionsJson
-        | ResponseAdapter::AnthropicJson
+        ResponseAdapter::AnthropicMessagesFromResponses
+        | ResponseAdapter::ChatCompletionsFromResponses
+        | ResponseAdapter::ImagesB64JsonFromResponses
+        | ResponseAdapter::ImagesUrlFromResponses
         | ResponseAdapter::GeminiJson
-        | ResponseAdapter::GeminiCliJson => SseKeepAliveFrame::Comment,
+        | ResponseAdapter::GeminiCliJson
+        | ResponseAdapter::GeminiSse
+        | ResponseAdapter::GeminiCliSse => SseKeepAliveFrame::Comment,
     }
 }
 
@@ -2350,8 +3228,12 @@ fn resolve_stream_keepalive_frame(
 mod tests {
     use super::{
         classify_compact_non_success_kind, compact_non_success_body_should_be_normalized,
-        force_openai_responses_stream_content_type, Header,
+        convert_responses_body_to_chat_completions,
+        convert_responses_body_to_gemini_generate_content, convert_responses_body_to_images,
+        force_openai_responses_stream_content_type, gemini_cli_wrap_response_envelope, Header,
+        ImagesResponseFormat, ResponseAdapter,
     };
+    use serde_json::json;
 
     /// 函数 `compact_header_only_identity_error_is_normalized_and_classified`
     ///
@@ -2440,5 +3322,178 @@ mod tests {
         assert!(headers
             .iter()
             .any(|header| header.field.as_str().as_str() == "x-request-id"));
+    }
+
+    #[test]
+    fn non_stream_gemini_response_preserves_function_call_id_and_top_level_function_calls() {
+        let body = json!({
+            "id": "resp_non_stream_tool",
+            "model": "gpt-5.4",
+            "output": [{
+                "type": "function_call",
+                "call_id": "call_non_stream_write",
+                "name": "write_file",
+                "arguments": "{\"path\":\"plan.md\"}"
+            }],
+            "usage": { "input_tokens": 1, "output_tokens": 1, "total_tokens": 2 }
+        });
+
+        let mapped = convert_responses_body_to_gemini_generate_content(
+            serde_json::to_vec(&body).expect("body").as_slice(),
+            false,
+            None,
+        )
+        .expect("convert gemini body");
+        let value: serde_json::Value = serde_json::from_slice(&mapped).expect("parse mapped body");
+
+        assert_eq!(
+            value["candidates"][0]["content"]["parts"][0]["functionCall"]["id"],
+            "call_non_stream_write"
+        );
+        assert_eq!(value["functionCalls"][0]["id"], "call_non_stream_write");
+        assert_eq!(value["functionCalls"][0]["args"]["path"], "plan.md");
+    }
+
+    #[test]
+    fn non_stream_chat_completion_response_adds_image_generation_message_images() {
+        let body = json!({
+            "id": "resp_non_stream_image",
+            "model": "gpt-5.4",
+            "output": [{
+                "type": "image_generation_call",
+                "id": "ig_non_stream_1",
+                "status": "completed",
+                "output_format": "png",
+                "result": "aGVsbG8="
+            }],
+            "usage": { "input_tokens": 2, "output_tokens": 1, "total_tokens": 3 }
+        });
+
+        let mapped = convert_responses_body_to_chat_completions(
+            serde_json::to_vec(&body).expect("body").as_slice(),
+        )
+        .expect("convert chat completion body");
+        let value: serde_json::Value = serde_json::from_slice(&mapped).expect("parse mapped body");
+
+        assert_eq!(
+            value["choices"][0]["message"]["images"][0]["type"],
+            "image_url"
+        );
+        assert_eq!(
+            value["choices"][0]["message"]["images"][0]["image_url"]["url"],
+            "data:image/png;base64,aGVsbG8="
+        );
+        assert_eq!(
+            value["usage"]["prompt_tokens"],
+            serde_json::Value::Number(2.into())
+        );
+    }
+
+    #[test]
+    fn non_stream_images_response_builds_b64_json_payload() {
+        let body = json!({
+            "id": "resp_images_1",
+            "created_at": 1775900000,
+            "model": "gpt-5.4",
+            "output": [{
+                "type": "image_generation_call",
+                "id": "ig_1",
+                "status": "completed",
+                "revised_prompt": "一只极简猫",
+                "output_format": "png",
+                "size": "1024x1024",
+                "quality": "high",
+                "background": "transparent",
+                "result": "aGVsbG8="
+            }],
+            "tool_usage": {
+                "image_gen": { "input_tokens": 1, "output_tokens": 2, "total_tokens": 3 }
+            }
+        });
+
+        let mapped = convert_responses_body_to_images(
+            serde_json::to_vec(&body).expect("body").as_slice(),
+            ImagesResponseFormat::B64Json,
+        )
+        .expect("convert images body");
+        let value: serde_json::Value = serde_json::from_slice(&mapped).expect("parse images body");
+
+        assert_eq!(value["created"], 1775900000);
+        assert_eq!(value["data"][0]["b64_json"], "aGVsbG8=");
+        assert_eq!(value["data"][0]["revised_prompt"], "一只极简猫");
+        assert_eq!(value["size"], "1024x1024");
+        assert_eq!(value["quality"], "high");
+        assert_eq!(value["background"], "transparent");
+        assert_eq!(value["output_format"], "png");
+        assert_eq!(value["usage"]["total_tokens"], 3);
+    }
+
+    #[test]
+    fn non_stream_images_response_builds_url_payload() {
+        let body = json!({
+            "created": 1775900001,
+            "output": [{
+                "type": "image_generation_call",
+                "output_format": "webp",
+                "result": "aGVsbG8="
+            }]
+        });
+
+        let mapped = convert_responses_body_to_images(
+            serde_json::to_vec(&body).expect("body").as_slice(),
+            ImagesResponseFormat::Url,
+        )
+        .expect("convert images body");
+        let value: serde_json::Value = serde_json::from_slice(&mapped).expect("parse images body");
+
+        assert_eq!(value["data"][0]["url"], "data:image/webp;base64,aGVsbG8=");
+    }
+
+    #[test]
+    fn non_stream_gemini_response_decodes_double_encoded_function_call_arguments() {
+        let body = json!({
+            "id": "resp_non_stream_double_encoded_tool",
+            "model": "gpt-5.4",
+            "output": [{
+                "type": "function_call",
+                "call_id": "call_non_stream_double_encoded_write",
+                "name": "write_file",
+                "arguments": "\"{\\\"file_path\\\":\\\"C:/Users/test/Desktop/test/gemini/plan.md\\\",\\\"content\\\":\\\"plan\\\"}\""
+            }],
+            "usage": { "input_tokens": 1, "output_tokens": 1, "total_tokens": 2 }
+        });
+
+        let mapped = convert_responses_body_to_gemini_generate_content(
+            serde_json::to_vec(&body).expect("body").as_slice(),
+            false,
+            None,
+        )
+        .expect("convert gemini body");
+        let value: serde_json::Value = serde_json::from_slice(&mapped).expect("parse mapped body");
+
+        assert_eq!(
+            value["candidates"][0]["content"]["parts"][0]["functionCall"]["args"]["file_path"],
+            "C:/Users/test/Desktop/test/gemini/plan.md"
+        );
+        assert_eq!(value["functionCalls"][0]["args"]["content"], "plan");
+    }
+
+    #[test]
+    fn gemini_cli_wrap_response_envelope_is_enabled_for_gemini_adapter_only() {
+        assert!(gemini_cli_wrap_response_envelope(
+            ResponseAdapter::GeminiCliJson
+        ));
+        assert!(gemini_cli_wrap_response_envelope(
+            ResponseAdapter::GeminiCliSse
+        ));
+        assert!(!gemini_cli_wrap_response_envelope(
+            ResponseAdapter::AnthropicMessagesFromResponses
+        ));
+        assert!(!gemini_cli_wrap_response_envelope(
+            ResponseAdapter::ChatCompletionsFromResponses
+        ));
+        assert!(!gemini_cli_wrap_response_envelope(
+            ResponseAdapter::Passthrough
+        ));
     }
 }

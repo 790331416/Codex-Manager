@@ -79,8 +79,18 @@ pub(super) fn respond_local_json(
     body: String,
     usage: super::request_log::RequestLogUsage,
 ) -> Result<(), String> {
+    respond_local_json_with_headers(request, ctx, body, usage, Vec::new())
+}
+
+pub(super) fn respond_local_json_with_headers(
+    request: Request,
+    ctx: &LocalResponseContext<'_>,
+    body: String,
+    usage: super::request_log::RequestLogUsage,
+    extra_headers: Vec<tiny_http::Header>,
+) -> Result<(), String> {
     record_local_result(ctx, 200, usage, None);
-    let response = super::error_response::with_trace_id_header(
+    let mut response = super::error_response::with_trace_id_header(
         Response::from_string(body)
             .with_status_code(200)
             .with_header(
@@ -92,6 +102,9 @@ pub(super) fn respond_local_json(
             ),
         Some(ctx.trace_id),
     );
+    for header in extra_headers {
+        response = response.with_header(header);
+    }
     let _ = request.respond(response);
     Ok(())
 }

@@ -71,6 +71,19 @@ test("readAccountExportResult 与 readDeleteUnavailableFreeResult 对齐数字�
     deleted: "6",
   });
   assert.equal(deleteResult.deleted, 6);
+
+  const cleanupResult = accountMaintenance.readDeleteAccountsByStatusesResult({
+    scanned: "9",
+    deleted: 4,
+    skippedStatus: "5",
+    targetStatuses: [" banned ", "limited", 1],
+    deletedAccountIds: [" acc-1 ", "acc-2"],
+  });
+  assert.equal(cleanupResult.scanned, 9);
+  assert.equal(cleanupResult.deleted, 4);
+  assert.equal(cleanupResult.skippedStatus, 5);
+  assert.deepEqual(cleanupResult.targetStatuses, ["banned", "limited"]);
+  assert.deepEqual(cleanupResult.deletedAccountIds, ["acc-1", "acc-2"]);
 });
 
 test("readApiKeySecret 统一读取 secret 字段", () => {

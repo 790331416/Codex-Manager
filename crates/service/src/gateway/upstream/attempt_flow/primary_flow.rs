@@ -9,7 +9,7 @@ use super::fallback_branch::{handle_openai_fallback_branch, FallbackBranchResult
 use super::primary_attempt::{run_primary_upstream_attempt, PrimaryAttemptResult};
 use super::transport::UpstreamRequestContext;
 
-pub(super) enum PrimaryFlowDecision {
+pub(in crate::gateway::upstream) enum PrimaryFlowDecision {
     Continue {
         upstream: GatewayUpstreamResponse,
         auth_token: String,
@@ -54,7 +54,7 @@ fn resolve_chatgpt_primary_bearer(token: &Token) -> Option<String> {
 /// # 返回
 /// 返回函数执行结果
 #[allow(clippy::too_many_arguments)]
-pub(super) fn run_primary_upstream_flow<F>(
+pub(in crate::gateway::upstream) fn run_primary_upstream_flow<F>(
     client: &reqwest::blocking::Client,
     storage: &Storage,
     method: &reqwest::Method,
@@ -104,6 +104,7 @@ where
         storage,
         method,
         request_deadline,
+        request_ctx.protocol_type,
         incoming_headers,
         body,
         base,

@@ -265,8 +265,10 @@ pub(super) fn try_openai_fallback(
         let header_input = super::upstream::header_profile::CodexCompactUpstreamHeaderInput {
             auth_token: bearer.as_str(),
             chatgpt_account_id: resolve_chatgpt_account_header(account, upstream_base),
+            installation_id: None,
             incoming_user_agent: incoming_headers.user_agent(),
             incoming_originator: incoming_headers.originator(),
+            preserve_client_identity: false,
             incoming_session_id: request_affinity.incoming_session_id,
             incoming_window_id: incoming_headers.window_id(),
             incoming_subagent: incoming_headers.subagent(),
@@ -283,6 +285,7 @@ pub(super) fn try_openai_fallback(
             chatgpt_account_id: resolve_chatgpt_account_header(account, upstream_base),
             incoming_user_agent: incoming_headers.user_agent(),
             incoming_originator: incoming_headers.originator(),
+            preserve_client_identity: false,
             incoming_session_id: request_affinity.incoming_session_id,
             incoming_window_id: incoming_headers.window_id(),
             incoming_client_request_id: request_affinity.incoming_client_request_id,
@@ -290,6 +293,8 @@ pub(super) fn try_openai_fallback(
             incoming_beta_features: incoming_headers.beta_features(),
             incoming_turn_metadata: incoming_headers.turn_metadata(),
             incoming_parent_thread_id: incoming_headers.parent_thread_id(),
+            incoming_responsesapi_include_timing_metrics: incoming_headers
+                .responsesapi_include_timing_metrics(),
             passthrough_codex_headers: incoming_headers.passthrough_codex_headers(),
             fallback_session_id: request_affinity.fallback_session_id,
             incoming_turn_state: request_affinity.incoming_turn_state,

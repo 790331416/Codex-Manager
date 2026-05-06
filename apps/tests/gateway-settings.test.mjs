@@ -46,6 +46,7 @@ test("readGatewayTransportSettings 读取真实传输配置并补齐默认值", 
   assert.deepEqual(settings.envKeys, [
     "CODEXMANAGER_SSE_KEEPALIVE_INTERVAL_MS",
     "CODEXMANAGER_UPSTREAM_STREAM_TIMEOUT_MS",
+    "CODEXMANAGER_UPSTREAM_TOTAL_TIMEOUT_MS",
   ]);
   assert.equal(settings.requiresRestart, false);
 });

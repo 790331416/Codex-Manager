@@ -202,6 +202,27 @@ pub async fn service_account_delete_unavailable_free(
     rpc_call_in_background("account/deleteUnavailableFree", addr, None).await
 }
 
+/// 函数 `service_account_delete_by_statuses`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-05-04
+///
+/// # 参数
+/// - addr: 参数 addr
+/// - statuses: 参数 statuses
+///
+/// # 返回
+/// 返回函数执行结果
+#[tauri::command]
+pub async fn service_account_delete_by_statuses(
+    addr: Option<String>,
+    statuses: Vec<String>,
+) -> Result<serde_json::Value, String> {
+    let params = serde_json::json!({ "statuses": statuses });
+    rpc_call_in_background("account/deleteByStatuses", addr, Some(params)).await
+}
+
 /// 函数 `service_account_update`
 ///
 /// 作者: gaohongshun

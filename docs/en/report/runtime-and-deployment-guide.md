@@ -12,6 +12,48 @@
 3. If callback parsing fails, paste the callback URL and complete it manually.
 4. Refresh usage and confirm the account status.
 
+## Connect through ccswitch
+If you want to use CodexManager through ccswitch or directly from Codex CLI, keep the platform key, `auth.json`, and `config.toml` aligned:
+
+1. Open `Platform Keys` and create a general-purpose key.
+2. In ccswitch, create a provider and paste that key into the provider API key field.
+3. Write the same key into Codex CLI's `auth.json`. Do not put account `access_token`, `refresh_token`, or OpenAI login tokens here.
+4. Copy the sample `config.toml` below into the ccswitch / Codex config, then restart Codex CLI.
+
+Common paths:
+
+- macOS / Linux: `~/.codex/auth.json`, `~/.codex/config.toml`
+- Windows: `%USERPROFILE%\.codex\auth.json`, `%USERPROFILE%\.codex\config.toml`
+
+Example `auth.json`:
+
+```json
+{
+  "OPENAI_API_KEY": "replace_with_codexmanager_platform_key",
+  "auth_mode": "apikey"
+}
+```
+
+Example `config.toml`:
+
+```toml
+model = "gpt-5.4"
+model_provider = "cm"
+review_model = "gpt-5.4"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+cli_auth_credentials_store = "file"
+service_tier = "fast"
+
+[model_providers.cm]
+name = "OpenAI"
+base_url = "http://localhost:48760/v1"
+wire_api = "responses"
+```
+
+- If you changed the service port in Settings, update `base_url` accordingly.
+- Restart Codex CLI after changing `auth.json` or `config.toml`.
+
 ## Import and export
 - `Batch import`: select multiple `.json/.txt` files and import them together.
 - `Import by folder`: desktop only. After selecting a directory, the app recursively scans `.json` files and imports them in batches. Empty files are skipped automatically.

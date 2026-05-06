@@ -166,14 +166,69 @@ fn token_upsert_keeps_refresh_schedule_columns() {
     storage.insert_token(&token2).expect("upsert token");
 
     let due = storage
-        .list_tokens_due_for_refresh(4_102_444_100, 10)
+        .list_tokens_due_for_refresh(4_102_444_100, 4_102_444_700, 10)
         .expect("list due");
     assert!(due.is_empty());
     let due2 = storage
-        .list_tokens_due_for_refresh(4_102_444_300, 10)
+        .list_tokens_due_for_refresh(4_102_444_300, 4_102_444_900, 10)
         .expect("list due2");
     assert_eq!(due2.len(), 1);
     assert_eq!(due2[0].account_id, "acc-schedule-1");
+}
+
+/// 函数 `tokens_due_for_refresh_uses_access_exp_when_next_refresh_is_stale`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-26
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn tokens_due_for_refresh_uses_access_exp_when_next_refresh_is_stale() {
+    let storage = Storage::open_in_memory().expect("open in memory");
+    storage.init().expect("init schema");
+    let now = now_ts();
+    let account = Account {
+        id: "acc-stale-next-refresh".to_string(),
+        label: "stale next refresh".to_string(),
+        issuer: "https://auth.openai.com".to_string(),
+        chatgpt_account_id: None,
+        workspace_id: None,
+        group_name: None,
+        sort: 0,
+        status: "active".to_string(),
+        created_at: now,
+        updated_at: now,
+    };
+    storage.insert_account(&account).expect("insert account");
+    storage
+        .insert_token(&Token {
+            account_id: account.id.clone(),
+            id_token: "id".to_string(),
+            access_token: "access".to_string(),
+            refresh_token: "refresh".to_string(),
+            api_key_access_token: None,
+            last_refresh: now,
+        })
+        .expect("insert token");
+    storage
+        .update_token_refresh_schedule(&account.id, Some(4_102_444_800), Some(4_102_999_999))
+        .expect("set stale schedule");
+
+    let due = storage
+        .list_tokens_due_for_refresh(4_102_444_100, 4_102_444_700, 10)
+        .expect("list due before access exp window");
+    assert!(due.is_empty());
+
+    let due = storage
+        .list_tokens_due_for_refresh(4_102_444_100, 4_102_444_900, 10)
+        .expect("list due after access exp window");
+    assert_eq!(due.len(), 1);
+    assert_eq!(due[0].account_id, account.id);
 }
 
 /// 函数 `tokens_due_for_refresh_include_other_unavailable_accounts_but_skip_deactivated`
@@ -236,7 +291,7 @@ fn tokens_due_for_refresh_include_other_unavailable_accounts_but_skip_deactivate
         .expect("insert deactivated event");
 
     let due = storage
-        .list_tokens_due_for_refresh(4_102_444_300, 10)
+        .list_tokens_due_for_refresh(4_102_444_300, 4_102_444_900, 10)
         .expect("list due");
     let account_ids = due
         .into_iter()

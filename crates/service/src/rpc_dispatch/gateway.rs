@@ -80,15 +80,18 @@ pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
         "gateway/transport/get" => super::as_json(serde_json::json!({
             "sseKeepaliveIntervalMs": crate::current_gateway_sse_keepalive_interval_ms(),
             "upstreamStreamTimeoutMs": crate::current_gateway_upstream_stream_timeout_ms(),
+            "upstreamTotalTimeoutMs": crate::current_gateway_upstream_total_timeout_ms(),
             "envKeys": [
                 "CODEXMANAGER_SSE_KEEPALIVE_INTERVAL_MS",
-                "CODEXMANAGER_UPSTREAM_STREAM_TIMEOUT_MS"
+                "CODEXMANAGER_UPSTREAM_STREAM_TIMEOUT_MS",
+                "CODEXMANAGER_UPSTREAM_TOTAL_TIMEOUT_MS"
             ],
             "requiresRestart": false,
         })),
         "gateway/transport/set" => {
             let requested_sse_keepalive_interval_ms = u64_param(req, "sseKeepaliveIntervalMs");
             let requested_upstream_stream_timeout_ms = u64_param(req, "upstreamStreamTimeoutMs");
+            let requested_upstream_total_timeout_ms = u64_param(req, "upstreamTotalTimeoutMs");
             super::value_or_error((|| {
                 let sse_keepalive_interval_ms =
                     if let Some(value) = requested_sse_keepalive_interval_ms {
@@ -102,9 +105,16 @@ pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
                     } else {
                         crate::current_gateway_upstream_stream_timeout_ms()
                     };
+                let upstream_total_timeout_ms =
+                    if let Some(value) = requested_upstream_total_timeout_ms {
+                        crate::set_gateway_upstream_total_timeout_ms(value)?
+                    } else {
+                        crate::current_gateway_upstream_total_timeout_ms()
+                    };
                 Ok(serde_json::json!({
                     "sseKeepaliveIntervalMs": sse_keepalive_interval_ms,
                     "upstreamStreamTimeoutMs": upstream_stream_timeout_ms,
+                    "upstreamTotalTimeoutMs": upstream_total_timeout_ms,
                     "requiresRestart": false,
                 }))
             })())

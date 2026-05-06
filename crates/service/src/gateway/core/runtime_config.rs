@@ -23,9 +23,15 @@ static ACCOUNT_MAX_INFLIGHT: AtomicUsize = AtomicUsize::new(DEFAULT_ACCOUNT_MAX_
 static STRICT_REQUEST_PARAM_ALLOWLIST: AtomicBool =
     AtomicBool::new(DEFAULT_STRICT_REQUEST_PARAM_ALLOWLIST);
 static ENABLE_REQUEST_COMPRESSION: AtomicBool = AtomicBool::new(DEFAULT_ENABLE_REQUEST_COMPRESSION);
+static CODEX_IMAGE_GENERATION_ENABLED: AtomicBool =
+    AtomicBool::new(DEFAULT_CODEX_IMAGE_GENERATION_ENABLED);
+static CODEX_IMAGE_GENERATION_AUTO_INJECT_TOOL: AtomicBool =
+    AtomicBool::new(DEFAULT_CODEX_IMAGE_GENERATION_AUTO_INJECT_TOOL);
 static UPSTREAM_PROXY_URL: OnceLock<RwLock<Option<String>>> = OnceLock::new();
 static FREE_ACCOUNT_MAX_MODEL: OnceLock<RwLock<String>> = OnceLock::new();
 static MODEL_FORWARD_RULES: OnceLock<RwLock<Vec<ModelForwardRule>>> = OnceLock::new();
+static CODEX_IMAGE_MAIN_MODEL: OnceLock<RwLock<String>> = OnceLock::new();
+static CODEX_IMAGE_TOOL_MODEL: OnceLock<RwLock<String>> = OnceLock::new();
 static ORIGINATOR: OnceLock<RwLock<String>> = OnceLock::new();
 static CODEX_USER_AGENT_VERSION: OnceLock<RwLock<String>> = OnceLock::new();
 static RESIDENCY_REQUIREMENT: OnceLock<RwLock<Option<String>>> = OnceLock::new();
@@ -39,11 +45,15 @@ const DEFAULT_UPSTREAM_STREAM_TIMEOUT_MS: u64 = 300_000;
 const DEFAULT_ACCOUNT_MAX_INFLIGHT: usize = 0;
 const DEFAULT_STRICT_REQUEST_PARAM_ALLOWLIST: bool = false;
 const DEFAULT_ENABLE_REQUEST_COMPRESSION: bool = true;
+const DEFAULT_CODEX_IMAGE_GENERATION_ENABLED: bool = true;
+const DEFAULT_CODEX_IMAGE_GENERATION_AUTO_INJECT_TOOL: bool = true;
 const DEFAULT_REQUEST_GATE_WAIT_TIMEOUT_MS: u64 = 0;
 const DEFAULT_TRACE_BODY_PREVIEW_MAX_BYTES: usize = 0;
 const DEFAULT_FRONT_PROXY_MAX_BODY_BYTES: usize = 0;
 const DEFAULT_FREE_ACCOUNT_MAX_MODEL: &str = "auto";
 const DEFAULT_MODEL_FORWARD_RULES: &str = "";
+const DEFAULT_CODEX_IMAGE_MAIN_MODEL: &str = "gpt-5.4-mini";
+const DEFAULT_CODEX_IMAGE_TOOL_MODEL: &str = "gpt-image-2";
 const DEFAULT_CODEX_USER_AGENT_VERSION: &str = "0.101.0";
 const MAX_UPSTREAM_PROXY_POOL_SIZE: usize = 5;
 
@@ -56,6 +66,11 @@ const ENV_UPSTREAM_STREAM_TIMEOUT_MS: &str = "CODEXMANAGER_UPSTREAM_STREAM_TIMEO
 const ENV_ACCOUNT_MAX_INFLIGHT: &str = "CODEXMANAGER_ACCOUNT_MAX_INFLIGHT";
 const ENV_STRICT_REQUEST_PARAM_ALLOWLIST: &str = "CODEXMANAGER_STRICT_REQUEST_PARAM_ALLOWLIST";
 const ENV_ENABLE_REQUEST_COMPRESSION: &str = "CODEXMANAGER_ENABLE_REQUEST_COMPRESSION";
+const ENV_CODEX_IMAGE_GENERATION_ENABLED: &str = "CODEXMANAGER_CODEX_IMAGE_GENERATION_ENABLED";
+const ENV_CODEX_IMAGE_GENERATION_AUTO_INJECT_TOOL: &str =
+    "CODEXMANAGER_CODEX_IMAGE_GENERATION_AUTO_INJECT_TOOL";
+const ENV_CODEX_IMAGE_MAIN_MODEL: &str = "CODEXMANAGER_CODEX_IMAGE_MAIN_MODEL";
+const ENV_CODEX_IMAGE_TOOL_MODEL: &str = "CODEXMANAGER_CODEX_IMAGE_TOOL_MODEL";
 const ENV_TOKEN_EXCHANGE_CLIENT_ID: &str = "CODEXMANAGER_CLIENT_ID";
 const ENV_TOKEN_EXCHANGE_ISSUER: &str = "CODEXMANAGER_ISSUER";
 const ENV_PROXY_LIST: &str = "CODEXMANAGER_PROXY_LIST";
@@ -202,6 +217,15 @@ pub(crate) fn fresh_async_upstream_client_for_account(account_id: &str) -> reqwe
         return build_async_upstream_client_with_proxy(Some(proxy_url));
     }
     build_async_upstream_client()
+}
+
+pub(crate) fn upstream_proxy_url_for_account(account_id: &str) -> Option<String> {
+    ensure_runtime_config_loaded();
+    let pool = crate::lock_utils::read_recover(upstream_client_pool_lock(), "upstream_client_pool");
+    if let Some(proxy_url) = pool.proxy_for_account(account_id) {
+        return Some(proxy_url.to_string());
+    }
+    current_upstream_proxy_url()
 }
 
 /// 函数 `upstream_connect_timeout_cached`
@@ -367,6 +391,11 @@ pub(crate) fn current_upstream_stream_timeout_ms() -> u64 {
     UPSTREAM_STREAM_TIMEOUT_MS.load(Ordering::Relaxed)
 }
 
+pub(crate) fn current_upstream_total_timeout_ms() -> u64 {
+    ensure_runtime_config_loaded();
+    UPSTREAM_TOTAL_TIMEOUT_MS.load(Ordering::Relaxed)
+}
+
 /// 函数 `request_compression_enabled`
 ///
 /// 作者: gaohongshun
@@ -381,6 +410,27 @@ pub(crate) fn current_upstream_stream_timeout_ms() -> u64 {
 pub(crate) fn request_compression_enabled() -> bool {
     ensure_runtime_config_loaded();
     ENABLE_REQUEST_COMPRESSION.load(Ordering::Relaxed)
+}
+
+pub(crate) fn codex_image_generation_enabled() -> bool {
+    ensure_runtime_config_loaded();
+    CODEX_IMAGE_GENERATION_ENABLED.load(Ordering::Relaxed)
+}
+
+#[allow(dead_code)]
+pub(crate) fn codex_image_generation_auto_inject_tool_enabled() -> bool {
+    ensure_runtime_config_loaded();
+    CODEX_IMAGE_GENERATION_AUTO_INJECT_TOOL.load(Ordering::Relaxed)
+}
+
+pub(crate) fn current_codex_image_main_model() -> String {
+    ensure_runtime_config_loaded();
+    crate::lock_utils::read_recover(codex_image_main_model_cell(), "codex_image_main_model").clone()
+}
+
+pub(crate) fn current_codex_image_tool_model() -> String {
+    ensure_runtime_config_loaded();
+    crate::lock_utils::read_recover(codex_image_tool_model_cell(), "codex_image_tool_model").clone()
 }
 
 /// 函数 `account_max_inflight_limit`
@@ -884,6 +934,13 @@ pub(crate) fn set_upstream_stream_timeout_ms(timeout_ms: u64) -> u64 {
     timeout_ms
 }
 
+pub(crate) fn set_upstream_total_timeout_ms(timeout_ms: u64) -> u64 {
+    ensure_runtime_config_loaded();
+    UPSTREAM_TOTAL_TIMEOUT_MS.store(timeout_ms, Ordering::Relaxed);
+    std::env::set_var(ENV_UPSTREAM_TOTAL_TIMEOUT_MS, timeout_ms.to_string());
+    timeout_ms
+}
+
 /// 函数 `token_exchange_client_id`
 ///
 /// 作者: gaohongshun
@@ -989,6 +1046,20 @@ pub(super) fn reload_from_env() {
         ),
         Ordering::Relaxed,
     );
+    CODEX_IMAGE_GENERATION_ENABLED.store(
+        env_bool_or(
+            ENV_CODEX_IMAGE_GENERATION_ENABLED,
+            DEFAULT_CODEX_IMAGE_GENERATION_ENABLED,
+        ),
+        Ordering::Relaxed,
+    );
+    CODEX_IMAGE_GENERATION_AUTO_INJECT_TOOL.store(
+        env_bool_or(
+            ENV_CODEX_IMAGE_GENERATION_AUTO_INJECT_TOOL,
+            DEFAULT_CODEX_IMAGE_GENERATION_AUTO_INJECT_TOOL,
+        ),
+        Ordering::Relaxed,
+    );
 
     let client_id = env_non_empty(ENV_TOKEN_EXCHANGE_CLIENT_ID)
         .unwrap_or_else(|| DEFAULT_CLIENT_ID.to_string());
@@ -1045,6 +1116,22 @@ pub(super) fn reload_from_env() {
         crate::lock_utils::write_recover(model_forward_rules_cell(), "model_forward_rules");
     *cached_model_forward_rules = model_forward_rules;
     drop(cached_model_forward_rules);
+
+    let codex_image_main_model = env_non_empty(ENV_CODEX_IMAGE_MAIN_MODEL)
+        .and_then(|value| normalize_model_slug(value.as_str()).ok())
+        .unwrap_or_else(|| DEFAULT_CODEX_IMAGE_MAIN_MODEL.to_string());
+    let mut cached_codex_image_main_model =
+        crate::lock_utils::write_recover(codex_image_main_model_cell(), "codex_image_main_model");
+    *cached_codex_image_main_model = codex_image_main_model;
+    drop(cached_codex_image_main_model);
+
+    let codex_image_tool_model = env_non_empty(ENV_CODEX_IMAGE_TOOL_MODEL)
+        .and_then(|value| normalize_model_slug(value.as_str()).ok())
+        .unwrap_or_else(|| DEFAULT_CODEX_IMAGE_TOOL_MODEL.to_string());
+    let mut cached_codex_image_tool_model =
+        crate::lock_utils::write_recover(codex_image_tool_model_cell(), "codex_image_tool_model");
+    *cached_codex_image_tool_model = codex_image_tool_model;
+    drop(cached_codex_image_tool_model);
 
     let originator = env_non_empty(ENV_ORIGINATOR)
         .and_then(|value| normalize_originator(value.as_str()).ok())
@@ -1231,6 +1318,14 @@ fn model_forward_rules_cell() -> &'static RwLock<Vec<ModelForwardRule>> {
         let initial = parse_model_forward_rules(DEFAULT_MODEL_FORWARD_RULES).unwrap_or_default();
         RwLock::new(initial)
     })
+}
+
+fn codex_image_main_model_cell() -> &'static RwLock<String> {
+    CODEX_IMAGE_MAIN_MODEL.get_or_init(|| RwLock::new(DEFAULT_CODEX_IMAGE_MAIN_MODEL.to_string()))
+}
+
+fn codex_image_tool_model_cell() -> &'static RwLock<String> {
+    CODEX_IMAGE_TOOL_MODEL.get_or_init(|| RwLock::new(DEFAULT_CODEX_IMAGE_TOOL_MODEL.to_string()))
 }
 
 /// 函数 `originator_cell`

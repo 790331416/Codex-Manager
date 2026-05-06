@@ -27,6 +27,9 @@ pub(crate) struct RequestLogTraceContext<'a> {
 
 const MODEL_PRICE_PER_1K_TOKENS: &[(&str, f64, f64, f64)] = &[
     // OpenAI 官方价格（单位：USD / 1K tokens）。按模型前缀匹配，越具体越靠前。
+    // GPT-5.5 官方价格。
+    ("gpt-5.5-pro", 0.03, 0.03, 0.18),
+    ("gpt-5.5", 0.005, 0.0005, 0.03),
     // GPT-5.4 mini 官方价格。
     ("gpt-5.4-mini", 0.00075, 0.000075, 0.0045),
     ("gpt-5.4-nano", 0.0002, 0.00002, 0.00125),
@@ -70,6 +73,11 @@ const MODEL_PRICE_PER_1K_TOKENS: &[(&str, f64, f64, f64)] = &[
     ("gpt-audio", 0.0025, 0.0025, 0.01),
     ("gpt-4o-mini-audio-preview", 0.00015, 0.00015, 0.0006),
     ("gpt-4o-audio-preview", 0.0025, 0.0025, 0.01),
+    // 图片模型官方区分 Text / Image modality。当前日志 usage 未携带 modality 分桶，
+    // 因此统一按 Image token 价格估算，避免把混合图片请求低估。
+    ("gpt-image-2", 0.008, 0.002, 0.03),
+    ("gpt-image-1.5", 0.008, 0.002, 0.032),
+    ("gpt-image-1-mini", 0.0025, 0.00025, 0.008),
     // 兼容旧模型：缓存输入按输入同价处理，保持历史口径稳定。
     ("gpt-4", 0.03, 0.03, 0.06),
     // o3 / o3-mini / o3-pro / o3-deep-research 官方价格。
@@ -104,7 +112,19 @@ fn resolve_model_price_per_1k(
     normalized: &str,
     input_tokens_total: i64,
 ) -> Option<(f64, f64, f64)> {
-    // OpenAI 官方定价：gpt-5.4 / gpt-5.4-pro 在输入达到 270K 时切换到更高档位。
+    // OpenAI 官方定价：gpt-5.5 / gpt-5.4 在输入达到 270K 时切换到更高档位。
+    if normalized.starts_with("gpt-5.5-pro") {
+        if input_tokens_total >= 270_000 {
+            return Some((0.06, 0.06, 0.27));
+        }
+        return Some((0.03, 0.03, 0.18));
+    }
+    if normalized == "gpt-5.5" {
+        if input_tokens_total >= 270_000 {
+            return Some((0.01, 0.001, 0.045));
+        }
+        return Some((0.005, 0.0005, 0.03));
+    }
     if normalized.starts_with("gpt-5.4-pro") {
         if input_tokens_total >= 270_000 {
             return Some((0.06, 0.06, 0.27));
@@ -245,16 +265,14 @@ fn should_write_gateway_error_fallback(status_code: Option<u16>, error: Option<&
 fn response_adapter_label(value: super::ResponseAdapter) -> &'static str {
     match value {
         super::ResponseAdapter::Passthrough => "Passthrough",
-        super::ResponseAdapter::AnthropicJson => "AnthropicJson",
-        super::ResponseAdapter::AnthropicSse => "AnthropicSse",
+        super::ResponseAdapter::AnthropicMessagesFromResponses => "AnthropicMessagesFromResponses",
+        super::ResponseAdapter::ChatCompletionsFromResponses => "ChatCompletionsFromResponses",
+        super::ResponseAdapter::ImagesB64JsonFromResponses => "ImagesB64JsonFromResponses",
+        super::ResponseAdapter::ImagesUrlFromResponses => "ImagesUrlFromResponses",
         super::ResponseAdapter::GeminiJson => "GeminiJson",
         super::ResponseAdapter::GeminiSse => "GeminiSse",
         super::ResponseAdapter::GeminiCliJson => "GeminiCliJson",
         super::ResponseAdapter::GeminiCliSse => "GeminiCliSse",
-        super::ResponseAdapter::OpenAIChatCompletionsJson => "OpenAIChatCompletionsJson",
-        super::ResponseAdapter::OpenAIChatCompletionsSse => "OpenAIChatCompletionsSse",
-        super::ResponseAdapter::OpenAICompletionsJson => "OpenAICompletionsJson",
-        super::ResponseAdapter::OpenAICompletionsSse => "OpenAICompletionsSse",
     }
 }
 

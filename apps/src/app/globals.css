@@ -54,6 +54,8 @@
   --muted-foreground: #71717a;
   --accent: rgb(var(--primary-rgb) / 0.08);
   --accent-foreground: #18181b;
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
   --border: rgb(var(--primary-rgb) / 0.12);
   --input: rgb(var(--primary-rgb) / 0.16);
   --ring: rgb(var(--primary-rgb) / 0.32);
@@ -108,6 +110,8 @@
   --secondary: rgb(var(--surface-rgb) / 0.82);
   --muted: rgb(var(--primary-rgb) / 0.1);
   --accent: rgb(var(--primary-rgb) / 0.12);
+  --destructive: #f87171;
+  --destructive-foreground: #18181b;
   --glass-border: rgb(255 255 255 / 0.08);
   --table-header-bg: rgb(var(--primary-rgb) / 0.16);
   --table-row-hover-bg: rgb(var(--primary-rgb) / 0.12);

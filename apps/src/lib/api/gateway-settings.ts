@@ -48,6 +48,7 @@ function readStringArrayField(payload: unknown, key: string): string[] {
 export interface GatewayTransportSettings {
   sseKeepaliveIntervalMs: number;
   upstreamStreamTimeoutMs: number;
+  upstreamTotalTimeoutMs: number;
   envKeys: string[];
   requiresRestart: boolean;
 }
@@ -106,12 +107,14 @@ export function readGatewayTransportSettings(
       "upstreamStreamTimeoutMs",
       300_000
     ),
+    upstreamTotalTimeoutMs: readNumberField(payload, "upstreamTotalTimeoutMs", 0),
     envKeys:
       readStringArrayField(payload, "envKeys").length > 0
         ? readStringArrayField(payload, "envKeys")
         : [
             "CODEXMANAGER_SSE_KEEPALIVE_INTERVAL_MS",
             "CODEXMANAGER_UPSTREAM_STREAM_TIMEOUT_MS",
+            "CODEXMANAGER_UPSTREAM_TOTAL_TIMEOUT_MS",
           ],
     requiresRestart: readBooleanField(payload, "requiresRestart", false),
   };

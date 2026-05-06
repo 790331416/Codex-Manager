@@ -24,7 +24,7 @@ use crate::usage_scheduler::{
     MIN_USAGE_POLL_INTERVAL_SECS,
 };
 use crate::usage_snapshot_store::store_usage_snapshot;
-use crate::usage_token_refresh::refresh_and_persist_access_token;
+use crate::usage_token_refresh::{refresh_and_persist_access_token, token_refresh_ahead_secs};
 
 mod batch;
 mod errors;
@@ -83,7 +83,6 @@ const GATEWAY_KEEPALIVE_FAILURE_BACKOFF_MAX_ENV: &str =
 const DEFAULT_TOKEN_REFRESH_POLL_INTERVAL_SECS: u64 = 60;
 const MIN_TOKEN_REFRESH_POLL_INTERVAL_SECS: u64 = 10;
 const TOKEN_REFRESH_FAILURE_BACKOFF_MAX_SECS: u64 = 300;
-const TOKEN_REFRESH_AHEAD_SECS: i64 = 600;
 const TOKEN_REFRESH_LOOKAHEAD_BUFFER_SECS: u64 = 60;
 const TOKEN_REFRESH_FALLBACK_AGE_SECS: i64 = 2700;
 const DEFAULT_TOKEN_REFRESH_BATCH_LIMIT: usize = 2048;
@@ -289,14 +288,21 @@ pub(crate) fn refresh_tokens_before_expiry_for_all_accounts() -> Result<(), Stri
         now,
         TOKEN_REFRESH_POLL_INTERVAL_SECS_ATOMIC.load(std::sync::atomic::Ordering::Relaxed),
     );
+    let refresh_ahead_secs = token_refresh_ahead_secs();
+    let access_exp_cutoff = token_refresh_access_exp_cutoff(due_cutoff, refresh_ahead_secs);
     let mut tokens = storage
-        .list_tokens_due_for_refresh(due_cutoff, token_refresh_batch_limit())
+        .list_tokens_due_for_refresh(due_cutoff, access_exp_cutoff, token_refresh_batch_limit())
         .map_err(|e| e.to_string())?;
     if tokens.is_empty() {
         return Ok(());
     }
+    let accounts = storage.list_accounts().map_err(|e| e.to_string())?;
+    let account_map = accounts
+        .iter()
+        .map(|account| (account.id.clone(), account.clone()))
+        .collect::<HashMap<_, _>>();
 
-    let issuer =
+    let default_issuer =
         std::env::var("CODEXMANAGER_ISSUER").unwrap_or_else(|_| DEFAULT_ISSUER.to_string());
     let client_id =
         std::env::var("CODEXMANAGER_CLIENT_ID").unwrap_or_else(|_| DEFAULT_CLIENT_ID.to_string());
@@ -309,7 +315,7 @@ pub(crate) fn refresh_tokens_before_expiry_for_all_accounts() -> Result<(), Stri
         let (exp_opt, scheduled_at) = token_refresh_schedule(
             token,
             now,
-            TOKEN_REFRESH_AHEAD_SECS,
+            refresh_ahead_secs,
             TOKEN_REFRESH_FALLBACK_AGE_SECS,
         );
         let _ =
@@ -318,10 +324,17 @@ pub(crate) fn refresh_tokens_before_expiry_for_all_accounts() -> Result<(), Stri
             skipped = skipped.saturating_add(1);
             continue;
         }
-        due_tokens.push(token.clone());
+        due_tokens.push(TokenRefreshTask {
+            issuer: resolve_token_refresh_issuer(
+                account_map.get(&token.account_id),
+                &default_issuer,
+            ),
+            client_id: client_id.clone(),
+            token: token.clone(),
+        });
     }
 
-    refreshed = refreshed.saturating_add(run_token_refresh_tasks(due_tokens, &issuer, &client_id)?);
+    refreshed = refreshed.saturating_add(run_token_refresh_tasks(due_tokens)?);
     let _ = (refreshed, skipped);
     Ok(())
 }
@@ -477,9 +490,13 @@ fn refresh_usage_for_token(
             }
             // 中文注释：token 刷新与持久化独立封装，避免轮询流程继续膨胀；
             // 不下沉会让后续 async 迁移时刷新链路与业务编排强耦合，回归范围扩大。
-            if let Err(refresh_err) =
-                refresh_and_persist_access_token(storage, &mut current, &issuer, &client_id)
-            {
+            if let Err(refresh_err) = refresh_and_persist_access_token(
+                storage,
+                &mut current,
+                &issuer,
+                &client_id,
+                token_refresh_ahead_secs(),
+            ) {
                 mark_usage_unreachable_if_needed(storage, &current.account_id, &refresh_err);
                 return Err(refresh_err);
             }
@@ -670,12 +687,26 @@ fn token_refresh_worker_count(total: usize) -> usize {
 ///
 /// # 返回
 /// 返回函数执行结果
-fn run_token_refresh_tasks(
-    tokens: Vec<Token>,
-    issuer: &str,
-    client_id: &str,
-) -> Result<usize, String> {
-    let total = tokens.len();
+#[derive(Clone)]
+struct TokenRefreshTask {
+    token: Token,
+    issuer: String,
+    client_id: String,
+}
+
+/// 函数 `run_token_refresh_tasks`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-02
+///
+/// # 参数
+/// - tasks: 参数 tasks
+///
+/// # 返回
+/// 返回函数执行结果
+fn run_token_refresh_tasks(tasks: Vec<TokenRefreshTask>) -> Result<usize, String> {
+    let total = tasks.len();
     if total == 0 {
         return Ok(0);
     }
@@ -684,18 +715,19 @@ fn run_token_refresh_tasks(
     if worker_count <= 1 {
         let storage = open_storage().ok_or_else(|| "storage unavailable".to_string())?;
         let mut refreshed = 0usize;
-        for mut token in tokens {
-            if run_token_refresh_task(&storage, &mut token, issuer, client_id) {
+        for task in tasks {
+            let mut token = task.token;
+            if run_token_refresh_task(&storage, &mut token, &task.issuer, &task.client_id) {
                 refreshed = refreshed.saturating_add(1);
             }
         }
         return Ok(refreshed);
     }
 
-    let (sender, receiver) = unbounded::<Token>();
-    for token in tokens {
+    let (sender, receiver) = unbounded::<TokenRefreshTask>();
+    for task in tasks {
         sender
-            .send(token)
+            .send(task)
             .map_err(|_| "enqueue token refresh task failed".to_string())?;
     }
     drop(sender);
@@ -710,8 +742,9 @@ fn run_token_refresh_tasks(
                 let storage = open_storage().ok_or_else(|| {
                     format!("token refresh worker {worker_index} storage unavailable")
                 })?;
-                while let Ok(mut token) = receiver.recv() {
-                    if run_token_refresh_task(&storage, &mut token, issuer, client_id) {
+                while let Ok(task) = receiver.recv() {
+                    let mut token = task.token;
+                    if run_token_refresh_task(&storage, &mut token, &task.issuer, &task.client_id) {
                         refreshed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
                 }
@@ -759,7 +792,13 @@ fn run_token_refresh_task(
         );
         return false;
     }
-    match refresh_and_persist_access_token(storage, token, issuer, client_id) {
+    match refresh_and_persist_access_token(
+        storage,
+        token,
+        issuer,
+        client_id,
+        token_refresh_ahead_secs(),
+    ) {
         Ok(_) => true,
         Err(err) => {
             let _ = mark_account_unavailable_for_auth_error(storage, &token.account_id, &err);
@@ -771,6 +810,14 @@ fn run_token_refresh_task(
             false
         }
     }
+}
+
+fn resolve_token_refresh_issuer(account: Option<&Account>, default_issuer: &str) -> String {
+    account
+        .map(|account| account.issuer.trim())
+        .filter(|issuer| !issuer.is_empty())
+        .unwrap_or(default_issuer)
+        .to_string()
 }
 
 /// 函数 `token_refresh_schedule`
@@ -796,11 +843,21 @@ fn token_refresh_schedule(
     if token.refresh_token.trim().is_empty() {
         return (None, i64::MAX);
     }
-    if let Some(exp) = extract_token_exp(&token.access_token) {
-        return (Some(exp), exp.saturating_sub(ahead_secs));
+    let access_exp = extract_token_exp(&token.access_token);
+    let refresh_exp = extract_token_exp(&token.refresh_token);
+    let access_refresh_at = access_exp.map(|exp| exp.saturating_sub(ahead_secs));
+    let refresh_refresh_at = refresh_exp.map(|exp| exp.saturating_sub(ahead_secs));
+    let scheduled_at = match (access_refresh_at, refresh_refresh_at) {
+        (Some(access_at), Some(refresh_at)) => Some(access_at.min(refresh_at)),
+        (Some(access_at), None) => Some(access_at),
+        (None, Some(refresh_at)) => Some(refresh_at),
+        (None, None) => None,
+    };
+    if let Some(scheduled_at) = scheduled_at {
+        return (access_exp, scheduled_at);
     }
     (
-        None,
+        access_exp,
         token
             .last_refresh
             .saturating_add(fallback_age_secs)
@@ -811,6 +868,10 @@ fn token_refresh_schedule(
 fn token_refresh_due_cutoff(now_ts_secs: i64, poll_interval_secs: u64) -> i64 {
     let lookahead_secs = poll_interval_secs.saturating_add(TOKEN_REFRESH_LOOKAHEAD_BUFFER_SECS);
     now_ts_secs.saturating_add(i64::try_from(lookahead_secs).unwrap_or(i64::MAX))
+}
+
+fn token_refresh_access_exp_cutoff(refresh_due_cutoff_ts: i64, ahead_secs: i64) -> i64 {
+    refresh_due_cutoff_ts.saturating_add(ahead_secs)
 }
 
 /// 函数 `should_retry_usage_refresh_with_token`

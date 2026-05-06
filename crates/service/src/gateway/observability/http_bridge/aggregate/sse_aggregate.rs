@@ -139,20 +139,29 @@ fn merge_response_output_item_event(synthesis: &mut ResponsesSseSynthesis, value
             }
             synthesis.output_items.insert(index, stored);
         }
-        "response.function_call_arguments.delta" | "response.function_call_arguments.done" => {
+        "response.function_call_arguments.delta"
+        | "response.function_call_arguments.done"
+        | "response.custom_tool_call_input.delta"
+        | "response.custom_tool_call_input.done" => {
             let fragment = value
                 .get("delta")
                 .and_then(Value::as_str)
                 .or_else(|| value.get("arguments").and_then(Value::as_str))
+                .or_else(|| value.get("input").and_then(Value::as_str))
                 .unwrap_or_default();
             let explicit_index = value.get("output_index").and_then(Value::as_i64);
             let index = reserve_output_index(synthesis, explicit_index);
+            let fallback_type = if event_type.starts_with("response.custom_tool_call_input.") {
+                "custom_tool_call"
+            } else {
+                "function_call"
+            };
             let entry = synthesis
                 .output_items
                 .entry(index)
-                .or_insert_with(|| json!({ "type": "function_call", "index": index }));
+                .or_insert_with(|| json!({ "type": fallback_type, "index": index }));
             if !entry.is_object() {
-                *entry = json!({ "type": "function_call", "index": index });
+                *entry = json!({ "type": fallback_type, "index": index });
             }
             let Some(entry_obj) = entry.as_object_mut() else {
                 return;
@@ -164,18 +173,30 @@ fn merge_response_output_item_event(synthesis: &mut ResponsesSseSynthesis, value
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
             {
-                entry_obj
-                    .entry("call_id".to_string())
-                    .or_insert_with(|| Value::String(call_id.to_string()));
+                if event_type.starts_with("response.custom_tool_call_input.") {
+                    entry_obj
+                        .entry("id".to_string())
+                        .or_insert_with(|| Value::String(call_id.to_string()));
+                } else {
+                    entry_obj
+                        .entry("call_id".to_string())
+                        .or_insert_with(|| Value::String(call_id.to_string()));
+                }
             }
             let mut arguments = entry_obj
                 .get("arguments")
                 .and_then(Value::as_str)
+                .or_else(|| entry_obj.get("input").and_then(Value::as_str))
                 .map(str::to_string)
                 .unwrap_or_default();
             merge_tool_call_arguments(&mut arguments, fragment);
             if !arguments.is_empty() {
-                entry_obj.insert("arguments".to_string(), Value::String(arguments));
+                let field = if event_type.starts_with("response.custom_tool_call_input.") {
+                    "input"
+                } else {
+                    "arguments"
+                };
+                entry_obj.insert(field.to_string(), Value::String(arguments));
             }
         }
         _ => {}

@@ -10,7 +10,7 @@ use crate::account_status::mark_account_unavailable_for_auth_error;
 use crate::apikey_models::read_managed_model_catalog_from_storage;
 use crate::storage_helpers::open_storage;
 use crate::usage_account_meta::workspace_header_for_account;
-use crate::usage_token_refresh::refresh_and_persist_access_token;
+use crate::usage_token_refresh::{refresh_and_persist_access_token, token_refresh_ahead_secs};
 
 const DEFAULT_WARMUP_MESSAGE: &str = "hi";
 const FALLBACK_WARMUP_MESSAGE: &str = "你好";
@@ -161,13 +161,18 @@ fn warmup_single_account(
                         .unwrap_or_else(|_| codexmanager_core::auth::DEFAULT_ISSUER.to_string());
                     let client_id = std::env::var("CODEXMANAGER_CLIENT_ID")
                         .unwrap_or_else(|_| codexmanager_core::auth::DEFAULT_CLIENT_ID.to_string());
-                    outcome =
-                        refresh_and_persist_access_token(storage, &mut token, &issuer, &client_id)
-                            .and_then(|_| {
-                                send_warmup_request_with_fallback(
-                                    client, &account, &token, model_slug, message,
-                                )
-                            });
+                    outcome = refresh_and_persist_access_token(
+                        storage,
+                        &mut token,
+                        &issuer,
+                        &client_id,
+                        token_refresh_ahead_secs(),
+                    )
+                    .and_then(|_| {
+                        send_warmup_request_with_fallback(
+                            client, &account, &token, model_slug, message,
+                        )
+                    });
                 }
             }
 

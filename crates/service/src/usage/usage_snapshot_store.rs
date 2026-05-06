@@ -61,7 +61,12 @@ pub(crate) fn apply_status_from_snapshot(
             set_account_status(storage, &record.account_id, "active", "usage_ok");
         }
         Availability::Unavailable("usage_exhausted_primary" | "usage_exhausted_secondary") => {
-            set_account_status(storage, &record.account_id, "limited", "usage_limit_exhausted");
+            set_account_status(
+                storage,
+                &record.account_id,
+                "limited",
+                "usage_limit_exhausted",
+            );
         }
         Availability::Unavailable(_) => {}
     }

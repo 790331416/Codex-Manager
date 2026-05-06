@@ -14,21 +14,16 @@ CodexManager is a local desktop + service-process account pool manager and gatew
 - Local OpenAI-compatible gateway for Codex CLI, Gemini CLI, Claude Code, and third-party tools.
 - Supports account routing, model/profile overrides, and aggregate API upstream relays.
 
-## Recent Commits
-
-- `524834e`: Cleanup pass for repository files.
-- `57d85d8`: Optimized the gateway HTTP bridge and session affinity, including keepalive handling, compression retry fallback, and bridge diagnostics.
-- `43778e4`: Improved `prompt_cache_key` passthrough and tightened account invalidation checks.
-
 ## Feature Overview
 
 - Account pool management: groups, tags, ordering, notes, ban recognition, and filtering.
 - Batch import/export: multi-file import, desktop recursive folder import, per-account export.
-- Usage display: 5-hour + 7-day windows, single-window accounts, and extra buckets such as Code Review / Spark.
+- Usage display: 5-hour + 7-day windows, single-window accounts, and official extra buckets such as Code Review / Spark.
 - Platform keys: create, disable, delete, model binding, reasoning tier, and service tier.
 - Aggregate API: create/edit/test third-party relay upstreams with supplier naming and priority ordering.
 - Plugin center: built-in, private, and custom source modes with task/log views and Rhai integration.
-- Local service + gateway: custom bind/listen settings and unified compatible endpoint.
+- Local service + gateway: custom bind/listen settings, upstream proxy, total request timeout, stream idle timeout, SSE keepalive, and a unified compatible endpoint.
+- Image generation: automatically injects the official Codex `image_generation` tool for `/v1/responses` by default, forwards explicit tools unchanged, and exposes compatible `/v1/images/generations` and `/v1/images/edits` endpoints with `gpt-image-2` as the default image tool model.
 
 ## Quick Start
 
@@ -48,7 +43,7 @@ CodexManager is a local desktop + service-process account pool manager and gatew
 ![Settings](../../assets/images/themes.png)
 
 ## Scope
-- Root `README.md` / `README.en.md`: project overview and quick start.
+- Root `README.md` and localized `docs/*/README.md`: project overview and quick start.
 - Root `CHANGELOG.md`: version history and unreleased changes.
 - `report/*`: operations, troubleshooting, compatibility notes, and FAQs.
 - `release/*`: build, packaging, release, and artifact documentation.
@@ -72,16 +67,6 @@ Thanks to the following sponsors for supporting CodexManager.
       <strong>Thanks to VisionCoder for supporting this project.</strong><br />
       <a href="https://coder.visioncoder.cn">VisionCoder Developer Platform</a> is a reliable and efficient API relay provider that offers mainstream AI models such as Claude Code, Codex, and Gemini, helping developers and teams integrate AI more easily and improve productivity.<br />
       <strong>Limited-time offer:</strong> VisionCoder is offering our users a <a href="https://coder.visioncoder.cn">Token Plan</a> promotion: buy 1 month and get 1 month free.
-    </td>
-  </tr>
-  <tr>
-    <td align="center" valign="middle" width="180">
-      <a href="https://www.aixiamo.com/">
-        <img src="../../assets/images/sponsors/aixiamo.ico" alt="XiaoMo AI Shop" width="88" />
-      </a>
-    </td>
-    <td valign="top">
-      <strong>XiaoMo AI Shop (MoDuanXia)</strong> provides stable GPT and Gemini membership top-up services for CodexManager users, with self-service purchase and activation. Register on the <a href="https://www.aixiamo.com/">official site</a>.
     </td>
   </tr>
   <tr>
@@ -111,6 +96,7 @@ Other supporters: [Wonderdch](https://github.com/Wonderdch), [suxinwl](https://g
 | What you need | Open this document |
 | --- | --- |
 | First launch, deployment, Docker, macOS allowlisting | [Runtime and Deployment Guide](report/runtime-and-deployment-guide.md) |
+| Configure Codex CLI / ccswitch `auth.json` and `config.toml` | [Runtime and Deployment Guide](report/runtime-and-deployment-guide.md#connect-through-ccswitch) |
 | Environment variables, database, ports, proxy, listen address | [Environment and Runtime Configuration](report/environment-and-runtime-config.md) |
 | Account routing, import errors, challenge interception | [FAQ and Account Routing Rules](report/faq-and-account-routing-rules.md) |
 | Why background jobs skip or disable accounts | [Background Task Account Skip Notes](report/background-task-account-skip-notes.md) |

@@ -1594,6 +1594,7 @@ export function normalizeAppSettings(payload: unknown): AppSettings {
     pluginMarketSourceUrl: asString(source.pluginMarketSourceUrl ?? source.plugin_market_source_url),
     upstreamProxyUrl: asString(source.upstreamProxyUrl),
     upstreamStreamTimeoutMs: asInteger(source.upstreamStreamTimeoutMs, 300_000, 0),
+    upstreamTotalTimeoutMs: asInteger(source.upstreamTotalTimeoutMs, 0, 0),
     sseKeepaliveIntervalMs: asInteger(source.sseKeepaliveIntervalMs, 15_000, 1),
     backgroundTasks: normalizeBackgroundTasks(source.backgroundTasks),
     envOverrides: normalizeStringRecord(source.envOverrides),

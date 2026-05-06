@@ -1,6 +1,3 @@
-pub(super) use super::protocol_adapter::{
-    adapt_request_for_protocol, adapt_upstream_response, ResponseAdapter,
-};
 pub(super) use super::request_rewrite::{apply_request_overrides, compute_upstream_url};
 pub(super) use super::should_failover_after_refresh;
 pub(super) use super::{
@@ -19,5 +16,4 @@ mod auth_headers;
 mod failover_paths;
 mod fallback_rules;
 mod metrics_tokens;
-mod protocol_adapter;
 mod upstream_headers;

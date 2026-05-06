@@ -245,17 +245,16 @@ fn gateway_error_status_change_invalidates_candidate_snapshot_cache() {
     let first = collect_gateway_candidates(&storage).expect("first candidates");
     assert_eq!(first.len(), 1);
 
-    assert!(!mark_account_unavailable_for_gateway_error(
+    assert!(mark_account_unavailable_for_gateway_error(
         &storage,
         "acc-cache-usage-limit",
         "You've hit your usage limit. To get more access now, try again at 8:02 PM."
     ));
 
     let second = collect_gateway_candidates(&storage).expect("second candidates");
-    assert_eq!(
-        second.len(),
-        1,
-        "usage-limit cooldown should not evict cached candidate"
+    assert!(
+        second.is_empty(),
+        "usage-limit should mark the account limited and evict cached candidate"
     );
 
     clear_candidate_cache_for_tests();

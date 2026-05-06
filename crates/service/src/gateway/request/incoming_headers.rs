@@ -18,6 +18,8 @@ pub(crate) struct IncomingHeaderSnapshot {
     turn_metadata: Option<String>,
     turn_state: Option<String>,
     parent_thread_id: Option<String>,
+    codex_installation_id: Option<String>,
+    responsesapi_include_timing_metrics: Option<String>,
     passthrough_codex_headers: Vec<(String, String)>,
     conversation_id: Option<String>,
 }
@@ -134,6 +136,22 @@ impl IncomingHeaderSnapshot {
             {
                 if !value.is_empty() {
                     snapshot.parent_thread_id = Some(value.to_string());
+                }
+                continue;
+            }
+            if snapshot.codex_installation_id.is_none()
+                && name.eq_ignore_ascii_case("x-codex-installation-id")
+            {
+                if !value.is_empty() {
+                    snapshot.codex_installation_id = Some(value.to_string());
+                }
+                continue;
+            }
+            if snapshot.responsesapi_include_timing_metrics.is_none()
+                && name.eq_ignore_ascii_case("x-responsesapi-include-timing-metrics")
+            {
+                if !value.is_empty() {
+                    snapshot.responsesapi_include_timing_metrics = Some(value.to_string());
                 }
                 continue;
             }
@@ -261,6 +279,24 @@ impl IncomingHeaderSnapshot {
                 let value = header.value.as_str().trim();
                 if !value.is_empty() {
                     snapshot.parent_thread_id = Some(value.to_string());
+                }
+                continue;
+            }
+            if snapshot.codex_installation_id.is_none()
+                && header.field.equiv("x-codex-installation-id")
+            {
+                let value = header.value.as_str().trim();
+                if !value.is_empty() {
+                    snapshot.codex_installation_id = Some(value.to_string());
+                }
+                continue;
+            }
+            if snapshot.responsesapi_include_timing_metrics.is_none()
+                && header.field.equiv("x-responsesapi-include-timing-metrics")
+            {
+                let value = header.value.as_str().trim();
+                if !value.is_empty() {
+                    snapshot.responsesapi_include_timing_metrics = Some(value.to_string());
                 }
                 continue;
             }
@@ -513,6 +549,36 @@ impl IncomingHeaderSnapshot {
     /// 返回函数执行结果
     pub(crate) fn parent_thread_id(&self) -> Option<&str> {
         self.parent_thread_id.as_deref()
+    }
+
+    /// 函数 `codex_installation_id`
+    ///
+    /// 作者: gaohongshun
+    ///
+    /// 时间: 2026-05-02
+    ///
+    /// # 参数
+    /// 无
+    ///
+    /// # 返回
+    /// 返回函数执行结果
+    pub(crate) fn codex_installation_id(&self) -> Option<&str> {
+        self.codex_installation_id.as_deref()
+    }
+
+    /// 函数 `responsesapi_include_timing_metrics`
+    ///
+    /// 作者: gaohongshun
+    ///
+    /// 时间: 2026-05-02
+    ///
+    /// # 参数
+    /// 无
+    ///
+    /// # 返回
+    /// 返回函数执行结果
+    pub(crate) fn responsesapi_include_timing_metrics(&self) -> Option<&str> {
+        self.responsesapi_include_timing_metrics.as_deref()
     }
 
     /// 函数 `passthrough_codex_headers`

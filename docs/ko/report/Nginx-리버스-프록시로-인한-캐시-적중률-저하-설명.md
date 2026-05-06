@@ -91,6 +91,29 @@ proxy_send_timeout 3600s;
 
 이 설정이 캐시 적중을 직접 만들어 주는 것은 아니지만, Responses, SSE, WebSocket 트래픽에서 프록시 간섭을 줄여 줍니다.
 
+### 4. `/v1/images/` 이미지 생성 경로를 별도 보수 설정으로 처리
+
+CodexManager 는 `/v1/images/generations` 및 `/v1/images/edits` 호환 엔드포인트를 지원합니다. 이 경로는 일반 텍스트 요청과 프록시 위험이 다릅니다.
+
+- `/v1/images/edits` 는 multipart 이미지 업로드로 request body 가 커질 수 있음
+- 이미지 생성은 일반 텍스트 첫 토큰보다 오래 걸릴 수 있음
+- `b64_json` 응답은 클 수 있어 기본 프록시 버퍼링이 지연 또는 중간 절단 위험을 키울 수 있음
+
+`/v1/images/` 에는 최소한 다음 설정을 유지하는 것이 좋습니다.
+
+```nginx
+client_max_body_size 0;
+proxy_buffering off;
+proxy_request_buffering off;
+gzip off;
+add_header X-Accel-Buffering no;
+proxy_read_timeout 3600s;
+proxy_send_timeout 3600s;
+send_timeout 3600s;
+```
+
+현재 저장소의 `docker/nginx/nginx.conf` 는 `location ^~ /v1/images/` 블록을 포함하며 이미지 생성 배포 기준으로 사용할 수 있습니다.
+
 ## 권장 예시 설정
 
 다음 파일을 참고하세요.
@@ -105,6 +128,7 @@ proxy_send_timeout 3600s;
 - 밑줄 헤더 허용
 - 세션 관련 헤더 명시적 전달
 - 스트리밍 친화적인 API 프록시 설정
+- `/v1/images/generations` 및 `/v1/images/edits` 이미지 생성 프록시 설정
 
 ## 배포 후 검증 방법
 

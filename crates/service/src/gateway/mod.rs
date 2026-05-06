@@ -87,6 +87,8 @@ mod local_validation;
 #[path = "observability/metrics.rs"]
 mod metrics;
 mod model_picker;
+#[path = "request/official_responses_http.rs"]
+mod official_responses_http;
 #[path = "auth/openai_fallback.rs"]
 mod openai_fallback;
 mod protocol_adapter;
@@ -129,12 +131,10 @@ pub(crate) use metrics::{
     begin_rpc_request, duration_to_millis, gateway_metrics_prometheus,
     record_usage_refresh_outcome, GatewayCandidateSkipReason,
 };
+pub(super) use official_responses_http::normalize_official_responses_http_body;
+use protocol_adapter::build_gemini_error_body;
 use protocol_adapter::{
-    adapt_request_for_protocol, adapt_upstream_response_with_tool_name_restore_map,
-    build_anthropic_error_body, build_gemini_error_body,
-    convert_openai_chat_stream_chunk_with_tool_name_restore_map,
-    convert_openai_completions_stream_chunk, GeminiStreamOutputMode, ResponseAdapter,
-    ToolNameRestoreMap,
+    adapt_request_for_protocol, GeminiStreamOutputMode, ResponseAdapter, ToolNameRestoreMap,
 };
 pub(super) use request_helpers::{
     inspect_service_tier_for_log, inspect_service_tier_value, is_html_content_type,
@@ -155,7 +155,8 @@ pub(super) use thread_anchor::{
     resolve_local_conversation_id_with_sticky_fallback,
 };
 pub(crate) use trace_log::{
-    log_client_service_tier, log_request_final, log_request_start, next_trace_id,
+    log_client_service_tier, log_request_execution_plan, log_request_final, log_request_start,
+    next_trace_id,
 };
 #[cfg(test)]
 use upstream::config::normalize_upstream_base_url;
@@ -423,7 +424,6 @@ pub(crate) fn reload_runtime_config_from_env() {
     upstream::config::reload_from_env();
     trace_log::reload_from_env();
     http_bridge::reload_from_env();
-    protocol_adapter::prompt_cache::reload_runtime_state();
 }
 
 /// 函数 `current_route_strategy`
@@ -758,6 +758,10 @@ pub(crate) fn current_upstream_proxy_url() -> Option<String> {
     runtime_config::upstream_proxy_url()
 }
 
+pub(crate) fn current_upstream_proxy_url_for_account(account_id: &str) -> Option<String> {
+    runtime_config::upstream_proxy_url_for_account(account_id)
+}
+
 /// 函数 `set_upstream_proxy_url`
 ///
 /// 作者: gaohongshun
@@ -791,6 +795,10 @@ pub(crate) fn current_upstream_stream_timeout_ms() -> u64 {
     runtime_config::current_upstream_stream_timeout_ms()
 }
 
+pub(crate) fn current_upstream_total_timeout_ms() -> u64 {
+    runtime_config::current_upstream_total_timeout_ms()
+}
+
 /// 函数 `set_upstream_stream_timeout_ms`
 ///
 /// 作者: gaohongshun
@@ -804,6 +812,10 @@ pub(crate) fn current_upstream_stream_timeout_ms() -> u64 {
 /// 返回函数执行结果
 pub(crate) fn set_upstream_stream_timeout_ms(timeout_ms: u64) -> u64 {
     runtime_config::set_upstream_stream_timeout_ms(timeout_ms)
+}
+
+pub(crate) fn set_upstream_total_timeout_ms(timeout_ms: u64) -> u64 {
+    runtime_config::set_upstream_total_timeout_ms(timeout_ms)
 }
 
 /// 函数 `current_sse_keepalive_interval_ms`

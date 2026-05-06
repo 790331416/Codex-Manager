@@ -24,7 +24,12 @@ type AccountExportPayload = Parameters<typeof accountClient.export>[0];
 type ExportResult = Awaited<ReturnType<typeof accountClient.export>>;
 type WarmupPayload = Parameters<typeof accountClient.warmup>[0];
 type WarmupResult = Awaited<ReturnType<typeof accountClient.warmup>>;
-type DeleteUnavailableFreeResult = { deleted?: number };
+type RefreshAllRtResult = Awaited<
+  ReturnType<typeof accountClient.refreshAllChatgptAuthTokens>
+>;
+type DeleteAccountsByStatusesResult = Awaited<
+  ReturnType<typeof accountClient.deleteByStatuses>
+>;
 type AccountSortUpdate = { accountId: string; sort: number };
 
 /**
@@ -94,6 +99,19 @@ function formatUsageRefreshErrorMessage(
   return message;
 }
 
+function getAccountsAutoRefreshIntervalMs(
+  enabled: boolean,
+  intervalSecs: number,
+): number | false {
+  if (!enabled) {
+    return false;
+  }
+  if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+    return false;
+  }
+  return Math.max(1, intervalSecs) * 1000;
+}
+
 /**
  * 函数 `useAccounts`
  *
@@ -112,11 +130,16 @@ export function useAccounts() {
   const { t } = useI18n();
   const localDayRange = useLocalDayRange();
   const serviceStatus = useAppStore((state) => state.serviceStatus);
+  const backgroundTasks = useAppStore((state) => state.appSettings.backgroundTasks);
   const { canAccessManagementRpc } = useRuntimeCapabilities();
   const isServiceReady = canAccessManagementRpc && serviceStatus.connected;
   const isPageActive = useDesktopPageActive("/accounts/");
   const areAccountQueriesEnabled = useDeferredDesktopActivation(
     isServiceReady && isPageActive,
+  );
+  const accountsAutoRefreshIntervalMs = getAccountsAutoRefreshIntervalMs(
+    areAccountQueriesEnabled && backgroundTasks.usagePollingEnabled,
+    backgroundTasks.usagePollIntervalSecs,
   );
   const startupSnapshot = queryClient.getQueryData<StartupSnapshot>(
     buildStartupSnapshotQueryKey(
@@ -155,6 +178,8 @@ export function useAccounts() {
     queryFn: () => accountClient.list(),
     enabled: areAccountQueriesEnabled,
     retry: 1,
+    refetchInterval: accountsAutoRefreshIntervalMs,
+    refetchIntervalInBackground: false,
     placeholderData: (previousData): AccountListResult | undefined =>
       previousData ||
       (startupAccounts.length > 0
@@ -172,6 +197,8 @@ export function useAccounts() {
     queryFn: () => accountClient.listUsage(),
     enabled: areAccountQueriesEnabled,
     retry: 1,
+    refetchInterval: accountsAutoRefreshIntervalMs,
+    refetchIntervalInBackground: false,
     placeholderData: (previousData) =>
       previousData || (startupUsages.length > 0 ? startupUsages : undefined),
   });
@@ -280,6 +307,59 @@ export function useAccounts() {
     },
   });
 
+  const refreshAccountRtMutation = useMutation({
+    mutationFn: (accountId: string) =>
+      accountClient.refreshChatgptAuthTokens(accountId),
+    onSuccess: () => {
+      toast.success(t("账号 AT/RT 已刷新"));
+    },
+    onError: (error: unknown) => {
+      toast.error(`${t("刷新 AT/RT 失败")}: ${getAppErrorMessage(error)}`);
+    },
+    onSettled: async () => {
+      await invalidateAll();
+    },
+  });
+
+  const refreshAllAccountRtMutation = useMutation({
+    mutationFn: () => accountClient.refreshAllChatgptAuthTokens(),
+    onSuccess: (result: RefreshAllRtResult) => {
+      const succeeded = Number(result?.succeeded || 0);
+      const failed = Number(result?.failed || 0);
+      const skipped = Number(result?.skipped || 0);
+      if (failed > 0) {
+        const firstFailure = (result?.results || []).find((item) => !item.ok);
+        toast.warning(
+          firstFailure?.message
+            ? t("AT/RT 刷新完成：成功{success}个，失败{failed}个，跳过{skipped}个；首个失败：{message}", {
+                success: succeeded,
+                failed,
+                skipped,
+                message: firstFailure.message,
+              })
+            : t("AT/RT 刷新完成：成功{success}个，失败{failed}个，跳过{skipped}个", {
+                success: succeeded,
+                failed,
+                skipped,
+              }),
+        );
+        return;
+      }
+      toast.success(
+        t("AT/RT 刷新完成：成功{success}个，跳过{skipped}个", {
+          success: succeeded,
+          skipped,
+        }),
+      );
+    },
+    onError: (error: unknown) => {
+      toast.error(`${t("批量刷新 AT/RT 失败")}: ${getAppErrorMessage(error)}`);
+    },
+    onSettled: async () => {
+      await invalidateAll();
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (accountId: string) => accountClient.delete(accountId),
     onSuccess: async () => {
@@ -302,15 +382,15 @@ export function useAccounts() {
     },
   });
 
-  const deleteUnavailableFreeMutation = useMutation({
-    mutationFn: () => accountClient.deleteUnavailableFree(),
-    onSuccess: async (result: DeleteUnavailableFreeResult) => {
+  const deleteByStatusesMutation = useMutation({
+    mutationFn: (statuses: string[]) => accountClient.deleteByStatuses({ statuses }),
+    onSuccess: async (result: DeleteAccountsByStatusesResult) => {
       await invalidateAll();
       const deleted = Number(result?.deleted || 0);
       if (deleted > 0) {
-        toast.success(t("已移除 {count} 个不可用免费账号", { count: deleted }));
+        toast.success(t("已清理 {count} 个账号", { count: deleted }));
       } else {
-        toast.success(t("未发现可清理的不可用免费账号"));
+        toast.success(t("未发现可清理的账号"));
       }
     },
     onError: (error: unknown) => {
@@ -546,7 +626,29 @@ export function useAccounts() {
     isServiceReady,
     refreshAccount: (accountId: string) => {
       if (!ensureServiceReady("刷新账号")) return;
-      refreshAccountMutation.mutate(accountId);
+      const targetAccountId = accountId.trim();
+      if (!targetAccountId) {
+        toast.error(t("未找到当前账号，请刷新后重试"));
+        return;
+      }
+      refreshAccountMutation.mutate(targetAccountId);
+    },
+    refreshAccountRt: (accountId: string) => {
+      if (!ensureServiceReady("刷新 AT/RT")) return;
+      const targetAccountId = accountId.trim();
+      if (!targetAccountId) {
+        toast.error(t("未找到当前账号，请刷新后重试"));
+        return;
+      }
+      refreshAccountRtMutation.mutate(targetAccountId);
+    },
+    refreshAllAccountRt: () => {
+      if (!ensureServiceReady("刷新 AT/RT")) return;
+      if (!accounts.length) {
+        toast.info(t("当前没有可刷新的账号"));
+        return;
+      }
+      refreshAllAccountRtMutation.mutate();
     },
     refreshAllAccounts: () => {
       if (!ensureServiceReady("刷新账号")) return;
@@ -569,9 +671,9 @@ export function useAccounts() {
       if (!ensureServiceReady("批量删除账号")) return;
       deleteManyMutation.mutate(accountIds);
     },
-    deleteUnavailableFree: () => {
+    cleanupAccountsByStatuses: async (statuses: string[]) => {
       if (!ensureServiceReady("清理账号")) return;
-      deleteUnavailableFreeMutation.mutate();
+      await deleteByStatusesMutation.mutateAsync(statuses);
     },
     importByFile: () => {
       if (!ensureServiceReady("导入账号")) return;
@@ -630,10 +732,17 @@ export function useAccounts() {
       refreshAccountMutation.isPending && typeof refreshAccountMutation.variables === "string"
         ? refreshAccountMutation.variables
         : "",
+    isRefreshingRtAccountId:
+      refreshAccountRtMutation.isPending &&
+      typeof refreshAccountRtMutation.variables === "string"
+        ? refreshAccountRtMutation.variables
+        : "",
+    isRefreshingAllRtAccounts: refreshAllAccountRtMutation.isPending,
     isRefreshingAllAccounts: refreshAllMutation.isPending,
     isExporting: exportMutation.isPending,
     isWarmingUpAccounts: warmupMutation.isPending,
     isDeletingMany: deleteManyMutation.isPending,
+    isCleaningAccountsByStatus: deleteByStatusesMutation.isPending,
     isUpdatingPreferred:
       setPreferredMutation.isPending || clearPreferredMutation.isPending,
     isUpdatingSortAccountId:

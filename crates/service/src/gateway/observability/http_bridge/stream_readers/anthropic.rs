@@ -10,6 +10,7 @@ pub(crate) struct AnthropicSseReader {
     upstream: UpstreamSseFramePump,
     out_cursor: Cursor<Vec<u8>>,
     state: AnthropicSseState,
+    tool_name_restore_map: Option<crate::gateway::ToolNameRestoreMap>,
     usage_collector: Arc<Mutex<UpstreamResponseUsage>>,
     request_started_at: Instant,
     last_upstream_activity: Instant,
@@ -34,6 +35,33 @@ struct AnthropicSseState {
 }
 
 impl AnthropicSseReader {
+    pub(crate) fn from_reader<R>(
+        upstream: R,
+        usage_collector: Arc<Mutex<UpstreamResponseUsage>>,
+        fallback_model: Option<&str>,
+        tool_name_restore_map: Option<crate::gateway::ToolNameRestoreMap>,
+        request_started_at: Instant,
+    ) -> Self
+    where
+        R: Read + Send + 'static,
+    {
+        let mut state = AnthropicSseState::default();
+        state.model = fallback_model
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        Self {
+            upstream: UpstreamSseFramePump::from_reader(upstream),
+            out_cursor: Cursor::new(Vec::new()),
+            state,
+            tool_name_restore_map,
+            usage_collector,
+            request_started_at,
+            last_upstream_activity: Instant::now(),
+            saw_upstream_frame: false,
+        }
+    }
+
     /// 函数 `new`
     ///
     /// 作者: gaohongshun
@@ -49,22 +77,16 @@ impl AnthropicSseReader {
         upstream: reqwest::blocking::Response,
         usage_collector: Arc<Mutex<UpstreamResponseUsage>>,
         fallback_model: Option<&str>,
+        tool_name_restore_map: Option<crate::gateway::ToolNameRestoreMap>,
         request_started_at: Instant,
     ) -> Self {
-        let mut state = AnthropicSseState::default();
-        state.model = fallback_model
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string);
-        Self {
-            upstream: UpstreamSseFramePump::new(upstream),
-            out_cursor: Cursor::new(Vec::new()),
-            state,
+        Self::from_reader(
+            upstream,
             usage_collector,
+            fallback_model,
+            tool_name_restore_map,
             request_started_at,
-            last_upstream_activity: Instant::now(),
-            saw_upstream_frame: false,
-        }
+        )
     }
 
     /// 函数 `next_chunk`
@@ -257,7 +279,8 @@ impl AnthropicSseReader {
                 let tool_name = item_obj
                     .get("name")
                     .and_then(Value::as_str)
-                    .unwrap_or("tool");
+                    .map(|name| restore_tool_name(name, self.tool_name_restore_map.as_ref()))
+                    .unwrap_or_else(|| "tool".to_string());
                 append_sse_event(
                     &mut out,
                     "content_block_start",
@@ -721,4 +744,14 @@ fn tool_input_partial_json(value: Value) -> Option<String> {
         return None;
     }
     Some(trimmed.to_string())
+}
+
+fn restore_tool_name(
+    name: &str,
+    tool_name_restore_map: Option<&crate::gateway::ToolNameRestoreMap>,
+) -> String {
+    tool_name_restore_map
+        .and_then(|map| map.get(name))
+        .cloned()
+        .unwrap_or_else(|| name.to_string())
 }

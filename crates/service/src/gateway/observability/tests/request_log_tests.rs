@@ -81,6 +81,20 @@ fn estimate_cost_matches_openai_gpt54_and_mini_prices() {
     assert_close(actual, 0.00955);
 }
 
+#[test]
+fn estimate_cost_matches_openai_gpt55_prices() {
+    // gpt-5.5：输入 5/M，缓存 0.5/M，输出 30/M
+    // 样本：输入 1000，缓存 200，输出 500
+    // => 非缓存输入 800*0.005/1000 + 缓存 200*0.0005/1000 + 输出 500*0.03/1000
+    // => 0.0191
+    let actual = estimate_cost_usd(Some("gpt-5.5"), Some(1000), Some(200), Some(500));
+    assert_close(actual, 0.0191);
+
+    // gpt-5.5-pro：输入 30/M，输出 180/M；无缓存折扣时按输入同价处理。
+    let actual = estimate_cost_usd(Some("gpt-5.5-pro"), Some(1000), Some(200), Some(500));
+    assert_close(actual, 0.12);
+}
+
 /// 函数 `estimate_cost_matches_openai_gpt54_large_context_prices`
 ///
 /// 作者: gaohongshun
@@ -100,6 +114,22 @@ fn estimate_cost_matches_openai_gpt54_large_context_prices() {
     // => 3.525
     let actual = estimate_cost_usd(Some("gpt-5.4"), Some(300_000), Some(50_000), Some(100_000));
     assert_close(actual, 3.525);
+}
+
+#[test]
+fn estimate_cost_matches_openai_gpt55_large_context_prices() {
+    // gpt-5.5：输入达到 270K 时，输入 10/M，缓存 1/M，输出 45/M。
+    let actual = estimate_cost_usd(Some("gpt-5.5"), Some(300_000), Some(50_000), Some(100_000));
+    assert_close(actual, 7.05);
+
+    // gpt-5.5-pro：输入达到 270K 时，输入 60/M，输出 270/M。
+    let actual = estimate_cost_usd(
+        Some("gpt-5.5-pro"),
+        Some(300_000),
+        Some(50_000),
+        Some(100_000),
+    );
+    assert_close(actual, 45.0);
 }
 
 /// 函数 `estimate_cost_matches_openai_gpt54_pro_prices`
@@ -221,6 +251,21 @@ fn estimate_cost_matches_current_codex_price_for_gpt_5_3_codex() {
 }
 
 #[test]
+fn estimate_cost_matches_openai_image_generation_prices() {
+    // 图片模型官方按 Text / Image modality 分价；当前请求日志没有 modality 分桶，
+    // 因此按 Image token 单价估算，避免低估图片生成费用。
+    let cases = [
+        ("gpt-image-2", 0.0218_f64),
+        ("gpt-image-1.5", 0.0228_f64),
+        ("gpt-image-1-mini", 0.00605_f64),
+    ];
+    for (model, expected) in cases {
+        let actual = estimate_cost_usd(Some(model), Some(1000), Some(200), Some(500));
+        assert_close(actual, expected);
+    }
+}
+
+#[test]
 fn gateway_error_fallback_matches_cloudflare_and_rate_limit_errors() {
     assert!(should_write_gateway_error_fallback(
         Some(403),
@@ -293,6 +338,18 @@ fn estimate_cost_matches_openai_gpt4o_and_o3_prices() {
 
 #[test]
 fn estimate_cost_switches_to_long_context_rates_at_270k_boundary() {
+    let gpt55_actual =
+        estimate_cost_usd(Some("gpt-5.5"), Some(270_000), Some(20_000), Some(10_000));
+    assert_close(gpt55_actual, 2.97);
+
+    let gpt55_pro_actual = estimate_cost_usd(
+        Some("gpt-5.5-pro"),
+        Some(270_000),
+        Some(20_000),
+        Some(10_000),
+    );
+    assert_close(gpt55_pro_actual, 18.9);
+
     let gpt54_actual =
         estimate_cost_usd(Some("gpt-5.4"), Some(270_000), Some(20_000), Some(10_000));
     assert_close(gpt54_actual, 1.485);

@@ -82,3 +82,32 @@ test("readChatgptAuthTokensRefreshResult 对齐刷新返回字段", () => {
   assert.equal(result.hasSubscription, true);
   assert.equal(result.subscriptionPlan, "team");
 });
+
+test("readChatgptAuthTokensRefreshAllResult 对齐批量刷新返回字段", () => {
+  const result = accountAuth.readChatgptAuthTokensRefreshAllResult({
+    requested: "2",
+    succeeded: 1,
+    failed: "1",
+    skipped: 0,
+    results: [
+      {
+        accountId: " acc-1 ",
+        accountName: " demo@example.com ",
+        ok: true,
+        message: null,
+      },
+      {
+        accountId: "acc-2",
+        accountName: "failed@example.com",
+        ok: false,
+        message: " reused ",
+      },
+    ],
+  });
+
+  assert.equal(result.requested, 2);
+  assert.equal(result.succeeded, 1);
+  assert.equal(result.failed, 1);
+  assert.equal(result.results[0].accountId, "acc-1");
+  assert.equal(result.results[1].message, "reused");
+});

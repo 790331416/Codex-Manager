@@ -31,7 +31,8 @@ use super::{
     APP_SETTING_GATEWAY_ORIGINATOR_KEY, APP_SETTING_GATEWAY_REQUEST_COMPRESSION_ENABLED_KEY,
     APP_SETTING_GATEWAY_RESIDENCY_REQUIREMENT_KEY, APP_SETTING_GATEWAY_ROUTE_STRATEGY_KEY,
     APP_SETTING_GATEWAY_SSE_KEEPALIVE_INTERVAL_MS_KEY, APP_SETTING_GATEWAY_UPSTREAM_PROXY_URL_KEY,
-    APP_SETTING_GATEWAY_UPSTREAM_STREAM_TIMEOUT_MS_KEY, APP_SETTING_GATEWAY_USER_AGENT_VERSION_KEY,
+    APP_SETTING_GATEWAY_UPSTREAM_STREAM_TIMEOUT_MS_KEY,
+    APP_SETTING_GATEWAY_UPSTREAM_TOTAL_TIMEOUT_MS_KEY, APP_SETTING_GATEWAY_USER_AGENT_VERSION_KEY,
 };
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -346,6 +347,17 @@ pub fn fetch_codex_latest_version() -> Result<CodexLatestVersionInfo, String> {
     fetch_codex_latest_version_from_url(CODEX_NPM_LATEST_URL)
 }
 
+pub(crate) fn sync_gateway_user_agent_version_from_codex_latest() -> Result<String, String> {
+    sync_gateway_user_agent_version_from_codex_latest_url(CODEX_NPM_LATEST_URL)
+}
+
+fn sync_gateway_user_agent_version_from_codex_latest_url(
+    registry_url: &str,
+) -> Result<String, String> {
+    let latest = fetch_codex_latest_version_from_url(registry_url)?;
+    set_gateway_user_agent_version(latest.version.as_str())
+}
+
 fn fetch_codex_latest_version_from_url(
     registry_url: &str,
 ) -> Result<CodexLatestVersionInfo, String> {
@@ -473,6 +485,15 @@ pub fn set_gateway_upstream_stream_timeout_ms(timeout_ms: u64) -> Result<u64, St
     Ok(applied)
 }
 
+pub fn set_gateway_upstream_total_timeout_ms(timeout_ms: u64) -> Result<u64, String> {
+    let applied = gateway::set_upstream_total_timeout_ms(timeout_ms);
+    save_persisted_app_setting(
+        APP_SETTING_GATEWAY_UPSTREAM_TOTAL_TIMEOUT_MS_KEY,
+        Some(&applied.to_string()),
+    )?;
+    Ok(applied)
+}
+
 /// 函数 `current_gateway_upstream_stream_timeout_ms`
 ///
 /// 作者: gaohongshun
@@ -486,6 +507,10 @@ pub fn set_gateway_upstream_stream_timeout_ms(timeout_ms: u64) -> Result<u64, St
 /// 返回函数执行结果
 pub fn current_gateway_upstream_stream_timeout_ms() -> u64 {
     gateway::current_upstream_stream_timeout_ms()
+}
+
+pub fn current_gateway_upstream_total_timeout_ms() -> u64 {
+    gateway::current_upstream_total_timeout_ms()
 }
 
 /// 函数 `set_gateway_sse_keepalive_interval_ms`
@@ -561,25 +586,72 @@ pub(crate) fn current_background_tasks_snapshot_value() -> Result<serde_json::Va
 
 #[cfg(test)]
 mod tests {
-    use super::fetch_codex_latest_version_from_url;
+    use super::{
+        fetch_codex_latest_version_from_url, sync_gateway_user_agent_version_from_codex_latest_url,
+    };
+    use crate::APP_SETTING_GATEWAY_USER_AGENT_VERSION_KEY;
+    use codexmanager_core::storage::Storage;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
     use tiny_http::{Header, Response, Server};
 
-    #[test]
-    fn fetch_codex_latest_version_reads_registry_payload() {
-        let _guard = crate::test_env_guard();
+    struct EnvGuard {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: Option<&str>) -> Self {
+            let previous = std::env::var_os(key);
+            match value {
+                Some(current) => std::env::set_var(key, current),
+                None => std::env::remove_var(key),
+            }
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(value) = self.previous.as_ref() {
+                std::env::set_var(self.key, value);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    fn unique_temp_db_path() -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        std::env::temp_dir().join(format!("codexmanager-codex-latest-sync-{unique}.db"))
+    }
+
+    fn spawn_latest_registry(version: &'static str) -> (String, std::thread::JoinHandle<()>) {
         let server = Server::http("127.0.0.1:0").expect("start mock registry server");
         let registry_url = format!("http://{}/latest", server.server_addr());
         let join = std::thread::spawn(move || {
             let request = server.recv().expect("receive mock registry request");
-            let response = Response::from_string(r#"{"name":"@openai/codex","version":"0.120.0"}"#)
-                .with_header(
-                    Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
-                        .expect("build content type header"),
-                );
+            let response = Response::from_string(format!(
+                r#"{{"name":"@openai/codex","version":"{version}"}}"#
+            ))
+            .with_header(
+                Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                    .expect("build content type header"),
+            );
             request
                 .respond(response)
                 .expect("respond mock registry response");
         });
+        (registry_url, join)
+    }
+
+    #[test]
+    fn fetch_codex_latest_version_reads_registry_payload() {
+        let _guard = crate::test_env_guard();
+        let (registry_url, join) = spawn_latest_registry("0.120.0");
 
         let result = fetch_codex_latest_version_from_url(registry_url.as_str())
             .expect("fetch latest version");
@@ -589,5 +661,30 @@ mod tests {
         assert_eq!(result.version, "0.120.0");
         assert_eq!(result.dist_tag, "latest");
         assert_eq!(result.registry_url, registry_url);
+    }
+
+    #[test]
+    fn sync_gateway_user_agent_version_from_codex_latest_persists_runtime_version() {
+        let _guard = crate::test_env_guard();
+        let db_path = unique_temp_db_path();
+        let _db_env = EnvGuard::set("CODEXMANAGER_DB_PATH", Some(&db_path.to_string_lossy()));
+        crate::initialize_storage_if_needed().expect("init storage");
+        let (registry_url, join) = spawn_latest_registry("0.128.0");
+
+        let version = sync_gateway_user_agent_version_from_codex_latest_url(registry_url.as_str())
+            .expect("sync latest version");
+
+        join.join().expect("join mock registry server");
+        assert_eq!(version, "0.128.0");
+        assert_eq!(crate::current_gateway_user_agent_version(), "0.128.0");
+
+        let storage = Storage::open(&db_path).expect("open storage");
+        assert_eq!(
+            storage
+                .get_app_setting(APP_SETTING_GATEWAY_USER_AGENT_VERSION_KEY)
+                .expect("read persisted version"),
+            Some("0.128.0".to_string())
+        );
+        let _ = std::fs::remove_file(db_path);
     }
 }

@@ -1,7 +1,5 @@
 use codexmanager_core::storage::{now_ts, Event, Storage};
 
-use crate::account_availability::{evaluate_snapshot, Availability};
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AccountAvailabilitySignal {
     RefreshToken(crate::usage_http::RefreshTokenAuthErrorReason),
@@ -295,19 +293,6 @@ fn mark_account_unavailable_for_confirmed_usage_exhausted(
     storage: &Storage,
     account_id: &str,
 ) -> bool {
-    let snapshot = storage
-        .latest_usage_snapshot_for_account(account_id)
-        .ok()
-        .flatten();
-    let exhausted = matches!(
-        snapshot.as_ref().map(evaluate_snapshot),
-        Some(Availability::Unavailable(
-            "usage_exhausted_primary" | "usage_exhausted_secondary"
-        ))
-    );
-    if !exhausted {
-        return false;
-    }
     set_account_limited_with_reason(storage, account_id, "usage_limit_exhausted")
 }
 
@@ -580,7 +565,7 @@ mod tests {
         assert!(!network_last.should_mark_account_unavailable);
     }
 
-    /// 函数 `gateway_usage_limit_error_does_not_persist_unavailable_status`
+    /// 函数 `gateway_usage_limit_error_marks_account_limited_immediately`
     ///
     /// 作者: gaohongshun
     ///
@@ -592,7 +577,7 @@ mod tests {
     /// # 返回
     /// 无
     #[test]
-    fn gateway_usage_limit_error_does_not_persist_unavailable_status() {
+    fn gateway_usage_limit_error_marks_account_limited_immediately() {
         let _guard = crate::test_env_guard();
         let storage = Storage::open_in_memory().expect("open storage");
         storage.init().expect("init storage");
@@ -612,7 +597,7 @@ mod tests {
             })
             .expect("insert account");
 
-        assert!(!mark_account_unavailable_for_gateway_error(
+        assert!(mark_account_unavailable_for_gateway_error(
             &storage,
             "acc-usage-limit",
             "You've hit your usage limit. To get more access now, try again at 8:02 PM."
@@ -622,7 +607,14 @@ mod tests {
             .find_account_by_id("acc-usage-limit")
             .expect("find account")
             .expect("account exists");
-        assert_eq!(account.status, "active");
+        assert_eq!(account.status, "limited");
+        let reasons = storage
+            .latest_account_status_reasons(&["acc-usage-limit".to_string()])
+            .expect("load reasons");
+        assert_eq!(
+            reasons.get("acc-usage-limit").map(String::as_str),
+            Some("usage_limit_exhausted")
+        );
     }
 
     /// 函数 `gateway_usage_limit_error_marks_account_limited_when_snapshot_exhausted`

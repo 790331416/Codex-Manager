@@ -141,6 +141,14 @@ fn refresh_token_status_error_includes_body_snippet() {
     );
 }
 
+#[test]
+fn refresh_token_body_matches_codex_refresh_scope() {
+    assert_eq!(
+        super::build_refresh_token_body("client-id", "refresh-token"),
+        "client_id=client-id&grant_type=refresh_token&refresh_token=refresh-token&scope=openid+profile+email"
+    );
+}
+
 /// 函数 `refresh_token_status_error_maps_invalidated_401_to_official_message`
 ///
 /// 作者: gaohongshun
@@ -355,6 +363,15 @@ fn refresh_token_auth_error_reason_from_message_tracks_canonical_messages() {
     assert_eq!(
         super::refresh_token_auth_error_reason_from_message(&unknown),
         Some(super::RefreshTokenAuthErrorReason::Unknown401)
+    );
+
+    let invalid_grant = super::format_refresh_token_status_error(
+        StatusCode::BAD_REQUEST,
+        "{\"error\":\"invalid_grant\"}",
+    );
+    assert_eq!(
+        super::refresh_token_auth_error_reason_from_message(&invalid_grant),
+        Some(super::RefreshTokenAuthErrorReason::InvalidGrant)
     );
 }
 

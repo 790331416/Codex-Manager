@@ -2,50 +2,44 @@ use serde_json::{json, Map, Value};
 use std::io::{Cursor, Read};
 use std::sync::{Arc, Mutex};
 
-use super::super::{
-    convert_openai_chat_stream_chunk_with_tool_name_restore_map,
-    convert_openai_completions_stream_chunk, ToolNameRestoreMap,
+use super::{
+    append_output_text, collect_output_text_from_event_fields, collect_response_output_text,
+    extract_error_hint_from_body, extract_error_message_from_json, merge_usage,
 };
 use super::{
-    append_output_text, apply_openai_stream_meta_defaults, build_chat_fallback_content_chunk,
-    build_completion_fallback_text_chunk, collect_output_text_from_event_fields,
-    collect_response_output_text, extract_openai_completed_output_text, extract_sse_frame_payload,
-    inspect_sse_frame, inspect_sse_frame_for_protocol, is_response_completed_event_name,
-    map_chunk_has_chat_text, map_chunk_has_completion_text, merge_usage,
-    normalize_chat_chunk_delta_role, parse_sse_frame_json, should_skip_chat_live_text_event,
-    should_skip_completion_live_text_event, update_openai_stream_meta, OpenAIResponsesEvent,
-    OpenAIStreamMeta, PassthroughSseProtocol, SseTerminal, UpstreamResponseUsage,
+    build_images_api_response, chat_image_payload, collect_image_generation_data_urls,
+    collect_image_generation_results, image_generation_result_payload, images_usage_value,
+    inspect_sse_frame_for_protocol, ImagesResponseFormat, OpenAIResponsesEvent,
+    PassthroughSseProtocol, SseTerminal, UpstreamResponseUsage,
 };
-
 #[path = "stream_readers/anthropic.rs"]
 mod anthropic;
+#[path = "stream_readers/chat_completions.rs"]
+mod chat_completions;
 #[path = "stream_readers/common.rs"]
 mod common;
 #[path = "stream_readers/gemini.rs"]
 mod gemini;
-#[path = "stream_readers/openai_chat.rs"]
-mod openai_chat;
-#[path = "stream_readers/openai_completions.rs"]
-mod openai_completions;
+#[path = "stream_readers/images.rs"]
+mod images;
 #[path = "stream_readers/openai_responses.rs"]
 mod openai_responses;
 #[path = "stream_readers/passthrough.rs"]
 mod passthrough;
 
 pub(crate) use anthropic::AnthropicSseReader;
+pub(crate) use chat_completions::ChatCompletionsFromResponsesSseReader;
 use common::{
-    classify_upstream_stream_read_error, collector_output_text_trimmed,
-    mark_collector_terminal_success, mark_first_response_ms, mark_first_response_ms_on_usage,
-    should_emit_keepalive, stream_idle_timed_out, stream_idle_timeout_message,
-    stream_reader_disconnected_message, stream_wait_timeout,
-    upstream_hint_or_stream_incomplete_message,
+    classify_upstream_stream_read_error, mark_first_response_ms, should_emit_keepalive,
+    stream_idle_timed_out, stream_idle_timeout_message, stream_reader_disconnected_message,
+    stream_wait_timeout, upstream_hint_or_stream_incomplete_message,
 };
+use common::{mark_collector_terminal_success, mark_first_response_ms_on_usage};
 pub(crate) use common::{
     PassthroughSseCollector, SseKeepAliveFrame, UpstreamSseFramePump, UpstreamSseFramePumpItem,
 };
 pub(crate) use gemini::GeminiSseReader;
-pub(crate) use openai_chat::OpenAIChatCompletionsSseReader;
-pub(crate) use openai_completions::OpenAICompletionsSseReader;
+pub(crate) use images::ImagesFromResponsesSseReader;
 pub(crate) use openai_responses::OpenAIResponsesPassthroughSseReader;
 pub(crate) use passthrough::PassthroughSseUsageReader;
 

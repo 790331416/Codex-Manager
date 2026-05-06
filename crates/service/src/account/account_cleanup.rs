@@ -1,6 +1,6 @@
 use codexmanager_core::storage::{now_ts, Event, UsageSnapshotRecord};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::account_availability::{evaluate_snapshot, Availability};
 use crate::account_plan::{resolve_account_plan, ResolvedAccountPlan};
@@ -28,6 +28,19 @@ pub(crate) struct DeleteBannedResult {
     skipped_not_banned: usize,
     deleted_account_ids: Vec<String>,
 }
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DeleteAccountsByStatusesResult {
+    scanned: usize,
+    deleted: usize,
+    skipped_status: usize,
+    target_statuses: Vec<String>,
+    deleted_account_ids: Vec<String>,
+}
+
+const CLEANUP_STATUS_ALLOWLIST: &[&str] =
+    &["unavailable", "banned", "limited", "disabled", "inactive"];
 
 /// 函数 `delete_unavailable_free_accounts`
 ///
@@ -180,6 +193,97 @@ pub(crate) fn delete_banned_accounts() -> Result<DeleteBannedResult, String> {
     Ok(result)
 }
 
+/// 函数 `delete_accounts_by_statuses`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-05-04
+///
+/// # 参数
+/// - statuses: 参数 statuses
+///
+/// # 返回
+/// 返回函数执行结果
+pub(crate) fn delete_accounts_by_statuses(
+    statuses: Vec<String>,
+) -> Result<DeleteAccountsByStatusesResult, String> {
+    let target_statuses = normalize_cleanup_statuses(statuses)?;
+    let target_set: HashSet<String> = target_statuses.iter().cloned().collect();
+    let mut storage = open_storage().ok_or_else(|| "storage unavailable".to_string())?;
+    let accounts = storage.list_accounts().map_err(|err| err.to_string())?;
+
+    let mut result = DeleteAccountsByStatusesResult {
+        scanned: 0,
+        deleted: 0,
+        skipped_status: 0,
+        target_statuses,
+        deleted_account_ids: Vec::new(),
+    };
+
+    for account in accounts {
+        result.scanned += 1;
+        let normalized_status = account.status.trim().to_ascii_lowercase();
+        if !target_set.contains(&normalized_status) {
+            result.skipped_status += 1;
+            continue;
+        }
+
+        storage
+            .delete_account(&account.id)
+            .map_err(|err| err.to_string())?;
+        let _ = storage.insert_event(&Event {
+            account_id: Some(account.id.clone()),
+            event_type: "account_bulk_delete_by_status".to_string(),
+            message: format!("bulk delete account by status: status={normalized_status}"),
+            created_at: now_ts(),
+        });
+
+        result.deleted += 1;
+        result.deleted_account_ids.push(account.id);
+    }
+
+    Ok(result)
+}
+
+fn normalize_cleanup_statuses(statuses: Vec<String>) -> Result<Vec<String>, String> {
+    let selected = statuses
+        .into_iter()
+        .filter_map(|status| {
+            let normalized = status.trim().to_ascii_lowercase();
+            if normalized.is_empty() {
+                None
+            } else {
+                Some(normalized)
+            }
+        })
+        .collect::<BTreeSet<_>>();
+    if selected.is_empty() {
+        return Err("missing cleanup statuses".to_string());
+    }
+
+    let allowed = CLEANUP_STATUS_ALLOWLIST
+        .iter()
+        .copied()
+        .collect::<HashSet<_>>();
+    let invalid = selected
+        .iter()
+        .filter(|status| !allowed.contains(status.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !invalid.is_empty() {
+        return Err(format!(
+            "unsupported cleanup statuses: {}",
+            invalid.join(",")
+        ));
+    }
+
+    Ok(CLEANUP_STATUS_ALLOWLIST
+        .iter()
+        .filter(|status| selected.contains(**status))
+        .map(|status| (*status).to_string())
+        .collect())
+}
+
 /// 函数 `plan_label_for_event`
 ///
 /// 作者: gaohongshun
@@ -203,7 +307,7 @@ fn plan_label_for_event(plan: Option<&ResolvedAccountPlan>) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::delete_banned_accounts;
+    use super::{delete_accounts_by_statuses, delete_banned_accounts};
     use codexmanager_core::storage::{Account, Storage};
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -339,5 +443,81 @@ mod tests {
             .find_account_by_id("acc-active")
             .expect("find active")
             .is_some());
+    }
+
+    #[test]
+    fn delete_accounts_by_statuses_removes_selected_statuses_only() {
+        let _lock = test_env_guard();
+        let dir = new_test_dir("cleanup-accounts-by-status");
+        let db_path = dir.join("codexmanager.db");
+        let _guard = EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
+
+        let storage = Storage::open(&db_path).expect("open db");
+        storage.init().expect("init db");
+        for (idx, (id, status)) in [
+            ("acc-active", "active"),
+            ("acc-unavailable", "unavailable"),
+            ("acc-banned", "banned"),
+            ("acc-limited", "limited"),
+            ("acc-disabled", "disabled"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            storage
+                .insert_account(&Account {
+                    id: id.to_string(),
+                    label: id.to_string(),
+                    issuer: "chatgpt".to_string(),
+                    chatgpt_account_id: None,
+                    workspace_id: None,
+                    group_name: None,
+                    sort: idx as i64,
+                    status: status.to_string(),
+                    created_at: 1,
+                    updated_at: 1,
+                })
+                .expect("insert account");
+        }
+
+        let result = delete_accounts_by_statuses(vec![
+            "banned".to_string(),
+            "limited".to_string(),
+            "banned".to_string(),
+        ])
+        .expect("cleanup result");
+
+        assert_eq!(result.deleted, 2);
+        assert_eq!(
+            result.target_statuses,
+            vec!["banned".to_string(), "limited".to_string()]
+        );
+        assert_eq!(
+            result.deleted_account_ids,
+            vec!["acc-banned".to_string(), "acc-limited".to_string()]
+        );
+        let remaining = Storage::open(&db_path)
+            .expect("reopen db")
+            .list_accounts()
+            .expect("list accounts")
+            .into_iter()
+            .map(|account| account.id)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            remaining,
+            vec![
+                "acc-active".to_string(),
+                "acc-unavailable".to_string(),
+                "acc-disabled".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn delete_accounts_by_statuses_rejects_active_status() {
+        let err = delete_accounts_by_statuses(vec!["active".to_string()])
+            .expect_err("active should not be cleanup-selectable");
+
+        assert!(err.contains("unsupported cleanup statuses"));
     }
 }

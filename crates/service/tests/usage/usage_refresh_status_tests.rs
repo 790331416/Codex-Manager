@@ -661,6 +661,47 @@ fn refresh_token_invalid_grant_on_forbidden_keeps_account_active() {
     assert_eq!(active.status, "active");
 }
 
+/// 函数 `refresh_token_invalid_grant_on_bad_request_marks_account_unavailable`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-05-03
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn refresh_token_invalid_grant_on_bad_request_marks_account_unavailable() {
+    let storage = Storage::open_in_memory().expect("open");
+    storage.init().expect("init");
+    let account = Account {
+        id: "acc-refresh-invalid-grant-400".to_string(),
+        label: "main".to_string(),
+        issuer: "issuer".to_string(),
+        chatgpt_account_id: None,
+        workspace_id: None,
+        group_name: None,
+        sort: 0,
+        status: "active".to_string(),
+        created_at: now_ts(),
+        updated_at: now_ts(),
+    };
+    storage.insert_account(&account).expect("insert");
+
+    assert!(mark_account_unavailable_for_refresh_token_error(
+        &storage,
+        "acc-refresh-invalid-grant-400",
+        "refresh token failed with status 400 Bad Request: invalid_grant"
+    ));
+    let unavailable = storage
+        .find_account_by_id("acc-refresh-invalid-grant-400")
+        .expect("find")
+        .expect("exists");
+    assert_eq!(unavailable.status, "unavailable");
+}
+
 /// 函数 `refresh_token_unknown_401_marks_account_unavailable`
 ///
 /// 作者: gaohongshun

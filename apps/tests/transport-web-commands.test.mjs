@@ -69,3 +69,10 @@ test("createWebCommandMap 为账号预热命令提供 Web RPC 映射", () => {
     rpcMethod: "account/warmup",
   });
 });
+
+test("createWebCommandMap 为按状态清理账号提供 Web RPC 映射", () => {
+  const cleanup = commandMap.service_account_delete_by_statuses;
+  assert.deepEqual(cleanup, {
+    rpcMethod: "account/deleteByStatuses",
+  });
+});

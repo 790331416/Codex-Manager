@@ -5,6 +5,7 @@ import { Power, PowerOff, RefreshCw, Zap } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import { cn } from "@/lib/utils";
 import {
+  formatRemainingDurationFromSeconds,
   formatTsFromSeconds,
   getExtraUsageDisplayRows,
   getUsageDisplayBuckets,
@@ -185,15 +186,6 @@ function QuotaProgress({
 export function QuotaOverviewCell({ items }: { items: QuotaSummaryItem[] }) {
   const { t } = useI18n();
   const summaryItems = items.slice(0, 2);
-  const resetSummary = summaryItems
-    .map(
-      (item) =>
-        `${item.label}${t("重置")}: ${formatTsFromSeconds(
-          item.resetsAt,
-          item.emptyResetText ?? t("未知"),
-        )}`,
-    )
-    .join(" · ");
 
   return (
     <Tooltip>
@@ -203,7 +195,7 @@ export function QuotaOverviewCell({ items }: { items: QuotaSummaryItem[] }) {
             {summaryItems.map((item) => (
               <div key={item.id} className="min-w-0 flex-1 space-y-1">
                 <div className="flex items-center justify-between text-[10px]">
-                  <span className="text-muted-foreground">{item.label}</span>
+                  <span className="truncate text-muted-foreground">{item.label}</span>
                   <span className="font-medium text-foreground/80">
                     {item.remainPercent == null
                       ? (item.emptyText ?? "--")
@@ -230,8 +222,28 @@ export function QuotaOverviewCell({ items }: { items: QuotaSummaryItem[] }) {
               </div>
             ))}
           </div>
-          <div className="mt-1 truncate text-[10px] text-muted-foreground">
-            {resetSummary}
+          <div className="mt-1 grid grid-cols-2 gap-3 text-[10px] text-muted-foreground">
+            {summaryItems.map((item) => (
+              <div
+                key={`${item.id}-reset`}
+                className="flex min-w-0 items-center justify-between gap-2"
+              >
+                <span className="min-w-0 truncate">
+                  {formatTsFromSeconds(
+                    item.resetsAt,
+                    item.emptyResetText ?? t("未知"),
+                  )}
+                </span>
+                <span className="shrink-0">
+                  {formatRemainingDurationFromSeconds(
+                    item.resetsAt,
+                    item.id.endsWith("-primary") ? "hours" : "days",
+                    item.emptyResetText ?? t("未知"),
+                  )}
+                  后刷新
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       </TooltipTrigger>

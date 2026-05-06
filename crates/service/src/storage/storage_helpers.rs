@@ -1,19 +1,43 @@
 use codexmanager_core::storage::Storage;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
-use std::cell::RefCell;
-#[cfg(test)]
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
+use std::sync::{Condvar, Mutex, MutexGuard, OnceLock};
+use std::time::{Duration, Instant};
 
-struct CachedStorage {
-    path: String,
-    storage: Storage,
+const DEFAULT_STORAGE_MAX_CONNECTIONS: usize = 32;
+const DEFAULT_STORAGE_MAX_IDLE_CONNECTIONS: usize = 16;
+const DEFAULT_STORAGE_ACQUIRE_TIMEOUT_MS: u64 = 30_000;
+const ENV_STORAGE_MAX_CONNECTIONS: &str = "CODEXMANAGER_STORAGE_MAX_CONNECTIONS";
+const ENV_STORAGE_MAX_IDLE_CONNECTIONS: &str = "CODEXMANAGER_STORAGE_MAX_IDLE_CONNECTIONS";
+const ENV_STORAGE_ACQUIRE_TIMEOUT_MS: &str = "CODEXMANAGER_STORAGE_ACQUIRE_TIMEOUT_MS";
+
+#[derive(Default)]
+struct StorageBucket {
+    idle: Vec<Storage>,
+    open_count: usize,
+    opening_count: usize,
 }
 
-thread_local! {
-    static STORAGE_CACHE: RefCell<Option<CachedStorage>> = const { RefCell::new(None) };
+#[derive(Default)]
+struct StoragePoolState {
+    buckets: HashMap<String, StorageBucket>,
+}
+
+struct StoragePool {
+    state: Mutex<StoragePoolState>,
+    available: Condvar,
+}
+
+impl StoragePool {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(StoragePoolState::default()),
+            available: Condvar::new(),
+        }
+    }
 }
 
 pub(crate) struct StorageHandle {
@@ -95,10 +119,7 @@ impl Drop for StorageHandle {
             return;
         };
         let path = self.path.clone();
-        STORAGE_CACHE.with(|cell| {
-            let mut cache = cell.borrow_mut();
-            *cache = Some(CachedStorage { path, storage });
-        });
+        return_storage_to_pool(path, storage);
     }
 }
 
@@ -272,6 +293,56 @@ pub(crate) fn generate_aggregate_api_id() -> String {
 static STORAGE_OPEN_COUNTS: std::sync::OnceLock<std::sync::Mutex<HashMap<String, usize>>> =
     std::sync::OnceLock::new();
 
+static STORAGE_POOL: OnceLock<StoragePool> = OnceLock::new();
+
+fn storage_pool() -> &'static StoragePool {
+    STORAGE_POOL.get_or_init(StoragePool::new)
+}
+
+fn lock_storage_pool_state(pool: &StoragePool) -> MutexGuard<'_, StoragePoolState> {
+    pool.state.lock().unwrap_or_else(|poisoned| {
+        log::warn!("storage pool lock poisoned; recovering");
+        poisoned.into_inner()
+    })
+}
+
+fn env_usize_or(name: &str, default: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(default)
+}
+
+fn env_u64_or(name: &str, default: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(default)
+}
+
+pub(crate) fn storage_max_connections() -> usize {
+    env_usize_or(ENV_STORAGE_MAX_CONNECTIONS, DEFAULT_STORAGE_MAX_CONNECTIONS).max(1)
+}
+
+fn storage_max_idle_connections() -> usize {
+    env_usize_or(
+        ENV_STORAGE_MAX_IDLE_CONNECTIONS,
+        DEFAULT_STORAGE_MAX_IDLE_CONNECTIONS,
+    )
+    .min(storage_max_connections())
+}
+
+fn storage_acquire_timeout() -> Duration {
+    Duration::from_millis(env_u64_or(
+        ENV_STORAGE_ACQUIRE_TIMEOUT_MS,
+        DEFAULT_STORAGE_ACQUIRE_TIMEOUT_MS,
+    ))
+}
+
 /// 函数 `open_storage`
 ///
 /// 作者: gaohongshun
@@ -307,10 +378,10 @@ pub(crate) fn open_storage() -> Option<StorageHandle> {
 /// # 返回
 /// 返回函数执行结果
 fn open_storage_at_path(path: &str) -> Option<StorageHandle> {
-    if let Some(storage) = take_cached_storage(&path) {
-        return Some(StorageHandle::new(path.to_string(), storage));
-    }
+    acquire_storage_from_pool(path).map(|storage| StorageHandle::new(path.to_string(), storage))
+}
 
+fn open_fresh_storage(path: &str) -> Option<Storage> {
     if !Path::new(&path).exists() {
         log::warn!("storage path missing: {}", path);
     }
@@ -323,7 +394,93 @@ fn open_storage_at_path(path: &str) -> Option<StorageHandle> {
     };
     #[cfg(test)]
     record_storage_open_for_tests(path);
-    Some(StorageHandle::new(path.to_string(), storage))
+    Some(storage)
+}
+
+fn acquire_storage_from_pool(path: &str) -> Option<Storage> {
+    let pool = storage_pool();
+    let max_connections = storage_max_connections();
+    let timeout = storage_acquire_timeout();
+    let started_at = Instant::now();
+    let mut state = lock_storage_pool_state(pool);
+
+    loop {
+        let bucket = state.buckets.entry(path.to_string()).or_default();
+        if let Some(storage) = bucket.idle.pop() {
+            return Some(storage);
+        }
+
+        if bucket.open_count < max_connections && bucket.opening_count == 0 {
+            bucket.open_count += 1;
+            bucket.opening_count += 1;
+            drop(state);
+            let storage = open_fresh_storage(path);
+            finish_storage_open(path, storage.is_some());
+            return storage;
+        }
+
+        let elapsed = started_at.elapsed();
+        if elapsed >= timeout {
+            log::error!(
+                "storage pool acquire timed out: path={} max_connections={} timeout_ms={}",
+                path,
+                max_connections,
+                timeout.as_millis()
+            );
+            return None;
+        }
+
+        let remaining = timeout.saturating_sub(elapsed);
+        match pool.available.wait_timeout(state, remaining) {
+            Ok((next_state, wait_result)) => {
+                state = next_state;
+                if wait_result.timed_out() {
+                    log::error!(
+                        "storage pool acquire timed out: path={} max_connections={} timeout_ms={}",
+                        path,
+                        max_connections,
+                        timeout.as_millis()
+                    );
+                    return None;
+                }
+            }
+            Err(poisoned) => {
+                log::warn!("storage pool condvar lock poisoned; recovering");
+                let (next_state, _) = poisoned.into_inner();
+                state = next_state;
+            }
+        }
+    }
+}
+
+fn finish_storage_open(path: &str, success: bool) {
+    let pool = storage_pool();
+    let mut state = lock_storage_pool_state(pool);
+    if let Some(bucket) = state.buckets.get_mut(path) {
+        bucket.opening_count = bucket.opening_count.saturating_sub(1);
+        if !success {
+            bucket.open_count = bucket.open_count.saturating_sub(1);
+        }
+    }
+    pool.available.notify_all();
+}
+
+fn return_storage_to_pool(path: String, storage: Storage) {
+    let pool = storage_pool();
+    let max_idle = storage_max_idle_connections();
+    let mut storage = Some(storage);
+    {
+        let mut state = lock_storage_pool_state(pool);
+        let bucket = state.buckets.entry(path).or_default();
+        if bucket.idle.len() < max_idle {
+            if let Some(storage) = storage.take() {
+                bucket.idle.push(storage);
+            }
+        } else {
+            bucket.open_count = bucket.open_count.saturating_sub(1);
+        }
+    }
+    pool.available.notify_one();
 }
 
 /// 函数 `initialize_storage`
@@ -351,34 +508,6 @@ pub(crate) fn initialize_storage() -> Result<(), String> {
     Ok(())
 }
 
-/// 函数 `take_cached_storage`
-///
-/// 作者: gaohongshun
-///
-/// 时间: 2026-04-02
-///
-/// # 参数
-/// - path: 参数 path
-///
-/// # 返回
-/// 返回函数执行结果
-fn take_cached_storage(path: &str) -> Option<Storage> {
-    STORAGE_CACHE.with(|cell| {
-        let mut cache = cell.borrow_mut();
-        match cache.take() {
-            Some(CachedStorage {
-                path: cached_path,
-                storage,
-            }) if cached_path == path => Some(storage),
-            Some(other) => {
-                *cache = Some(other);
-                None
-            }
-            None => None,
-        }
-    })
-}
-
 /// 函数 `clear_storage_cache_for_tests`
 ///
 /// 作者: gaohongshun
@@ -392,9 +521,10 @@ fn take_cached_storage(path: &str) -> Option<Storage> {
 /// 无
 #[cfg(test)]
 fn clear_storage_cache_for_tests() {
-    STORAGE_CACHE.with(|cell| {
-        *cell.borrow_mut() = None;
-    });
+    let pool = storage_pool();
+    let mut state = lock_storage_pool_state(pool);
+    state.buckets.clear();
+    pool.available.notify_all();
 }
 
 /// 函数 `record_storage_open_for_tests`

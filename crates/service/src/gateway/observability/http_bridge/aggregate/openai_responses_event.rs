@@ -20,6 +20,7 @@ pub(in super::super) enum OpenAIResponsesEventKind {
     OutputTextDone,
     OutputItemAdded,
     OutputItemDone,
+    ImageGenerationPartialImage,
     ContentPartAdded,
     ContentPartDone,
     Other,
@@ -36,6 +37,7 @@ impl OpenAIResponsesEventKind {
             "response.output_text.done" => Self::OutputTextDone,
             "response.output_item.added" => Self::OutputItemAdded,
             "response.output_item.done" => Self::OutputItemDone,
+            "response.image_generation_call.partial_image" => Self::ImageGenerationPartialImage,
             "response.content_part.added" | "response.content_part.delta" => Self::ContentPartAdded,
             "response.content_part.done" => Self::ContentPartDone,
             _ => Self::Other,
@@ -59,7 +61,7 @@ impl OpenAIResponsesEvent {
             .get("type")
             .and_then(Value::as_str)
             .map(str::trim)
-            .filter(|kind| !kind.is_empty())
+            .filter(|kind: &&str| !kind.is_empty())
             .map(str::to_string);
         let kind = event_type
             .as_deref()
@@ -135,6 +137,7 @@ fn terminal_for_event(
         | OpenAIResponsesEventKind::OutputTextDone
         | OpenAIResponsesEventKind::OutputItemAdded
         | OpenAIResponsesEventKind::OutputItemDone
+        | OpenAIResponsesEventKind::ImageGenerationPartialImage
         | OpenAIResponsesEventKind::ContentPartAdded
         | OpenAIResponsesEventKind::ContentPartDone
         | OpenAIResponsesEventKind::Other => None,
@@ -178,6 +181,7 @@ fn collect_extra_output_text(value: &Value, kind: OpenAIResponsesEventKind) -> O
         | OpenAIResponsesEventKind::Done
         | OpenAIResponsesEventKind::Failed
         | OpenAIResponsesEventKind::Incomplete
+        | OpenAIResponsesEventKind::ImageGenerationPartialImage
         | OpenAIResponsesEventKind::Other => {}
     }
 
@@ -228,5 +232,21 @@ mod tests {
             event.terminal,
             Some(SseTerminal::Err(ref message)) if message == "上游流式空闲超时"
         ));
+    }
+
+    #[test]
+    fn parse_openai_responses_event_treats_partial_image_as_non_terminal() {
+        let lines = vec![
+            "event: response.image_generation_call.partial_image\n".to_string(),
+            "data: {\"type\":\"response.image_generation_call.partial_image\",\"item_id\":\"ig_1\",\"partial_image_b64\":\"cGFydA==\",\"partial_image_index\":0}\n".to_string(),
+            "\n".to_string(),
+        ];
+
+        let event = OpenAIResponsesEvent::parse(&lines).expect("parsed event");
+        assert_eq!(
+            event.event_type.as_deref(),
+            Some("response.image_generation_call.partial_image")
+        );
+        assert!(event.terminal.is_none());
     }
 }

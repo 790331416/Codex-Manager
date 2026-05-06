@@ -116,6 +116,29 @@ send_timeout 600s;
 
 The repository's `docker/nginx/nginx.conf` now includes this dedicated compact block and can be used as the deployment baseline.
 
+### 5. Give `/v1/images/` its own conservative proxy block
+
+CodexManager now supports compatible `/v1/images/generations` and `/v1/images/edits` endpoints. This path has different proxy risks from normal text requests:
+
+- `/v1/images/edits` may upload multipart images with much larger request bodies
+- image generation may take longer than a normal text first token
+- `b64_json` responses can be large, and default proxy buffering can add truncation or latency risk
+
+For `/v1/images/`, keep at least:
+
+```nginx
+client_max_body_size 0;
+proxy_buffering off;
+proxy_request_buffering off;
+gzip off;
+add_header X-Accel-Buffering no;
+proxy_read_timeout 3600s;
+proxy_send_timeout 3600s;
+send_timeout 3600s;
+```
+
+The repository's `docker/nginx/nginx.conf` now includes `location ^~ /v1/images/` and can be used as the image-generation deployment baseline.
+
 ## Recommended example config
 
 See:
@@ -130,6 +153,7 @@ The sample covers:
 - underscore header support
 - explicit session header forwarding
 - streaming-friendly API proxy settings
+- image-generation proxy settings for `/v1/images/generations` and `/v1/images/edits`
 
 ## How to verify after deployment
 

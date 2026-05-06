@@ -52,6 +52,10 @@ const SETTINGS_SNAPSHOT = {
 };
 
 test("accounts toolbar shows warmup button and tooltip", async ({ page }) => {
+  const usageRefreshPayloads: Record<string, unknown>[] = [];
+  const rtRefreshPayloads: Record<string, unknown>[] = [];
+  let refreshAllRtCount = 0;
+
   await page.route("**/api/runtime", async (route) => {
     await route.fulfill({
       contentType: "application/json; charset=utf-8",
@@ -118,6 +122,48 @@ test("accounts toolbar shows warmup button and tooltip", async ({ page }) => {
       await ok([]);
       return;
     }
+    if (method === "account/usage/refresh") {
+      usageRefreshPayloads.push(
+        payload?.params && typeof payload.params === "object"
+          ? (payload.params as Record<string, unknown>)
+          : {},
+      );
+      await ok({});
+      return;
+    }
+    if (method === "account/chatgptAuthTokens/refresh") {
+      rtRefreshPayloads.push(
+        payload?.params && typeof payload.params === "object"
+          ? (payload.params as Record<string, unknown>)
+          : {},
+      );
+      await ok({
+        accessToken: "access-token",
+        chatgptAccountId: "org-plus-1",
+        chatgptPlanType: "plus",
+        hasSubscription: true,
+        subscriptionPlan: "plus",
+      });
+      return;
+    }
+    if (method === "account/chatgptAuthTokens/refreshAll") {
+      refreshAllRtCount += 1;
+      await ok({
+        requested: 1,
+        succeeded: 1,
+        failed: 0,
+        skipped: 0,
+        results: [
+          {
+            accountId: "acct-plus-1",
+            accountName: "qxcnms@gmail.com",
+            ok: true,
+            message: null,
+          },
+        ],
+      });
+      return;
+    }
 
     await route.fulfill({
       status: 500,
@@ -145,4 +191,53 @@ test("accounts toolbar shows warmup button and tooltip", async ({ page }) => {
       "向选中账号发送 hi 进行预热；如果未选中账号，则默认预热全部账号。",
     ),
   ).toBeVisible();
+
+  await page.getByRole("button", { name: "用量详情" }).click();
+  const usageDialog = page.getByRole("dialog", { name: "用量详情" });
+  await expect(usageDialog.getByRole("button", { name: "刷新 AT/RT" })).toBeVisible();
+
+  await usageDialog.getByRole("button", { name: "立即刷新" }).click();
+  await expect.poll(() => usageRefreshPayloads.length).toBe(1);
+  expect(usageRefreshPayloads[0].accountId).toBe("acct-plus-1");
+  expect(usageRefreshPayloads[0].account_id).toBe("acct-plus-1");
+
+  await usageDialog.getByRole("button", { name: "刷新 AT/RT" }).click();
+  await expect.poll(() => rtRefreshPayloads.length).toBe(1);
+  expect(rtRefreshPayloads[0].accountId).toBe("acct-plus-1");
+  expect(rtRefreshPayloads[0].previousAccountId).toBe("acct-plus-1");
+
+  await usageDialog.getByRole("button", { name: "关闭" }).click();
+  await expect(usageDialog).toBeHidden();
+  await page.getByText("账号操作", { exact: true }).click();
+  await page.getByRole("menuitem", { name: /刷新全部 AT\/RT/ }).click();
+  await expect.poll(() => refreshAllRtCount).toBe(1);
+
+  await page.locator("tbody tr").first().getByRole("checkbox").check();
+  await page.getByText("账号操作", { exact: true }).click();
+
+  const deleteSelectedItem = page.getByRole("menuitem", {
+    name: /删除选中账号/,
+  });
+  const cleanupByStatusItem = page.getByRole("menuitem", {
+    name: /按状态清理账号/,
+  });
+
+  await expect(deleteSelectedItem).toBeEnabled();
+  await deleteSelectedItem.hover();
+  await expect
+    .poll(async () =>
+      deleteSelectedItem.evaluate((element) =>
+        element.hasAttribute("data-highlighted"),
+      ),
+    )
+    .toBe(true);
+
+  await cleanupByStatusItem.hover();
+  await expect
+    .poll(async () =>
+      cleanupByStatusItem.evaluate((element) =>
+        element.hasAttribute("data-highlighted"),
+      ),
+    )
+    .toBe(true);
 });

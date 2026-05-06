@@ -60,6 +60,8 @@ pnpm exec playwright test
 - 平台密钥页默认优先展示 `supportedInApi = true` 的模型。
 - 所有主要列表页的“操作”列都已做右侧冻结，横向滚动时不会丢失操作入口。
 - 页面切换使用 keep-alive 缓存与整区加载遮罩，减少桌面端与 Web 版回访时的重载体感。
+- 首次接入引导会展示 `auth.json` 与 `config.toml` 示例，帮助用户把 Codex CLI / ccswitch 接入到本地网关。
+- 设置页网关配置包含上游代理、请求总超时、流式空闲超时与 SSE 保活间隔。
 
 ## 开发约定
 

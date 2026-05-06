@@ -231,6 +231,7 @@ pub(super) fn maybe_prepare_auto_compacted_body(
     storage: &Storage,
     method: &reqwest::Method,
     request_deadline: Option<Instant>,
+    protocol_type: &str,
     incoming_headers: &super::super::super::IncomingHeaderSnapshot,
     body: &Bytes,
     base: &str,
@@ -299,6 +300,7 @@ pub(super) fn maybe_prepare_auto_compacted_body(
         request_deadline,
         UpstreamRequestContext {
             request_path: COMPACT_REQUEST_PATH,
+            protocol_type,
         },
         incoming_headers,
         &compact_body,

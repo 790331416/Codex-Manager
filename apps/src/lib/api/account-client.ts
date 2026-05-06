@@ -17,19 +17,21 @@ import {
   normalizeUsageSnapshot,
 } from "./normalize";
 import {
+  readChatgptAuthTokensRefreshAllResult,
   readChatgptAuthTokensRefreshResult,
   readCurrentAccessTokenAccountReadResult,
   readLoginStatusResult,
 } from "./account-auth";
 import {
   AccountExportResult,
-  AccountImportError,
   AccountImportResult,
   AccountWarmupResult,
+  DeleteAccountsByStatusesResult,
   DeleteUnavailableFreeResult,
   readAccountExportResult,
   readAccountImportResult,
   readAccountWarmupResult,
+  readDeleteAccountsByStatusesResult,
   readApiKeySecret,
   readDeleteUnavailableFreeResult,
 } from "./account-maintenance";
@@ -45,6 +47,7 @@ import {
   ApiKey,
   ApiKeyCreateResult,
   ApiKeyUsageStat,
+  ChatgptAuthTokensRefreshAllResult,
   ChatgptAuthTokensRefreshResult,
   CurrentAccessTokenAccountReadResult,
   LoginStatusResult,
@@ -64,6 +67,10 @@ export interface AccountExportPayload {
 export interface AccountWarmupPayload {
   accountIds?: string[];
   message?: string;
+}
+
+export interface AccountDeleteByStatusesPayload {
+  statuses: string[];
 }
 
 interface LoginStartPayload {
@@ -295,6 +302,17 @@ export const accountClient = {
     readDeleteUnavailableFreeResult(
       await invoke<unknown>("service_account_delete_unavailable_free", withAddr())
     ),
+  deleteByStatuses: async (
+    params: AccountDeleteByStatusesPayload
+  ): Promise<DeleteAccountsByStatusesResult> =>
+    readDeleteAccountsByStatusesResult(
+      await invoke<unknown>(
+        "service_account_delete_by_statuses",
+        withAddr({
+          statuses: Array.isArray(params?.statuses) ? params.statuses : [],
+        })
+      )
+    ),
   updateSort: (accountId: string, sort: number) =>
     invoke("service_account_update", withAddr({ accountId, sort })),
   updateProfile: (accountId: string, params: AccountUpdatePayload) =>
@@ -377,18 +395,27 @@ export const accountClient = {
     ),
 
   async getUsage(accountId: string): Promise<AccountUsage | null> {
-    const result = await invoke<unknown>("service_usage_read", withAddr({ accountId }));
+    const result = await invoke<unknown>(
+      "service_usage_read",
+      withAddr({ accountId, account_id: accountId })
+    );
     return normalizeUsageSnapshot(unwrapUsageSnapshotPayload(result));
   },
   async listUsage(): Promise<AccountUsage[]> {
     const result = await invoke<unknown>("service_usage_list", withAddr());
     return normalizeUsageList(result);
   },
-  refreshUsage: (accountId?: string) =>
-    invoke(
+  refreshUsage: (accountId?: string) => {
+    const targetAccountId = accountId?.trim();
+    return invoke(
       "service_usage_refresh",
-      withAddr(accountId ? { accountId } : {})
-    ),
+      withAddr(
+        targetAccountId
+          ? { accountId: targetAccountId, account_id: targetAccountId }
+          : {}
+      )
+    );
+  },
   async aggregateUsage(): Promise<UsageAggregateSummary> {
     const result = await invoke<unknown>("service_usage_aggregate", withAddr());
     return normalizeUsageAggregateSummary(result);
@@ -439,13 +466,24 @@ export const accountClient = {
   logoutCurrentAccessTokenAccount: () =>
     invoke("service_account_logout", withAddr()),
   async refreshChatgptAuthTokens(
-    previousAccountId?: string
+    accountId?: string
   ): Promise<ChatgptAuthTokensRefreshResult> {
+    const targetAccountId = accountId?.trim() || null;
     const result = await invoke<unknown>(
       "service_chatgpt_auth_tokens_refresh",
-      withAddr({ previousAccountId: previousAccountId || null })
+      withAddr({
+        accountId: targetAccountId,
+        previousAccountId: targetAccountId,
+      })
     );
     return readChatgptAuthTokensRefreshResult(result);
+  },
+  async refreshAllChatgptAuthTokens(): Promise<ChatgptAuthTokensRefreshAllResult> {
+    const result = await invoke<unknown>(
+      "service_chatgpt_auth_tokens_refresh_all",
+      withAddr()
+    );
+    return readChatgptAuthTokensRefreshAllResult(result);
   },
 
   async listAggregateApis(): Promise<AggregateApi[]> {

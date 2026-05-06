@@ -125,6 +125,7 @@ fn codex_header_profile_sets_required_headers_for_stream() {
         chatgpt_account_id: Some("workspace-1"),
         incoming_user_agent: None,
         incoming_originator: None,
+        preserve_client_identity: false,
         incoming_session_id: None,
         incoming_window_id: None,
         incoming_client_request_id: Some("client-req-1"),
@@ -132,6 +133,7 @@ fn codex_header_profile_sets_required_headers_for_stream() {
         incoming_beta_features: Some("reasoning_summaries"),
         incoming_turn_metadata: Some("{\"workspace\":\"repo\"}"),
         incoming_parent_thread_id: Some("thread-parent-1"),
+        incoming_responsesapi_include_timing_metrics: Some("true"),
         passthrough_codex_headers: passthrough.as_slice(),
         fallback_session_id: None,
         incoming_turn_state: Some("turn-state"),
@@ -162,7 +164,10 @@ fn codex_header_profile_sets_required_headers_for_stream() {
         .as_deref()
         .is_some_and(|value| value.contains(expected_version.as_str())));
     assert!(find_header(&headers, "OpenAI-Beta").is_none());
-    assert!(find_header(&headers, "x-responsesapi-include-timing-metrics").is_none());
+    assert_eq!(
+        find_header(&headers, "x-responsesapi-include-timing-metrics").as_deref(),
+        Some("true")
+    );
     assert_eq!(
         find_header(&headers, "Originator").as_deref(),
         Some("codex_cli_rs")
@@ -217,6 +222,7 @@ fn codex_header_profile_uses_json_accept_for_non_stream() {
         chatgpt_account_id: None,
         incoming_user_agent: None,
         incoming_originator: None,
+        preserve_client_identity: false,
         incoming_session_id: None,
         incoming_window_id: None,
         incoming_client_request_id: None,
@@ -224,6 +230,7 @@ fn codex_header_profile_uses_json_accept_for_non_stream() {
         incoming_beta_features: None,
         incoming_turn_metadata: None,
         incoming_parent_thread_id: None,
+        incoming_responsesapi_include_timing_metrics: None,
         passthrough_codex_headers: &[],
         fallback_session_id: None,
         incoming_turn_state: None,
@@ -267,8 +274,10 @@ fn codex_compact_header_profile_matches_remote_compact_shape() {
     let headers = build_codex_compact_upstream_headers(CodexCompactUpstreamHeaderInput {
         auth_token: "token-compact",
         chatgpt_account_id: Some("workspace-compact"),
+        installation_id: Some("install-compact"),
         incoming_user_agent: None,
         incoming_originator: None,
+        preserve_client_identity: false,
         incoming_session_id: Some("session-compact"),
         incoming_window_id: Some("session-compact:7"),
         incoming_subagent: Some("compact"),
@@ -286,6 +295,10 @@ fn codex_compact_header_profile_matches_remote_compact_shape() {
     assert_eq!(
         find_header(&headers, "ChatGPT-Account-ID").as_deref(),
         Some("workspace-compact")
+    );
+    assert_eq!(
+        find_header(&headers, "x-codex-installation-id").as_deref(),
+        Some("install-compact")
     );
     assert_eq!(
         find_header(&headers, "Content-Type").as_deref(),
@@ -343,8 +356,10 @@ fn codex_compact_header_profile_omits_subagent_without_explicit_source() {
     let headers = build_codex_compact_upstream_headers(CodexCompactUpstreamHeaderInput {
         auth_token: "token-compact-default",
         chatgpt_account_id: None,
+        installation_id: None,
         incoming_user_agent: None,
         incoming_originator: None,
+        preserve_client_identity: false,
         incoming_session_id: Some("session-compact-default"),
         incoming_window_id: None,
         incoming_subagent: None,
@@ -356,6 +371,7 @@ fn codex_compact_header_profile_omits_subagent_without_explicit_source() {
     });
 
     assert!(find_header(&headers, "x-openai-subagent").is_none());
+    assert!(find_header(&headers, "x-codex-installation-id").is_none());
 }
 
 /// 函数 `codex_compact_header_profile_omits_session_without_thread_anchor`
@@ -375,8 +391,10 @@ fn codex_compact_header_profile_omits_session_without_thread_anchor() {
     let headers = build_codex_compact_upstream_headers(CodexCompactUpstreamHeaderInput {
         auth_token: "token-compact-no-session",
         chatgpt_account_id: None,
+        installation_id: None,
         incoming_user_agent: None,
         incoming_originator: None,
+        preserve_client_identity: false,
         incoming_session_id: None,
         incoming_window_id: None,
         incoming_subagent: None,
@@ -416,6 +434,7 @@ fn codex_header_profile_uses_dynamic_originator_and_residency_requirement() {
         chatgpt_account_id: Some("workspace-dynamic"),
         incoming_user_agent: None,
         incoming_originator: None,
+        preserve_client_identity: false,
         incoming_session_id: None,
         incoming_window_id: None,
         incoming_client_request_id: None,
@@ -423,6 +442,7 @@ fn codex_header_profile_uses_dynamic_originator_and_residency_requirement() {
         incoming_beta_features: None,
         incoming_turn_metadata: None,
         incoming_parent_thread_id: None,
+        incoming_responsesapi_include_timing_metrics: None,
         passthrough_codex_headers: &[],
         fallback_session_id: None,
         incoming_turn_state: None,
@@ -474,6 +494,7 @@ fn codex_header_profile_regenerates_session_on_failover() {
         chatgpt_account_id: None,
         incoming_user_agent: None,
         incoming_originator: None,
+        preserve_client_identity: false,
         incoming_session_id: Some("sticky-session"),
         incoming_window_id: Some("sticky-session:7"),
         incoming_client_request_id: None,
@@ -481,6 +502,7 @@ fn codex_header_profile_regenerates_session_on_failover() {
         incoming_beta_features: None,
         incoming_turn_metadata: None,
         incoming_parent_thread_id: None,
+        incoming_responsesapi_include_timing_metrics: None,
         passthrough_codex_headers: passthrough.as_slice(),
         fallback_session_id: Some("fallback-session"),
         incoming_turn_state: Some("sticky-turn"),
@@ -525,6 +547,7 @@ fn codex_header_profile_uses_fallback_session_when_incoming_missing() {
         chatgpt_account_id: None,
         incoming_user_agent: None,
         incoming_originator: None,
+        preserve_client_identity: false,
         incoming_session_id: None,
         incoming_window_id: None,
         incoming_client_request_id: None,
@@ -532,6 +555,7 @@ fn codex_header_profile_uses_fallback_session_when_incoming_missing() {
         incoming_beta_features: None,
         incoming_turn_metadata: None,
         incoming_parent_thread_id: None,
+        incoming_responsesapi_include_timing_metrics: None,
         passthrough_codex_headers: &[],
         fallback_session_id: Some("fallback-session"),
         incoming_turn_state: None,
@@ -570,6 +594,7 @@ fn codex_header_profile_does_not_forward_conversation_header_even_with_fallback(
         chatgpt_account_id: None,
         incoming_user_agent: None,
         incoming_originator: None,
+        preserve_client_identity: false,
         incoming_session_id: None,
         incoming_window_id: None,
         incoming_client_request_id: None,
@@ -577,6 +602,7 @@ fn codex_header_profile_does_not_forward_conversation_header_even_with_fallback(
         incoming_beta_features: None,
         incoming_turn_metadata: None,
         incoming_parent_thread_id: None,
+        incoming_responsesapi_include_timing_metrics: None,
         passthrough_codex_headers: &[],
         fallback_session_id: Some("fallback-session"),
         incoming_turn_state: None,
@@ -607,6 +633,7 @@ fn codex_header_profile_skips_account_header_when_disabled() {
         chatgpt_account_id: None,
         incoming_user_agent: None,
         incoming_originator: None,
+        preserve_client_identity: false,
         incoming_session_id: None,
         incoming_window_id: None,
         incoming_client_request_id: None,
@@ -614,6 +641,7 @@ fn codex_header_profile_skips_account_header_when_disabled() {
         incoming_beta_features: None,
         incoming_turn_metadata: None,
         incoming_parent_thread_id: None,
+        incoming_responsesapi_include_timing_metrics: None,
         passthrough_codex_headers: &[],
         fallback_session_id: None,
         incoming_turn_state: None,
@@ -644,6 +672,7 @@ fn codex_header_profile_can_disable_affinity_headers() {
         chatgpt_account_id: None,
         incoming_user_agent: None,
         incoming_originator: None,
+        preserve_client_identity: false,
         incoming_session_id: Some("sticky-session"),
         incoming_window_id: None,
         incoming_client_request_id: None,
@@ -651,6 +680,7 @@ fn codex_header_profile_can_disable_affinity_headers() {
         incoming_beta_features: None,
         incoming_turn_metadata: None,
         incoming_parent_thread_id: None,
+        incoming_responsesapi_include_timing_metrics: None,
         passthrough_codex_headers: &[],
         fallback_session_id: None,
         incoming_turn_state: Some("sticky-turn"),
@@ -692,6 +722,7 @@ fn codex_header_profile_does_not_invent_client_request_id_on_failover() {
         chatgpt_account_id: None,
         incoming_user_agent: None,
         incoming_originator: None,
+        preserve_client_identity: false,
         incoming_session_id: Some("sticky-session"),
         incoming_window_id: None,
         incoming_client_request_id: None,
@@ -699,6 +730,7 @@ fn codex_header_profile_does_not_invent_client_request_id_on_failover() {
         incoming_beta_features: None,
         incoming_turn_metadata: None,
         incoming_parent_thread_id: None,
+        incoming_responsesapi_include_timing_metrics: None,
         passthrough_codex_headers: &[],
         fallback_session_id: Some("fallback-session"),
         incoming_turn_state: Some("sticky-turn"),

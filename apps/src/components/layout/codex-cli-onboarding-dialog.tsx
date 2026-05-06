@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Copy,
   FileCog,
+  KeyRound,
   Link2,
   Rocket,
 } from "lucide-react";
@@ -42,8 +43,20 @@ const GUIDE_STEPS = [
     ],
   },
   {
+    icon: KeyRound,
+    title: "第二步：配置 Codex CLI 的 auth.json",
+    description:
+      "Codex CLI 需要从 `auth.json` 读取 API Key。这里填的是 CodexManager 平台密钥，不是账号里的 access token、refresh token 或 OpenAI 登录 token。",
+    details: [
+      "先到“平台密钥”页面创建或复制一个可用 Key。",
+      "通常放在 `~/.codex/auth.json`，和 `config.toml` 在同一个目录。",
+      "在 Windows 上一般是 `%USERPROFILE%\\\\.codex\\\\auth.json`。",
+      "如果文件不存在就新建；如果已有 `OPENAI_API_KEY`，替换成 CodexManager 生成的平台 Key。",
+    ],
+  },
+  {
     icon: Rocket,
-    title: "第二步：把下面这份配置写入 Codex CLI 配置文件",
+    title: "第三步：把下面这份配置写入 Codex CLI 配置文件",
     description:
       "推荐先复制右侧模板，再按你的实际端口或运行习惯微调。不要手敲 provider 名称，最容易在这里拼错。",
     details: [
@@ -54,17 +67,24 @@ const GUIDE_STEPS = [
   },
   {
     icon: Link2,
-    title: "第三步：保存后重新启动 Codex CLI 并验证 provider",
+    title: "第四步：保存后重新启动 Codex CLI 并验证 provider",
     description:
-      "最后只检查两件关键事：provider 名称一致，和 `base_url` 指向本软件的本地网关。只要这两项错一个，CLI 就不会走 CodexManager。",
+      "先确认 `auth.json` 能提供 API Key，再检查 provider 名称一致，和 `base_url` 指向本软件的本地网关。只要任意一项错了，CLI 就不会走 CodexManager。",
     details: [
+      "`auth.json` 里的 `OPENAI_API_KEY` 应填写平台密钥页面生成的 Key，不要填账号 token。",
       '`model_provider = "cm"` 必须和 `[model_providers.cm]` 完全一致。',
       "`base_url` 默认应指向 `http://localhost:48760/v1`。",
       "如果你在 Web 端部署并访问，可以去模型管理页点击“导出到本地 Codex 缓存”；浏览器会下载同名 `models_cache.json`，你再手动放入本地 `~/.codex/models_cache.json`。",
+      "修改 `auth.json` 后请重新启动 Codex CLI，避免旧认证缓存继续生效。",
       "如果你在设置里换过端口，把这里同步改掉后再重新打开 CLI 测试。",
     ],
   },
 ] as const;
+
+const GUIDE_AUTH_JSON_TEXT = `{
+  "OPENAI_API_KEY": "replace_with_codexmanager_platform_key",
+  "auth_mode": "apikey"
+}`;
 
 const GUIDE_CONFIG_LINES = [
   {
@@ -179,6 +199,7 @@ const GUIDE_CONFIG_LINES = [
 ] as const;
 
 const GUIDE_REMINDERS = [
+  "`auth.json` 里的 `OPENAI_API_KEY` 应填写平台密钥页面生成的 Key，不要填账号 token。",
   "如果你在设置页改过服务端口，记得同步修改 `base_url`，否则 CLI 会连到旧端口。",
   "如果你在 Web 端想手动替换本地 Codex 缓存，优先用模型管理页右上角的导出按钮；它会下载同名 `models_cache.json` 供你手动放入本地 `.codex` 目录。",
   "如果 CLI 已经有其它 `model_providers` 配置，不需要全删，只要保证 `cm` 这一段完整且名字一致即可。",
@@ -200,6 +221,7 @@ export function CodexCliOnboardingDialog({
   const activeStep = GUIDE_STEPS[currentStep];
   const isFirstStep = currentStep === 0;
   const isLastStep = currentStep === GUIDE_STEPS.length - 1;
+  const guideAuthJson = GUIDE_AUTH_JSON_TEXT;
   const guideConfig = GUIDE_CONFIG_LINES.map(({ comment, line }) => {
     if (!line) {
       return "";
@@ -209,6 +231,13 @@ export function CodexCliOnboardingDialog({
     }
     return `# ${t(comment)}\n${line}`;
   }).join("\n");
+  const guideClipboardText = [
+    "# ~/.codex/auth.json",
+    guideAuthJson,
+    "",
+    "# ~/.codex/config.toml",
+    guideConfig,
+  ].join("\n");
 
   useEffect(() => {
     if (!open) {
@@ -259,8 +288,17 @@ export function CodexCliOnboardingDialog({
 
   const handleCopyConfig = async () => {
     try {
-      await copyTextToClipboard(guideConfig);
+      await copyTextToClipboard(guideClipboardText);
       toast.success(t("配置模板已复制"));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const handleCopySnippet = async (text: string) => {
+    try {
+      await copyTextToClipboard(text);
+      toast.success(t("配置片段已复制"));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
@@ -270,7 +308,7 @@ export function CodexCliOnboardingDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         initialFocus={introFocusRef}
-        className="glass-card max-h-[92vh] overflow-hidden border-none p-0 sm:!max-w-[92vw] xl:!max-w-6xl"
+        className="glass-card max-h-[92vh] overflow-hidden border-none p-0 sm:!max-w-[94vw] xl:!max-w-[86rem] 2xl:!max-w-[92rem]"
       >
         <div className="flex min-h-0 max-h-[92vh] flex-col">
           <DialogHeader className="shrink-0 border-b border-border/60 px-6 pb-4 pt-6">
@@ -285,13 +323,13 @@ export function CodexCliOnboardingDialog({
                 </DialogTitle>
                 <DialogDescription className="text-sm leading-7">
                   {t(
-                    "先看左侧步骤，再复制右侧模板去写 `config.toml`。只要没有勾选“不再显示”，你下次进入软件时仍会看到它。",
+                    "先看左侧步骤，再按顺序准备 `auth.json` 和 `config.toml`。只要没有勾选“不再显示”，你下次进入软件时仍会看到它。",
                   )}
                 </DialogDescription>
               </div>
               <div className="rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm leading-6 text-muted-foreground lg:max-w-sm">
                 {t(
-                  "推荐先完整读一遍，再复制模板；这比自己手写 provider 名称和地址更不容易出错。",
+                  "推荐先完整读一遍，再复制模板；这比自己手写平台 Key、provider 名称和地址更不容易出错。",
                 )}
               </div>
             </div>
@@ -299,7 +337,7 @@ export function CodexCliOnboardingDialog({
 
           <div
             ref={scrollContainerRef}
-            className="grid min-h-0 gap-5 overflow-y-auto px-6 py-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]"
+            className="grid min-h-0 gap-5 overflow-y-auto px-6 py-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(460px,0.85fr)]"
           >
             <div className="space-y-5">
               <section className="rounded-2xl border border-border/60 bg-background/45 p-5 shadow-sm">
@@ -318,7 +356,7 @@ export function CodexCliOnboardingDialog({
                       {t("点击步骤标签可直接跳转，按顺序做不容易漏。")}
                     </p>
                   </div>
-                  <div className="grid gap-2 sm:grid-cols-3">
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                     {GUIDE_STEPS.map((step, index) => (
                       <button
                         key={step.title}
@@ -372,7 +410,7 @@ export function CodexCliOnboardingDialog({
 
               <section className="rounded-2xl border border-dashed border-border/70 bg-muted/25 p-5">
                 <h3 className="mb-2 text-base font-semibold leading-7 text-foreground">
-                  {t("使用时最容易忽略的 3 个点")}
+                  {t("使用时最容易忽略的几个点")}
                 </h3>
                 <ul className="list-disc space-y-2 pl-5 text-sm leading-7 text-muted-foreground">
                   {GUIDE_REMINDERS.map((item) => (
@@ -390,7 +428,7 @@ export function CodexCliOnboardingDialog({
                   </h3>
                   <p className="text-sm leading-6 text-muted-foreground">
                     {t(
-                      "已为每一行补充中文注释，可以直接复制后再按你的环境微调。",
+                      "已包含 `auth.json` 与 `config.toml`，可以按文件分别复制，或一键复制完整参考模板。",
                     )}
                   </p>
                 </div>
@@ -405,13 +443,51 @@ export function CodexCliOnboardingDialog({
                   {t("复制配置")}
                 </Button>
               </div>
-              <div className="p-5">
-                <pre
-                  ref={codeBlockRef}
-                  className="max-h-[46vh] overflow-auto rounded-2xl border border-border/60 bg-black/90 p-4 font-mono text-xs leading-6 text-slate-100"
-                >
-                  <code>{guideConfig}</code>
-                </pre>
+              <div className="space-y-4 p-5">
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-3 text-sm font-semibold text-foreground">
+                    <div className="space-y-1">
+                      <div>{t("auth.json 示例")}</div>
+                      <div className="text-xs font-normal text-muted-foreground">
+                        {t("这个 Key 来自 CodexManager 的“平台密钥”页面")}
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 gap-2 px-2 text-xs"
+                      onClick={() => void handleCopySnippet(guideAuthJson)}
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                      {t("复制 auth.json")}
+                    </Button>
+                  </div>
+                  <pre className="overflow-auto rounded-2xl border border-border/60 bg-black/90 p-4 font-mono text-xs leading-6 text-slate-100">
+                    <code>{guideAuthJson}</code>
+                  </pre>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3 text-sm font-semibold text-foreground">
+                    <span>{t("config.toml 示例")}</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 gap-2 px-2 text-xs"
+                      onClick={() => void handleCopySnippet(guideConfig)}
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                      {t("复制 config.toml")}
+                    </Button>
+                  </div>
+                  <pre
+                    ref={codeBlockRef}
+                    className="max-h-[34vh] overflow-auto rounded-2xl border border-border/60 bg-black/90 p-4 font-mono text-xs leading-6 text-slate-100"
+                  >
+                    <code>{guideConfig}</code>
+                  </pre>
+                </div>
               </div>
             </section>
           </div>

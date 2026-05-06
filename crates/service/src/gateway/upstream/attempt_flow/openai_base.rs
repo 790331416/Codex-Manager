@@ -5,7 +5,7 @@ use reqwest::header::CONTENT_TYPE;
 use super::super::support::outcome::{decide_upstream_outcome, UpstreamOutcomeDecision};
 use super::super::GatewayUpstreamResponse;
 
-pub(super) enum OpenAiAttemptResult {
+pub(in crate::gateway::upstream) enum OpenAiAttemptResult {
     Upstream(GatewayUpstreamResponse),
     Failover,
     Terminal { status_code: u16, message: String },
@@ -22,7 +22,7 @@ pub(super) enum OpenAiAttemptResult {
 ///
 /// # 返回
 /// 返回函数执行结果
-pub(super) fn handle_openai_base_attempt<F>(
+pub(in crate::gateway::upstream) fn handle_openai_base_attempt<F>(
     client: &reqwest::blocking::Client,
     storage: &Storage,
     method: &reqwest::Method,

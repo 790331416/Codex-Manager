@@ -11,6 +11,8 @@ pub const DEFAULT_ORIGINATOR: &str = "codex_cli_rs";
 pub struct IdTokenClaims {
     pub sub: String,
     #[serde(default)]
+    pub client_id: Option<String>,
+    #[serde(default)]
     pub email: Option<String>,
     #[serde(default)]
     pub workspace_id: Option<String>,
@@ -96,6 +98,14 @@ pub fn parse_id_token_claims(token: &str) -> Result<IdTokenClaims, String> {
         .map_err(|e| e.to_string())?;
     let json = std::str::from_utf8(&decoded).map_err(|e| e.to_string())?;
     serde_json::from_str(json).map_err(|e| e.to_string())
+}
+
+pub fn extract_client_id_claim(token: &str) -> Option<String> {
+    parse_id_token_claims(token)
+        .ok()
+        .and_then(|claims| claims.client_id)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn normalize_scoped_identity_value(value: Option<&str>, marker: &str) -> Option<String> {
@@ -188,6 +198,56 @@ pub fn extract_chatgpt_account_id(token: &str) -> Option<String> {
         .and_then(|v| v.get("chatgpt_account_id"))
         .and_then(|v| v.as_str())
         .and_then(|v| normalize_chatgpt_account_id(Some(v)))
+}
+
+/// 函数 `extract_chatgpt_user_id`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-02
+///
+/// # 参数
+/// - token: 参数 token
+///
+/// # 返回
+/// 返回函数执行结果
+pub fn extract_chatgpt_user_id(token: &str) -> Option<String> {
+    let mut parts = token.split('.');
+    let _header = parts.next()?;
+    let payload = parts.next()?;
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .ok()?;
+    let json = std::str::from_utf8(&decoded).ok()?;
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    for key in ["chatgpt_user_id", "user_id"] {
+        if let Some(v) = value.get(key).and_then(|v| v.as_str()) {
+            let trimmed = v.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    value
+        .get("https://api.openai.com/auth")
+        .and_then(|v| v.as_object())
+        .and_then(|auth| {
+            ["chatgpt_user_id", "user_id"].into_iter().find_map(|key| {
+                auth.get(key)
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .map(str::to_string)
+            })
+        })
+        .or_else(|| {
+            value
+                .get("sub")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(str::to_string)
+        })
 }
 
 /// 函数 `extract_workspace_id`

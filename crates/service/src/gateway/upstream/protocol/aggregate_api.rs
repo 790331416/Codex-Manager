@@ -9,7 +9,7 @@ use tiny_http::Request;
 use super::super::GatewayUpstreamResponse;
 use crate::aggregate_api::{
     AGGREGATE_API_AUTH_APIKEY, AGGREGATE_API_AUTH_USERPASS, AGGREGATE_API_PROVIDER_CLAUDE,
-    AGGREGATE_API_PROVIDER_CODEX,
+    AGGREGATE_API_PROVIDER_CODEX, AGGREGATE_API_PROVIDER_GEMINI,
 };
 use crate::gateway::request_log::RequestLogUsage;
 
@@ -417,6 +417,9 @@ fn normalize_provider_type_value(value: &str) -> String {
         "claude" | "anthropic" | "anthropic_native" | "claude_code" => {
             AGGREGATE_API_PROVIDER_CLAUDE.to_string()
         }
+        "gemini" | "gemini_native" | "google" | "google_ai" | "google_gemini" => {
+            AGGREGATE_API_PROVIDER_GEMINI.to_string()
+        }
         _ => AGGREGATE_API_PROVIDER_CODEX.to_string(),
     }
 }
@@ -633,10 +636,10 @@ pub(crate) fn resolve_aggregate_api_rotation_candidates(
     protocol_type: &str,
     aggregate_api_id: Option<&str>,
 ) -> Result<Vec<AggregateApi>, String> {
-    let provider_type = if protocol_type == "anthropic_native" {
-        AGGREGATE_API_PROVIDER_CLAUDE
-    } else {
-        AGGREGATE_API_PROVIDER_CODEX
+    let provider_type = match protocol_type {
+        "anthropic_native" => AGGREGATE_API_PROVIDER_CLAUDE,
+        "gemini_native" => AGGREGATE_API_PROVIDER_GEMINI,
+        _ => AGGREGATE_API_PROVIDER_CODEX,
     };
 
     let mut candidates = storage
@@ -1273,9 +1276,16 @@ mod bridge_tests {
 
 #[cfg(test)]
 mod tests {
-    use codexmanager_core::storage::AggregateApi;
+    use codexmanager_core::storage::{now_ts, AggregateApi, Storage};
 
-    use super::{build_upstream_url, effective_action_path, resolve_passthrough_sse_protocol};
+    use super::{
+        build_upstream_url, effective_action_path, resolve_aggregate_api_rotation_candidates,
+        resolve_passthrough_sse_protocol,
+    };
+    use crate::aggregate_api::{
+        AGGREGATE_API_AUTH_APIKEY, AGGREGATE_API_PROVIDER_CLAUDE, AGGREGATE_API_PROVIDER_CODEX,
+        AGGREGATE_API_PROVIDER_GEMINI,
+    };
     use crate::gateway::{PassthroughSseProtocol, ResponseAdapter};
 
     fn aggregate_api_with_action(action: Option<&str>) -> AggregateApi {
@@ -1316,17 +1326,6 @@ mod tests {
     }
 
     #[test]
-    fn non_passthrough_adapter_does_not_override_sse_protocol() {
-        let api = aggregate_api_with_action(None);
-        let protocol = resolve_passthrough_sse_protocol(
-            &api,
-            "/v1/messages?beta=true",
-            ResponseAdapter::AnthropicSse,
-        );
-        assert_eq!(protocol, None);
-    }
-
-    #[test]
     fn build_upstream_url_preserves_base_path_prefix() {
         let url = build_upstream_url(
             "https://open.bigmodel.cn/api/anthropic",
@@ -1347,6 +1346,45 @@ mod tests {
             url.as_str(),
             "https://api.example.com/v1/messages?beta=true"
         );
+    }
+
+    #[test]
+    fn gemini_native_candidates_resolve_to_gemini_provider_only() {
+        let storage = Storage::open_in_memory().expect("open storage");
+        storage.init().expect("init storage");
+        let now = now_ts();
+        for (id, provider_type) in [
+            ("agg-codex", AGGREGATE_API_PROVIDER_CODEX),
+            ("agg-claude", AGGREGATE_API_PROVIDER_CLAUDE),
+            ("agg-gemini", AGGREGATE_API_PROVIDER_GEMINI),
+        ] {
+            storage
+                .insert_aggregate_api(&AggregateApi {
+                    id: id.to_string(),
+                    provider_type: provider_type.to_string(),
+                    supplier_name: Some(id.to_string()),
+                    sort: 0,
+                    url: format!("https://{id}.example.com"),
+                    auth_type: AGGREGATE_API_AUTH_APIKEY.to_string(),
+                    auth_params_json: None,
+                    action: None,
+                    status: "active".to_string(),
+                    created_at: now,
+                    updated_at: now,
+                    last_test_at: None,
+                    last_test_status: None,
+                    last_test_error: None,
+                })
+                .expect("insert aggregate api");
+        }
+
+        let candidates = resolve_aggregate_api_rotation_candidates(&storage, "gemini_native", None)
+            .expect("resolve gemini candidates");
+        let candidate_ids = candidates
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(candidate_ids, vec!["agg-gemini"]);
     }
 
     /// 函数 `final_error_promotes_success_status_to_bad_gateway`

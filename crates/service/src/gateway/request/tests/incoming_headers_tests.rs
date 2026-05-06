@@ -102,6 +102,10 @@ fn codex_headers_are_captured_from_http_headers() {
         axum::http::HeaderValue::from_static("thread_parent_123"),
     );
     headers.insert(
+        "x-codex-installation-id",
+        axum::http::HeaderValue::from_static("install_123"),
+    );
+    headers.insert(
         "x-codex-window-id",
         axum::http::HeaderValue::from_static("thread_child_123:7"),
     );
@@ -109,12 +113,18 @@ fn codex_headers_are_captured_from_http_headers() {
         "x-codex-other-limit-name",
         axum::http::HeaderValue::from_static("promo_header"),
     );
+    headers.insert(
+        "x-responsesapi-include-timing-metrics",
+        axum::http::HeaderValue::from_static("true"),
+    );
 
     let snapshot = IncomingHeaderSnapshot::from_http_headers(&headers);
     assert_eq!(snapshot.user_agent(), Some("codex_cli_rs/0.999.0"));
     assert_eq!(snapshot.originator(), Some("codex_cli_rs"));
     assert_eq!(snapshot.session_affinity(), Some("affinity_123"));
     assert_eq!(snapshot.parent_thread_id(), Some("thread_parent_123"));
+    assert_eq!(snapshot.codex_installation_id(), Some("install_123"));
     assert_eq!(snapshot.window_id(), Some("thread_child_123:7"));
+    assert_eq!(snapshot.responsesapi_include_timing_metrics(), Some("true"));
     assert!(snapshot.passthrough_codex_headers().is_empty());
 }

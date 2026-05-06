@@ -174,50 +174,6 @@ pub(super) fn post_http_raw(
     panic!("status parse failed, raw response: {last_raw:?}");
 }
 
-/// 函数 `get_http_raw`
-///
-/// 作者: gaohongshun
-///
-/// 时间: 2026-04-02
-///
-/// # 参数
-/// - super: 参数 super
-///
-/// # 返回
-/// 返回函数执行结果
-pub(super) fn get_http_raw(addr: &str, path: &str, headers: &[(&str, &str)]) -> (u16, String) {
-    let mut last_raw = String::new();
-    for _ in 0..20 {
-        let mut stream = TcpStream::connect(addr).expect("connect server");
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-        let mut request = format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n");
-        for (name, value) in headers {
-            request.push_str(name);
-            request.push_str(": ");
-            request.push_str(value);
-            request.push_str("\r\n");
-        }
-        request.push_str("\r\n");
-        stream.write_all(request.as_bytes()).expect("write");
-
-        let mut buf = String::new();
-        stream.read_to_string(&mut buf).expect("read");
-        if let Some(status) = buf
-            .lines()
-            .next()
-            .and_then(|line| line.split_whitespace().nth(1))
-            .and_then(|value| value.parse::<u16>().ok())
-        {
-            let body_raw = buf.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
-            let body = decode_chunked_body_if_needed(&body_raw);
-            return (status, body);
-        }
-        last_raw = buf;
-        thread::sleep(Duration::from_millis(50));
-    }
-    panic!("status parse failed, raw response: {last_raw:?}");
-}
-
 /// 函数 `hash_platform_key_for_test`
 ///
 /// 作者: gaohongshun
@@ -658,60 +614,6 @@ pub(super) fn start_mock_upstream_once_with_content_type(
             "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             response.len()
         );
-        stream
-            .write_all(header.as_bytes())
-            .expect("write upstream status");
-        stream.write_all(&response).expect("write upstream body");
-        let _ = stream.flush();
-    });
-
-    (addr.to_string(), rx, join)
-}
-
-/// 函数 `start_mock_upstream_once_with_status_content_type_and_headers`
-///
-/// 作者: gaohongshun
-///
-/// 时间: 2026-04-02
-///
-/// # 参数
-/// - super: 参数 super
-///
-/// # 返回
-/// 返回函数执行结果
-pub(super) fn start_mock_upstream_once_with_status_content_type_and_headers(
-    status: u16,
-    response_body: &str,
-    content_type: &str,
-    extra_headers: &[(&str, &str)],
-) -> (
-    String,
-    Receiver<CapturedUpstreamRequest>,
-    thread::JoinHandle<()>,
-) {
-    let listener = bind_test_listener("mock upstream");
-    let addr = listener.local_addr().expect("mock upstream addr");
-    let response = response_body.as_bytes().to_vec();
-    let content_type = content_type.to_string();
-    let extra_headers = extra_headers
-        .iter()
-        .map(|(name, value)| ((*name).to_string(), (*value).to_string()))
-        .collect::<Vec<_>>();
-    let (tx, rx) = mpsc::channel();
-
-    let join = thread::spawn(move || {
-        let (mut stream, captured) = accept_http_request(&listener, Duration::from_secs(3))
-            .expect("accept upstream http request");
-        let _ = tx.send(captured);
-
-        let mut header = format!(
-            "HTTP/1.1 {status} OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n",
-            response.len()
-        );
-        for (name, value) in extra_headers {
-            header.push_str(&format!("{name}: {value}\r\n"));
-        }
-        header.push_str("\r\n");
         stream
             .write_all(header.as_bytes())
             .expect("write upstream status");

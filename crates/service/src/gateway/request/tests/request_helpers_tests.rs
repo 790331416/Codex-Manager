@@ -72,3 +72,15 @@ fn non_inference_path_skips_text_limit_validation() {
 
     assert!(result.is_ok());
 }
+
+#[test]
+fn legacy_completions_path_no_longer_participates_in_text_limit_validation() {
+    let body = serde_json::json!({
+        "prompt": "x".repeat(MAX_TEXT_INPUT_CHARS + 100),
+    });
+    let body = serde_json::to_vec(&body).expect("serialize body");
+
+    let result = validate_text_input_limit_for_path("/v1/completions", &body);
+
+    assert!(result.is_ok());
+}

@@ -1,5 +1,7 @@
 use codexmanager_core::auth::{DEFAULT_CLIENT_ID, DEFAULT_ISSUER, DEFAULT_ORIGINATOR};
 
+use crate::usage_token_refresh::ENV_TOKEN_REFRESH_AHEAD_SECS;
+
 use super::EnvOverrideCatalogItem;
 
 const ENV_OVERRIDE_SCOPE_SERVICE: &str = "service";
@@ -71,6 +73,34 @@ pub(crate) const ENV_OVERRIDE_CATALOG: &[EnvOverrideCatalogItem] = &[
         ENV_OVERRIDE_SCOPE_SERVICE,
         ENV_OVERRIDE_APPLY_MODE_RUNTIME,
         DEFAULT_CLIENT_ID,
+    ),
+    EnvOverrideCatalogItem::new(
+        "CODEXMANAGER_CODEX_IMAGE_GENERATION_AUTO_INJECT_TOOL",
+        "Codex 图片 Tool 自动注入",
+        ENV_OVERRIDE_SCOPE_SERVICE,
+        ENV_OVERRIDE_APPLY_MODE_RUNTIME,
+        "1",
+    ),
+    EnvOverrideCatalogItem::new(
+        "CODEXMANAGER_CODEX_IMAGE_GENERATION_ENABLED",
+        "Codex 图片生成兼容开关",
+        ENV_OVERRIDE_SCOPE_SERVICE,
+        ENV_OVERRIDE_APPLY_MODE_RUNTIME,
+        "1",
+    ),
+    EnvOverrideCatalogItem::new(
+        "CODEXMANAGER_CODEX_IMAGE_MAIN_MODEL",
+        "Codex 图片主模型",
+        ENV_OVERRIDE_SCOPE_SERVICE,
+        ENV_OVERRIDE_APPLY_MODE_RUNTIME,
+        "gpt-5.4-mini",
+    ),
+    EnvOverrideCatalogItem::new(
+        "CODEXMANAGER_CODEX_IMAGE_TOOL_MODEL",
+        "Codex 图片工具模型",
+        ENV_OVERRIDE_SCOPE_SERVICE,
+        ENV_OVERRIDE_APPLY_MODE_RUNTIME,
+        "gpt-image-2",
     ),
     EnvOverrideCatalogItem::new(
         "CODEXMANAGER_FRONT_PROXY_MAX_BODY_BYTES",
@@ -281,6 +311,13 @@ pub(crate) const ENV_OVERRIDE_CATALOG: &[EnvOverrideCatalogItem] = &[
         ENV_OVERRIDE_SCOPE_SERVICE,
         ENV_OVERRIDE_APPLY_MODE_RUNTIME,
         "0",
+    ),
+    EnvOverrideCatalogItem::new(
+        ENV_TOKEN_REFRESH_AHEAD_SECS,
+        "Token 刷新提前量（秒）",
+        ENV_OVERRIDE_SCOPE_SERVICE,
+        ENV_OVERRIDE_APPLY_MODE_RUNTIME,
+        "3600",
     ),
     EnvOverrideCatalogItem::new(
         "CODEXMANAGER_UPDATE_PRERELEASE",

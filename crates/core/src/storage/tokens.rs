@@ -45,12 +45,18 @@ impl Storage {
     ///
     /// # 参数
     /// - self: 参数 self
-    /// - now_ts: 参数 now_ts
+    /// - refresh_due_cutoff_ts: 参数 refresh_due_cutoff_ts
+    /// - access_exp_cutoff_ts: 参数 access_exp_cutoff_ts
     /// - limit: 参数 limit
     ///
     /// # 返回
     /// 返回函数执行结果
-    pub fn list_tokens_due_for_refresh(&self, now_ts: i64, limit: usize) -> Result<Vec<Token>> {
+    pub fn list_tokens_due_for_refresh(
+        &self,
+        refresh_due_cutoff_ts: i64,
+        access_exp_cutoff_ts: i64,
+        limit: usize,
+    ) -> Result<Vec<Token>> {
         let mut stmt = self.conn.prepare(
             "WITH latest_status AS (
                 SELECT
@@ -76,11 +82,18 @@ impl Storage {
                         AND latest_status.message NOT LIKE '% reason=workspace_deactivated'
                     )
                )
-               AND (next_refresh_at IS NULL OR next_refresh_at <= ?1)
+               AND (
+                    next_refresh_at IS NULL
+                    OR next_refresh_at <= ?1
+                    OR (
+                        access_token_exp IS NOT NULL
+                        AND access_token_exp <= ?2
+                    )
+               )
              ORDER BY COALESCE(tokens.next_refresh_at, 0) ASC, tokens.account_id ASC
-             LIMIT ?2",
+             LIMIT ?3",
         )?;
-        let mut rows = stmt.query((now_ts, limit as i64))?;
+        let mut rows = stmt.query((refresh_due_cutoff_ts, access_exp_cutoff_ts, limit as i64))?;
         let mut out = Vec::new();
         while let Some(row) = rows.next()? {
             out.push(map_token_row(row)?);

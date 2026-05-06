@@ -6,7 +6,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 mod support;
 use support::test_env_guard;
 
+const CODEX_IMAGE_AUTO_INJECT_TOOL_ENV: &str =
+    "CODEXMANAGER_CODEX_IMAGE_GENERATION_AUTO_INJECT_TOOL";
+
 const ISOLATED_RUNTIME_ENV_KEYS: &[&str] = &[
+    CODEX_IMAGE_AUTO_INJECT_TOOL_ENV,
     "CODEXMANAGER_SERVICE_ADDR",
     "CODEXMANAGER_WEB_ADDR",
     "CODEXMANAGER_ROUTE_STRATEGY",
@@ -25,6 +29,7 @@ const ISOLATED_RUNTIME_ENV_KEYS: &[&str] = &[
     "CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS",
     "CODEXMANAGER_TOKEN_REFRESH_POLLING_ENABLED",
     "CODEXMANAGER_TOKEN_REFRESH_POLL_INTERVAL_SECS",
+    "CODEXMANAGER_TOKEN_REFRESH_AHEAD_SECS",
     "CODEXMANAGER_USAGE_REFRESH_WORKERS",
     "CODEXMANAGER_HTTP_WORKER_FACTOR",
     "CODEXMANAGER_HTTP_WORKER_MIN",
@@ -77,6 +82,7 @@ fn reset_runtime_defaults() {
         "lightweightModeOnCloseToTray": false,
         "upstreamProxyUrl": "",
         "upstreamStreamTimeoutMs": 600000,
+        "upstreamTotalTimeoutMs": 0,
         "sseKeepaliveIntervalMs": 15000,
         "envOverrides": {},
         "backgroundTasks": {
@@ -280,6 +286,42 @@ fn sync_runtime_settings_from_storage_preserves_explicit_process_env_over_persis
 }
 
 #[test]
+fn sync_runtime_settings_from_storage_upgrades_legacy_image_auto_inject_default() {
+    with_temp_db(|db_path| {
+        let storage = Storage::open(db_path).expect("open storage");
+        storage
+            .set_app_setting(
+                codexmanager_service::APP_SETTING_ENV_OVERRIDES_KEY,
+                &serde_json::to_string(&json!({
+                    CODEX_IMAGE_AUTO_INJECT_TOOL_ENV: "0"
+                }))
+                .expect("serialize env overrides"),
+                now_ts(),
+            )
+            .expect("save legacy env overrides");
+        drop(storage);
+
+        let _env = override_env_vars(&[(CODEX_IMAGE_AUTO_INJECT_TOOL_ENV, None)]);
+
+        codexmanager_service::sync_runtime_settings_from_storage();
+
+        assert_eq!(
+            std::env::var(CODEX_IMAGE_AUTO_INJECT_TOOL_ENV)
+                .ok()
+                .as_deref(),
+            Some("1")
+        );
+        let stored = read_env_overrides_map(db_path);
+        assert_eq!(
+            stored
+                .get(CODEX_IMAGE_AUTO_INJECT_TOOL_ENV)
+                .and_then(|value| value.as_str()),
+            Some("1")
+        );
+    });
+}
+
+#[test]
 fn app_settings_gateway_mode_is_no_longer_a_persisted_runtime_setting() {
     with_temp_db(|db_path| {
         let storage = Storage::open(db_path).expect("open storage");
@@ -334,6 +376,7 @@ fn app_settings_set_persists_snapshot_and_password_hash() {
             "gatewayResidencyRequirement": "us",
             "upstreamProxyUrl": "http://127.0.0.1:7890",
             "upstreamStreamTimeoutMs": 654321,
+            "upstreamTotalTimeoutMs": 120000,
             "sseKeepaliveIntervalMs": 17000,
             "backgroundTasks": {
                 "usagePollingEnabled": false,
@@ -397,6 +440,12 @@ fn app_settings_set_persists_snapshot_and_password_hash() {
                 .get("upstreamStreamTimeoutMs")
                 .and_then(|value| value.as_u64()),
             Some(654321)
+        );
+        assert_eq!(
+            snapshot
+                .get("upstreamTotalTimeoutMs")
+                .and_then(|value| value.as_u64()),
+            Some(120000)
         );
         assert_eq!(
             snapshot
@@ -844,6 +893,48 @@ fn sync_runtime_settings_from_storage_applies_saved_runtime_values() {
     });
 }
 
+#[test]
+fn sync_runtime_settings_from_storage_preserves_explicit_usage_workers_env() {
+    with_temp_db(|db_path| {
+        let storage = Storage::open(db_path).expect("open storage");
+        storage
+            .set_app_setting(
+                codexmanager_service::APP_SETTING_GATEWAY_BACKGROUND_TASKS_KEY,
+                &serde_json::to_string(&json!({
+                    "usagePollingEnabled": false,
+                    "usagePollIntervalSecs": 777,
+                    "gatewayKeepaliveEnabled": true,
+                    "gatewayKeepaliveIntervalSecs": 180,
+                    "tokenRefreshPollingEnabled": true,
+                    "tokenRefreshPollIntervalSecs": 60,
+                    "usageRefreshWorkers": 4,
+                    "httpWorkerFactor": 4,
+                    "httpWorkerMin": 8,
+                    "httpStreamWorkerFactor": 1,
+                    "httpStreamWorkerMin": 2
+                }))
+                .expect("serialize background tasks"),
+                now_ts(),
+            )
+            .expect("save background tasks");
+        drop(storage);
+
+        let _env = override_env_vars(&[("CODEXMANAGER_USAGE_REFRESH_WORKERS", Some("9"))]);
+
+        codexmanager_service::sync_runtime_settings_from_storage();
+
+        let snapshot =
+            codexmanager_service::app_settings_get().expect("get app settings after sync");
+        assert_eq!(
+            snapshot
+                .get("backgroundTasks")
+                .and_then(|value| value.get("usageRefreshWorkers"))
+                .and_then(|value| value.as_u64()),
+            Some(9)
+        );
+    });
+}
+
 /// 函数 `app_settings_get_loads_env_backed_dedicated_settings_when_storage_missing`
 ///
 /// 作者: gaohongshun
@@ -1285,6 +1376,50 @@ fn app_settings_set_persists_env_overrides_and_exposes_catalog() {
                 .get("defaultValue")
                 .and_then(|value| value.as_str()),
             Some("0")
+        );
+        let image_generation_enabled = catalog
+            .iter()
+            .find(|item| {
+                item.get("key").and_then(|value| value.as_str())
+                    == Some("CODEXMANAGER_CODEX_IMAGE_GENERATION_ENABLED")
+            })
+            .expect("image generation catalog item");
+        assert_eq!(
+            image_generation_enabled
+                .get("label")
+                .and_then(|value| value.as_str()),
+            Some("Codex 图片生成兼容开关")
+        );
+        assert_eq!(
+            image_generation_enabled
+                .get("applyMode")
+                .and_then(|value| value.as_str()),
+            Some("runtime")
+        );
+        assert_eq!(
+            image_generation_enabled
+                .get("defaultValue")
+                .and_then(|value| value.as_str()),
+            Some("1")
+        );
+        let token_refresh_ahead = catalog
+            .iter()
+            .find(|item| {
+                item.get("key").and_then(|value| value.as_str())
+                    == Some("CODEXMANAGER_TOKEN_REFRESH_AHEAD_SECS")
+            })
+            .expect("token refresh ahead catalog item");
+        assert_eq!(
+            token_refresh_ahead
+                .get("defaultValue")
+                .and_then(|value| value.as_str()),
+            Some("3600")
+        );
+        assert_eq!(
+            token_refresh_ahead
+                .get("applyMode")
+                .and_then(|value| value.as_str()),
+            Some("runtime")
         );
         assert!(snapshot
             .get("envOverrideReservedKeys")

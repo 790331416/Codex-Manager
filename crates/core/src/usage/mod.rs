@@ -15,8 +15,12 @@ pub struct UsageSnapshot {
 
 fn normalize_rate_limit_entry(source_key: Option<&str>, value: &Value) -> Option<Value> {
     let obj = value.as_object()?;
-    let has_primary = obj.get("primary_window").is_some();
-    let has_secondary = obj.get("secondary_window").is_some();
+    let rate_limit = obj
+        .get("rate_limit")
+        .and_then(Value::as_object)
+        .unwrap_or(obj);
+    let has_primary = rate_limit.get("primary_window").is_some();
+    let has_secondary = rate_limit.get("secondary_window").is_some();
     if !has_primary && !has_secondary {
         return None;
     }
@@ -28,18 +32,32 @@ fn normalize_rate_limit_entry(source_key: Option<&str>, value: &Value) -> Option
             Value::String(source_key.to_string()),
         );
     }
-    for key in ["limit_id", "limit_name", "allowed", "limit_reached"] {
+    for key in ["limit_name", "metered_feature"] {
         if let Some(field) = obj.get(key) {
+            normalized.insert(key.to_string(), field.clone());
+        }
+    }
+    if let Some(field) = obj.get("limit_id").or_else(|| obj.get("metered_feature")) {
+        normalized.insert("limit_id".to_string(), field.clone());
+    }
+    for key in ["allowed", "limit_reached"] {
+        if let Some(field) = obj.get(key).or_else(|| rate_limit.get(key)) {
             normalized.insert(key.to_string(), field.clone());
         }
     }
     normalized.insert(
         "primary_window".to_string(),
-        obj.get("primary_window").cloned().unwrap_or(Value::Null),
+        rate_limit
+            .get("primary_window")
+            .cloned()
+            .unwrap_or(Value::Null),
     );
     normalized.insert(
         "secondary_window".to_string(),
-        obj.get("secondary_window").cloned().unwrap_or(Value::Null),
+        rate_limit
+            .get("secondary_window")
+            .cloned()
+            .unwrap_or(Value::Null),
     );
     Some(Value::Object(normalized))
 }
@@ -65,6 +83,7 @@ fn collect_extra_rate_limits(value: &Value) -> Vec<Value> {
                 let source_key = item
                     .get("limit_id")
                     .and_then(Value::as_str)
+                    .or_else(|| item.get("metered_feature").and_then(Value::as_str))
                     .or_else(|| item.get("limit_name").and_then(Value::as_str))
                     .map(str::trim)
                     .filter(|value| !value.is_empty())

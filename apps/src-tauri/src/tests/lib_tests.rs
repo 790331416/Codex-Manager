@@ -3,7 +3,7 @@ use crate::app_storage::{
     resolve_rpc_token_path_for_db,
 };
 use crate::commands::settings::effective_lightweight_mode_on_close_to_tray;
-use crate::rpc_client::{normalize_addr, rpc_call, rpc_call_with_sockets};
+use crate::rpc_client::{normalize_addr, resolve_socket_addrs, rpc_call, rpc_call_with_sockets};
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -27,6 +27,13 @@ fn normalize_addr_defaults_to_localhost() {
     assert_eq!(normalize_addr("5050").unwrap(), "localhost:5050");
     assert_eq!(normalize_addr("localhost:5050").unwrap(), "localhost:5050");
     assert_eq!(normalize_addr("example.com").unwrap(), "example.com");
+}
+
+#[test]
+fn localhost_socket_resolution_prefers_ipv4_loopback() {
+    let sockets = resolve_socket_addrs("localhost:48760").expect("resolve localhost sockets");
+
+    assert!(sockets.first().is_some_and(|socket| socket.is_ipv4()));
 }
 
 /// 函数 `lightweight_close_to_tray_requires_close_to_tray_mode`

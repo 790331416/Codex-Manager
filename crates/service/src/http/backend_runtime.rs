@@ -11,18 +11,23 @@ use tiny_http::Server;
 
 const HTTP_WORKER_FACTOR: usize = 4;
 const HTTP_WORKER_MIN: usize = 8;
+const HTTP_WORKER_MAX: usize = 16;
 const HTTP_STREAM_WORKER_FACTOR: usize = 1;
 const HTTP_STREAM_WORKER_MIN: usize = 2;
+const HTTP_STREAM_WORKER_MAX: usize = 4;
 const HTTP_QUEUE_FACTOR: usize = 4;
 const HTTP_QUEUE_MIN: usize = 32;
 const HTTP_STREAM_QUEUE_FACTOR: usize = 2;
 const HTTP_STREAM_QUEUE_MIN: usize = 16;
+const HTTP_WORKER_STACK_BYTES: usize = 512 * 1024;
 const HTTP_QUEUE_SEND_TIMEOUT_MS: u64 = 100;
 const HTTP_STREAM_QUEUE_SEND_TIMEOUT_MS: u64 = 100;
 const ENV_HTTP_WORKER_FACTOR: &str = "CODEXMANAGER_HTTP_WORKER_FACTOR";
 const ENV_HTTP_WORKER_MIN: &str = "CODEXMANAGER_HTTP_WORKER_MIN";
+const ENV_HTTP_WORKER_MAX: &str = "CODEXMANAGER_HTTP_WORKER_MAX";
 const ENV_HTTP_STREAM_WORKER_FACTOR: &str = "CODEXMANAGER_HTTP_STREAM_WORKER_FACTOR";
 const ENV_HTTP_STREAM_WORKER_MIN: &str = "CODEXMANAGER_HTTP_STREAM_WORKER_MIN";
+const ENV_HTTP_STREAM_WORKER_MAX: &str = "CODEXMANAGER_HTTP_STREAM_WORKER_MAX";
 const ENV_HTTP_QUEUE_FACTOR: &str = "CODEXMANAGER_HTTP_QUEUE_FACTOR";
 const ENV_HTTP_QUEUE_MIN: &str = "CODEXMANAGER_HTTP_QUEUE_MIN";
 const ENV_HTTP_STREAM_QUEUE_FACTOR: &str = "CODEXMANAGER_HTTP_STREAM_QUEUE_FACTOR";
@@ -51,7 +56,8 @@ fn http_worker_count() -> usize {
         .unwrap_or(4);
     let factor = env_usize_or(ENV_HTTP_WORKER_FACTOR, HTTP_WORKER_FACTOR).max(1);
     let min = env_usize_or(ENV_HTTP_WORKER_MIN, HTTP_WORKER_MIN).max(1);
-    (cpus.saturating_mul(factor)).max(min)
+    let max = env_usize_or(ENV_HTTP_WORKER_MAX, HTTP_WORKER_MAX).max(1);
+    (cpus.saturating_mul(factor)).max(min).min(max)
 }
 
 /// 函数 `http_stream_worker_count`
@@ -71,7 +77,8 @@ fn http_stream_worker_count() -> usize {
         .unwrap_or(4);
     let factor = env_usize_or(ENV_HTTP_STREAM_WORKER_FACTOR, HTTP_STREAM_WORKER_FACTOR).max(1);
     let min = env_usize_or(ENV_HTTP_STREAM_WORKER_MIN, HTTP_STREAM_WORKER_MIN).max(1);
-    (cpus.saturating_mul(factor)).max(min)
+    let max = env_usize_or(ENV_HTTP_STREAM_WORKER_MAX, HTTP_STREAM_WORKER_MAX).max(1);
+    (cpus.saturating_mul(factor)).max(min).min(max)
 }
 
 /// 函数 `http_queue_size`
@@ -144,14 +151,22 @@ fn env_usize_or(name: &str, default: usize) -> usize {
 /// # 返回
 /// 无
 fn spawn_request_workers(worker_count: usize, rx: Receiver<Request>, is_stream_queue: bool) {
-    for _ in 0..worker_count {
+    let thread_prefix = if is_stream_queue {
+        "http-stream-worker"
+    } else {
+        "http-worker"
+    };
+    for index in 0..worker_count {
         let worker_rx = rx.clone();
-        let _ = thread::spawn(move || {
-            while let Ok(request) = worker_rx.recv() {
-                crate::gateway::record_http_queue_dequeue(is_stream_queue);
-                handle_backend_request_safely(request);
-            }
-        });
+        let _ = thread::Builder::new()
+            .name(format!("{thread_prefix}-{index}"))
+            .stack_size(HTTP_WORKER_STACK_BYTES)
+            .spawn(move || {
+                while let Ok(request) = worker_rx.recv() {
+                    crate::gateway::record_http_queue_dequeue(is_stream_queue);
+                    handle_backend_request_safely(request);
+                }
+            });
     }
 }
 

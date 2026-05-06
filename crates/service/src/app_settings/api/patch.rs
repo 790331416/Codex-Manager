@@ -8,10 +8,11 @@ use super::{
     set_gateway_free_account_max_model, set_gateway_model_forward_rules, set_gateway_originator,
     set_gateway_residency_requirement, set_gateway_route_strategy,
     set_gateway_sse_keepalive_interval_ms, set_gateway_upstream_proxy_url,
-    set_gateway_upstream_stream_timeout_ms, set_gateway_user_agent_version,
-    set_lightweight_mode_on_close_to_tray_setting, set_saved_service_addr, set_service_bind_mode,
-    set_ui_appearance_preset, set_ui_locale, set_ui_low_transparency_enabled, set_ui_theme,
-    set_update_auto_check_enabled, BackgroundTasksInput, APP_SETTING_PLUGIN_MARKET_MODE_KEY,
+    set_gateway_upstream_stream_timeout_ms, set_gateway_upstream_total_timeout_ms,
+    set_gateway_user_agent_version, set_lightweight_mode_on_close_to_tray_setting,
+    set_saved_service_addr, set_service_bind_mode, set_ui_appearance_preset, set_ui_locale,
+    set_ui_low_transparency_enabled, set_ui_theme, set_update_auto_check_enabled,
+    BackgroundTasksInput, APP_SETTING_PLUGIN_MARKET_MODE_KEY,
     APP_SETTING_PLUGIN_MARKET_SOURCE_URL_KEY,
 };
 
@@ -39,6 +40,7 @@ pub(super) struct AppSettingsPatch {
     plugin_market_source_url: Option<String>,
     upstream_proxy_url: Option<String>,
     upstream_stream_timeout_ms: Option<u64>,
+    upstream_total_timeout_ms: Option<u64>,
     sse_keepalive_interval_ms: Option<u64>,
     background_tasks: Option<BackgroundTasksInput>,
     env_overrides: Option<HashMap<String, String>>,
@@ -152,6 +154,9 @@ pub(super) fn apply_app_settings_patch(patch: AppSettingsPatch) -> Result<(), St
     }
     if let Some(timeout_ms) = patch.upstream_stream_timeout_ms {
         let _ = set_gateway_upstream_stream_timeout_ms(timeout_ms)?;
+    }
+    if let Some(timeout_ms) = patch.upstream_total_timeout_ms {
+        let _ = set_gateway_upstream_total_timeout_ms(timeout_ms)?;
     }
     if let Some(interval_ms) = patch.sse_keepalive_interval_ms {
         let _ = set_gateway_sse_keepalive_interval_ms(interval_ms)?;

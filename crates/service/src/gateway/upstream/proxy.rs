@@ -1,10 +1,12 @@
 use crate::apikey_profile::PROTOCOL_ANTHROPIC_NATIVE;
-use crate::apikey_profile::ROTATION_AGGREGATE_API;
 use crate::gateway::request_log::RequestLogUsage;
 use std::time::Instant;
 use tiny_http::Request;
 
 use super::super::local_validation::LocalValidationResult;
+use super::executor::{
+    resolve_gateway_upstream_execution_plan, GatewayUpstreamExecutorKind, GatewayUpstreamRouteKind,
+};
 use super::proxy_pipeline::candidate_executor::{
     execute_candidate_sequence, CandidateExecutionResult, CandidateExecutorParams,
 };
@@ -71,6 +73,150 @@ fn resolve_upstream_is_stream(client_is_stream: bool, path: &str) -> bool {
     let is_compact_path =
         path == "/v1/responses/compact" || path.starts_with("/v1/responses/compact?");
     client_is_stream || (path.starts_with("/v1/responses") && !is_compact_path)
+}
+
+fn should_try_provider_executor_aggregate_route(
+    execution_plan: super::executor::GatewayUpstreamExecutionPlan,
+) -> bool {
+    matches!(
+        execution_plan.route_kind,
+        GatewayUpstreamRouteKind::AggregateApi
+    )
+}
+
+fn executor_kind_label(value: GatewayUpstreamExecutorKind) -> &'static str {
+    match value {
+        GatewayUpstreamExecutorKind::CodexResponses => "codex_responses",
+        GatewayUpstreamExecutorKind::Claude => "claude",
+        GatewayUpstreamExecutorKind::Gemini => "gemini",
+    }
+}
+
+fn route_kind_label(value: GatewayUpstreamRouteKind) -> &'static str {
+    match value {
+        GatewayUpstreamRouteKind::AccountRotation => "account_rotation",
+        GatewayUpstreamRouteKind::AggregateApi => "aggregate_api",
+    }
+}
+
+fn provider_upstream_hint(
+    value: GatewayUpstreamExecutorKind,
+) -> Option<(&'static str, &'static str)> {
+    match value {
+        GatewayUpstreamExecutorKind::Claude => Some(("Claude", "claude")),
+        GatewayUpstreamExecutorKind::Gemini => Some(("Gemini", "gemini")),
+        GatewayUpstreamExecutorKind::CodexResponses => None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn respond_aggregate_route_error(
+    request: Request,
+    storage: &crate::storage_helpers::StorageHandle,
+    trace_id: &str,
+    key_id: &str,
+    original_path: &str,
+    path: &str,
+    request_method: &str,
+    response_adapter: super::super::ResponseAdapter,
+    effective_service_tier_for_log: Option<&str>,
+    model_for_log: Option<&str>,
+    reasoning_for_log: Option<&str>,
+    started_at: Instant,
+    message: String,
+) -> Result<(), String> {
+    super::super::record_gateway_request_outcome(path, 404, Some("aggregate_api"));
+    super::super::trace_log::log_request_final(
+        trace_id,
+        404,
+        Some(key_id),
+        None,
+        Some(message.as_str()),
+        started_at.elapsed().as_millis(),
+    );
+    super::super::write_request_log(
+        storage,
+        super::super::request_log::RequestLogTraceContext {
+            trace_id: Some(trace_id),
+            original_path: Some(original_path),
+            adapted_path: Some(path),
+            response_adapter: Some(response_adapter),
+            effective_service_tier: effective_service_tier_for_log,
+            ..Default::default()
+        },
+        Some(key_id),
+        None,
+        path,
+        request_method,
+        model_for_log,
+        reasoning_for_log,
+        None,
+        Some(404),
+        super::super::request_log::RequestLogUsage::default(),
+        Some(message.as_str()),
+        Some(started_at.elapsed().as_millis()),
+    );
+    let response = super::super::error_response::terminal_text_response(
+        404,
+        super::super::error_message_for_client(
+            super::super::prefers_raw_errors_for_tiny_http_request(&request),
+            message,
+        ),
+        Some(trace_id),
+    );
+    let _ = request.respond(response);
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn proxy_with_aggregate_candidates(
+    request: Request,
+    storage: &crate::storage_helpers::StorageHandle,
+    trace_id: &str,
+    key_id: &str,
+    original_path: &str,
+    path: &str,
+    request_method: &str,
+    method: &reqwest::Method,
+    body: &bytes::Bytes,
+    client_is_stream: bool,
+    model_for_log: Option<&str>,
+    reasoning_for_log: Option<&str>,
+    effective_service_tier_for_log: Option<&str>,
+    aggregate_api_id: Option<&str>,
+    request_deadline: Option<Instant>,
+    started_at: Instant,
+    aggregate_api_candidates: Vec<codexmanager_core::storage::AggregateApi>,
+) -> Result<(), String> {
+    let mut aggregate_api_candidates = aggregate_api_candidates;
+    super::protocol::aggregate_api::apply_gateway_route_strategy_to_aggregate_candidates(
+        &mut aggregate_api_candidates,
+        key_id,
+        model_for_log,
+        aggregate_api_id,
+    );
+
+    super::protocol::aggregate_api::proxy_aggregate_request(
+        super::protocol::aggregate_api::AggregateProxyRequest {
+            request,
+            storage,
+            trace_id,
+            key_id,
+            original_path,
+            path,
+            request_method,
+            method,
+            body,
+            is_stream: client_is_stream,
+            response_adapter: super::super::ResponseAdapter::Passthrough,
+            model_for_log,
+            reasoning_for_log,
+            effective_service_tier_for_log,
+            aggregate_api_candidates,
+            request_deadline,
+            started_at,
+        },
+    )
 }
 
 /// 函数 `proxy_validated_request`
@@ -151,92 +297,93 @@ pub(in super::super) fn proxy_validated_request(
         );
     }
 
-    if rotation_strategy == ROTATION_AGGREGATE_API {
-        let mut aggregate_api_candidates =
-            match super::protocol::aggregate_api::resolve_aggregate_api_rotation_candidates(
-                &storage,
-                protocol_type.as_str(),
-                aggregate_api_id.as_deref(),
-            ) {
-                Ok(candidates) => candidates,
-                Err(err) => {
-                    let message = err;
-                    super::super::record_gateway_request_outcome(
-                        path.as_str(),
-                        404,
-                        Some("aggregate_api"),
-                    );
-                    super::super::trace_log::log_request_final(
-                        trace_id.as_str(),
-                        404,
-                        Some(key_id.as_str()),
-                        None,
-                        Some(message.as_str()),
-                        started_at.elapsed().as_millis(),
-                    );
-                    super::super::write_request_log(
-                        &storage,
-                        super::super::request_log::RequestLogTraceContext {
-                            trace_id: Some(trace_id.as_str()),
-                            original_path: Some(original_path.as_str()),
-                            adapted_path: Some(path.as_str()),
-                            response_adapter: Some(super::super::ResponseAdapter::Passthrough),
-                            effective_service_tier: effective_service_tier_for_log.as_deref(),
-                            ..Default::default()
-                        },
-                        Some(key_id.as_str()),
-                        None,
-                        path.as_str(),
-                        request_method.as_str(),
-                        model_for_log.as_deref(),
-                        reasoning_for_log.as_deref(),
-                        None,
-                        Some(404),
-                        super::super::request_log::RequestLogUsage::default(),
-                        Some(message.as_str()),
-                        Some(started_at.elapsed().as_millis()),
-                    );
-                    let response = super::super::error_response::terminal_text_response(
-                        404,
-                        super::super::error_message_for_client(
-                            super::super::prefers_raw_errors_for_tiny_http_request(&request),
-                            message,
-                        ),
-                        Some(trace_id.as_str()),
-                    );
-                    let _ = request.respond(response);
-                    return Ok(());
-                }
-            };
+    let execution_plan =
+        resolve_gateway_upstream_execution_plan(protocol_type.as_str(), rotation_strategy.as_str());
+    super::super::log_request_execution_plan(
+        trace_id.as_str(),
+        path.as_str(),
+        protocol_type.as_str(),
+        executor_kind_label(execution_plan.executor_kind),
+        route_kind_label(execution_plan.route_kind),
+    );
 
-        super::protocol::aggregate_api::apply_gateway_route_strategy_to_aggregate_candidates(
-            &mut aggregate_api_candidates,
-            key_id.as_str(),
-            model_for_log.as_deref(),
+    if should_try_provider_executor_aggregate_route(execution_plan) {
+        match super::protocol::aggregate_api::resolve_aggregate_api_rotation_candidates(
+            &storage,
+            protocol_type.as_str(),
             aggregate_api_id.as_deref(),
-        );
-
-        return super::protocol::aggregate_api::proxy_aggregate_request(
-            super::protocol::aggregate_api::AggregateProxyRequest {
-                request,
-                storage: &storage,
-                trace_id: trace_id.as_str(),
-                key_id: key_id.as_str(),
-                original_path: original_path.as_str(),
-                path: path.as_str(),
-                request_method: request_method.as_str(),
-                method: &method,
-                body: &body,
-                is_stream: client_is_stream,
-                response_adapter: super::super::ResponseAdapter::Passthrough,
-                model_for_log: model_for_log.as_deref(),
-                reasoning_for_log: reasoning_for_log.as_deref(),
-                effective_service_tier_for_log: effective_service_tier_for_log.as_deref(),
-                aggregate_api_candidates,
-                request_deadline,
-                started_at,
-            },
-        );
+        ) {
+            Ok(aggregate_api_candidates) => {
+                return proxy_with_aggregate_candidates(
+                    request,
+                    &storage,
+                    trace_id.as_str(),
+                    key_id.as_str(),
+                    original_path.as_str(),
+                    path.as_str(),
+                    request_method.as_str(),
+                    &method,
+                    &body,
+                    client_is_stream,
+                    model_for_log.as_deref(),
+                    reasoning_for_log.as_deref(),
+                    effective_service_tier_for_log.as_deref(),
+                    aggregate_api_id.as_deref(),
+                    request_deadline,
+                    started_at,
+                    aggregate_api_candidates,
+                );
+            }
+            Err(err)
+                if matches!(
+                    execution_plan.route_kind,
+                    GatewayUpstreamRouteKind::AggregateApi
+                ) =>
+            {
+                return respond_aggregate_route_error(
+                    request,
+                    &storage,
+                    trace_id.as_str(),
+                    key_id.as_str(),
+                    original_path.as_str(),
+                    path.as_str(),
+                    request_method.as_str(),
+                    super::super::ResponseAdapter::Passthrough,
+                    effective_service_tier_for_log.as_deref(),
+                    model_for_log.as_deref(),
+                    reasoning_for_log.as_deref(),
+                    started_at,
+                    err,
+                );
+            }
+            Err(err) => {
+                let (provider_name, provider_type) =
+                    provider_upstream_hint(execution_plan.executor_kind)
+                        .unwrap_or(("Codex", "codex"));
+                return respond_aggregate_route_error(
+                    request,
+                    &storage,
+                    trace_id.as_str(),
+                    key_id.as_str(),
+                    original_path.as_str(),
+                    path.as_str(),
+                    request_method.as_str(),
+                    super::super::ResponseAdapter::Passthrough,
+                    effective_service_tier_for_log.as_deref(),
+                    model_for_log.as_deref(),
+                    reasoning_for_log.as_deref(),
+                    started_at,
+                    crate::gateway::bilingual_error(
+                        format!(
+                            "未配置 {provider_name} 上游 Provider，请添加 provider_type={provider_type} 的 Aggregate API"
+                        ),
+                        format!(
+                            "{provider_name} upstream provider is not configured; add aggregate api with provider_type={provider_type}: {err}"
+                        ),
+                    ),
+                );
+            }
+        }
     }
 
     let (request, mut candidates) = match prepare_candidates_for_proxy(
@@ -378,7 +525,13 @@ pub(in super::super) fn proxy_validated_request(
 
 #[cfg(test)]
 mod tests {
-    use super::{exhausted_gateway_error_for_log, resolve_upstream_is_stream};
+    use super::{
+        exhausted_gateway_error_for_log, provider_upstream_hint, resolve_upstream_is_stream,
+        should_try_provider_executor_aggregate_route,
+    };
+    use crate::gateway::upstream::executor::{
+        GatewayUpstreamExecutionPlan, GatewayUpstreamExecutorKind, GatewayUpstreamRouteKind,
+    };
 
     /// 函数 `exhausted_gateway_error_includes_attempts_skips_and_last_error`
     ///
@@ -435,5 +588,61 @@ mod tests {
         assert!(!resolve_upstream_is_stream(false, "/v1/responses/compact"));
         assert!(!resolve_upstream_is_stream(false, "/v1/chat/completions"));
         assert!(resolve_upstream_is_stream(true, "/v1/chat/completions"));
+    }
+
+    #[test]
+    fn only_explicit_aggregate_route_uses_aggregate_candidates() {
+        assert!(should_try_provider_executor_aggregate_route(
+            GatewayUpstreamExecutionPlan {
+                executor_kind: GatewayUpstreamExecutorKind::Claude,
+                route_kind: GatewayUpstreamRouteKind::AggregateApi,
+            }
+        ));
+        assert!(should_try_provider_executor_aggregate_route(
+            GatewayUpstreamExecutionPlan {
+                executor_kind: GatewayUpstreamExecutorKind::Gemini,
+                route_kind: GatewayUpstreamRouteKind::AggregateApi,
+            }
+        ));
+        assert!(!should_try_provider_executor_aggregate_route(
+            GatewayUpstreamExecutionPlan {
+                executor_kind: GatewayUpstreamExecutorKind::Claude,
+                route_kind: GatewayUpstreamRouteKind::AccountRotation,
+            }
+        ));
+        assert!(should_try_provider_executor_aggregate_route(
+            GatewayUpstreamExecutionPlan {
+                executor_kind: GatewayUpstreamExecutorKind::CodexResponses,
+                route_kind: GatewayUpstreamRouteKind::AggregateApi,
+            }
+        ));
+        assert!(!should_try_provider_executor_aggregate_route(
+            GatewayUpstreamExecutionPlan {
+                executor_kind: GatewayUpstreamExecutorKind::Gemini,
+                route_kind: GatewayUpstreamRouteKind::AccountRotation,
+            }
+        ));
+        assert!(!should_try_provider_executor_aggregate_route(
+            GatewayUpstreamExecutionPlan {
+                executor_kind: GatewayUpstreamExecutorKind::CodexResponses,
+                route_kind: GatewayUpstreamRouteKind::AccountRotation,
+            }
+        ));
+    }
+
+    #[test]
+    fn provider_upstream_hint_reports_expected_aggregate_provider_type() {
+        assert_eq!(
+            provider_upstream_hint(GatewayUpstreamExecutorKind::Claude),
+            Some(("Claude", "claude"))
+        );
+        assert_eq!(
+            provider_upstream_hint(GatewayUpstreamExecutorKind::Gemini),
+            Some(("Gemini", "gemini"))
+        );
+        assert_eq!(
+            provider_upstream_hint(GatewayUpstreamExecutorKind::CodexResponses),
+            None
+        );
     }
 }

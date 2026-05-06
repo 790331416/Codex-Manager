@@ -266,6 +266,9 @@ fn balanced_round_robin_isolated_by_key_and_model() {
 #[test]
 fn set_route_strategy_accepts_aliases_and_reports_canonical_name() {
     let _guard = crate::test_env_guard();
+    let previous = std::env::var(ROUTE_STRATEGY_ENV).ok();
+    std::env::set_var(ROUTE_STRATEGY_ENV, "ordered");
+    reload_from_env();
     clear_route_state_for_tests();
     assert_eq!(
         set_route_strategy("ordered").expect("set ordered"),
@@ -277,6 +280,13 @@ fn set_route_strategy_accepts_aliases_and_reports_canonical_name() {
     );
     assert_eq!(current_route_strategy(), "balanced");
     assert!(set_route_strategy("unsupported").is_err());
+
+    if let Some(value) = previous {
+        std::env::set_var(ROUTE_STRATEGY_ENV, value);
+    } else {
+        std::env::remove_var(ROUTE_STRATEGY_ENV);
+    }
+    reload_from_env();
 }
 
 /// 函数 `route_state_ttl_expires_per_key_state`
