@@ -189,6 +189,7 @@ export const DEFAULT_FREE_ACCOUNT_MAX_MODEL_OPTIONS = [
   "gpt-5.3-codex",
   "gpt-5.4-mini",
   "gpt-5.4",
+  "gpt-5.5",
 ] as const;
 
 export function formatFreeAccountModelLabel(

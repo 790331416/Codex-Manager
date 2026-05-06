@@ -47,6 +47,7 @@ const DEFAULT_FREE_ACCOUNT_MAX_MODEL_OPTIONS: &[&str] = &[
     "gpt-5.3-codex",
     "gpt-5.4-mini",
     "gpt-5.4",
+    "gpt-5.5",
 ];
 
 /// 函数 `normalize_service_bind_mode_value`
