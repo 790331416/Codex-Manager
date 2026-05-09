@@ -4,7 +4,7 @@ use codexmanager_core::usage::parse_usage_snapshot;
 use crossbeam_channel::unbounded;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -129,6 +129,19 @@ struct UsageRefreshResult {
     _status: UsageAvailabilityStatus,
 }
 
+#[derive(Debug, Clone)]
+pub struct UsageRefreshCompletedEvent {
+    pub source: &'static str,
+    pub processed: usize,
+    pub total: usize,
+    pub completed_at: i64,
+}
+
+type UsageRefreshCompletedHandler = Arc<dyn Fn(UsageRefreshCompletedEvent) + Send + Sync>;
+
+static USAGE_REFRESH_COMPLETED_HANDLER: OnceLock<Mutex<Option<UsageRefreshCompletedHandler>>> =
+    OnceLock::new();
+
 pub(crate) use self::batch::refresh_usage_for_all_accounts;
 use self::batch::refresh_usage_for_polling_batch;
 #[cfg(test)]
@@ -145,6 +158,31 @@ pub(crate) use self::settings::{
     background_tasks_settings, reload_background_tasks_runtime_from_env,
     set_background_tasks_settings, BackgroundTasksSettingsPatch,
 };
+
+pub fn set_usage_refresh_completed_handler<F>(handler: F)
+where
+    F: Fn(UsageRefreshCompletedEvent) + Send + Sync + 'static,
+{
+    let slot = USAGE_REFRESH_COMPLETED_HANDLER.get_or_init(|| Mutex::new(None));
+    let mut guard = crate::lock_utils::lock_recover(slot, "usage_refresh_completed_handler");
+    *guard = Some(Arc::new(handler));
+}
+
+pub(crate) fn notify_usage_refresh_completed(source: &'static str, processed: usize, total: usize) {
+    let handler = USAGE_REFRESH_COMPLETED_HANDLER.get().and_then(|slot| {
+        let guard = crate::lock_utils::lock_recover(slot, "usage_refresh_completed_handler");
+        guard.clone()
+    });
+
+    if let Some(handler) = handler {
+        handler(UsageRefreshCompletedEvent {
+            source,
+            processed,
+            total,
+            completed_at: now_ts(),
+        });
+    }
+}
 
 /// 函数 `ensure_usage_polling`
 ///
@@ -388,6 +426,7 @@ pub(crate) fn refresh_usage_for_account(account_id: &str) -> Result<(), String> 
         }
     }
     record_usage_refresh_metrics(true, started_at);
+    notify_usage_refresh_completed("single", 1, 1);
     Ok(())
 }
 

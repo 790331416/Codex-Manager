@@ -1,13 +1,32 @@
 use super::{
     clear_pending_usage_refresh_tasks_for_tests, enqueue_usage_refresh_with_worker,
-    next_usage_poll_cursor, reset_usage_poll_cursor_for_tests, resolve_token_refresh_issuer,
-    run_token_refresh_task, should_retry_usage_refresh_with_token, token_refresh_access_exp_cutoff,
+    next_usage_poll_cursor, notify_usage_refresh_completed, reset_usage_poll_cursor_for_tests,
+    resolve_token_refresh_issuer, run_token_refresh_task, set_usage_refresh_completed_handler,
+    should_retry_usage_refresh_with_token, token_refresh_access_exp_cutoff,
     token_refresh_due_cutoff, token_refresh_schedule, usage_poll_batch_indices,
 };
 use codexmanager_core::storage::{now_ts, Account, Storage, Token};
 use std::collections::HashSet;
 use std::sync::mpsc;
 use std::time::Duration;
+
+#[test]
+fn usage_refresh_completed_handler_receives_notification() {
+    let _guard = crate::test_env_guard();
+    let (tx, rx) = mpsc::channel();
+    set_usage_refresh_completed_handler(move |event| {
+        let _ = tx.send(event);
+    });
+
+    notify_usage_refresh_completed("test-notify", 2, 3);
+    let event = rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("usage refresh completed event");
+    assert_eq!(event.source, "test-notify");
+    assert_eq!(event.processed, 2);
+    assert_eq!(event.total, 3);
+    assert!(event.completed_at > 0);
+}
 
 /// 函数 `enqueue_usage_refresh_for_same_account_is_deduplicated_until_finish`
 ///

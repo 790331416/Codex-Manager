@@ -34,20 +34,49 @@ pub(crate) async fn rpc_call_in_background(
 ///
 /// # 返回
 /// 返回函数执行结果
-pub(crate) fn open_in_browser_blocking(url: &str) -> Result<(), String> {
-    if cfg!(target_os = "windows") {
-        let status = std::process::Command::new("rundll32.exe")
-            .args(["url.dll,FileProtocolHandler", url])
-            .status()
-            .map_err(|e| e.to_string())?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err(format!("rundll32 failed with status: {status}"))
-        }
+#[cfg(target_os = "windows")]
+fn wide_null(value: &str) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+
+    std::ffi::OsStr::new(value)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+#[cfg(target_os = "windows")]
+fn open_url_with_shell(url: &str) -> Result<(), String> {
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let operation = wide_null("open");
+    let target = wide_null(url);
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            operation.as_ptr(),
+            target.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    } as isize;
+
+    if result > 32 {
+        Ok(())
     } else {
-        webbrowser::open(url).map(|_| ()).map_err(|e| e.to_string())
+        Err(format!("ShellExecuteW failed with code: {result}"))
     }
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn open_in_browser_blocking(url: &str) -> Result<(), String> {
+    open_url_with_shell(url)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn open_in_browser_blocking(url: &str) -> Result<(), String> {
+    webbrowser::open(url).map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// 函数 `spawn_background_command`

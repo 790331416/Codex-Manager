@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { accountClient } from "@/lib/api/account-client";
@@ -10,13 +10,14 @@ import {
   STARTUP_SNAPSHOT_REQUEST_LOG_LIMIT,
 } from "@/lib/api/startup-snapshot";
 import { getAppErrorMessage } from "@/lib/api/transport";
+import { listenUsageRefreshCompleted } from "@/lib/api/usage-refresh-events";
 import { useDesktopPageActive } from "@/hooks/useDesktopPageActive";
 import { useDeferredDesktopActivation } from "@/hooks/useDeferredDesktopActivation";
 import { useLocalDayRange } from "@/hooks/useLocalDayRange";
 import { useRuntimeCapabilities } from "@/hooks/useRuntimeCapabilities";
 import { useI18n } from "@/lib/i18n/provider";
 import { useAppStore } from "@/lib/store/useAppStore";
-import { AccountListResult, StartupSnapshot } from "@/types";
+import { AccountListResult, AccountUsage, StartupSnapshot } from "@/types";
 
 type ImportByDirectoryResult = Awaited<ReturnType<typeof accountClient.importByDirectory>>;
 type ImportByFileResult = Awaited<ReturnType<typeof accountClient.importByFile>>;
@@ -112,6 +113,39 @@ function getAccountsAutoRefreshIntervalMs(
   return Math.max(1, intervalSecs) * 1000;
 }
 
+function getUsageListRefreshIntervalMs(
+  enabled: boolean,
+  intervalSecs: number,
+): number | false {
+  const intervalMs = getAccountsAutoRefreshIntervalMs(enabled, intervalSecs);
+  if (!intervalMs) {
+    return false;
+  }
+  return Math.min(5_000, intervalMs);
+}
+
+function buildUsageListFingerprint(usages: AccountUsage[]): string {
+  if (usages.length === 0) {
+    return "";
+  }
+
+  return usages
+    .map((usage) =>
+      [
+        usage.accountId,
+        usage.capturedAt ?? "",
+        usage.usedPercent ?? "",
+        usage.secondaryUsedPercent ?? "",
+        usage.resetsAt ?? "",
+        usage.secondaryResetsAt ?? "",
+        usage.availabilityStatus ?? "",
+        usage.creditsJson ?? "",
+      ].join(":"),
+    )
+    .sort()
+    .join("|");
+}
+
 /**
  * 函数 `useAccounts`
  *
@@ -141,6 +175,11 @@ export function useAccounts() {
     areAccountQueriesEnabled && backgroundTasks.usagePollingEnabled,
     backgroundTasks.usagePollIntervalSecs,
   );
+  const usageListRefreshIntervalMs = getUsageListRefreshIntervalMs(
+    areAccountQueriesEnabled && backgroundTasks.usagePollingEnabled,
+    backgroundTasks.usagePollIntervalSecs,
+  );
+  const usageListFingerprintRef = useRef<string | null>(null);
   const startupSnapshot = queryClient.getQueryData<StartupSnapshot>(
     buildStartupSnapshotQueryKey(
       serviceStatus.addr,
@@ -197,11 +236,78 @@ export function useAccounts() {
     queryFn: () => accountClient.listUsage(),
     enabled: areAccountQueriesEnabled,
     retry: 1,
-    refetchInterval: accountsAutoRefreshIntervalMs,
+    refetchInterval: usageListRefreshIntervalMs,
     refetchIntervalInBackground: false,
     placeholderData: (previousData) =>
       previousData || (startupUsages.length > 0 ? startupUsages : undefined),
   });
+
+  const usageListFingerprint = useMemo(
+    () => buildUsageListFingerprint(usagesQuery.data || []),
+    [usagesQuery.data],
+  );
+
+  useEffect(() => {
+    if (!areAccountQueriesEnabled) {
+      return;
+    }
+
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    const refreshVisibleUsageData = () => {
+      void Promise.all([
+        queryClient.refetchQueries({ queryKey: ["usage", "list"], type: "active" }),
+        queryClient.refetchQueries({ queryKey: ["accounts", "list"], type: "active" }),
+        queryClient.invalidateQueries({ queryKey: ["usage-aggregate"] }),
+        queryClient.invalidateQueries({ queryKey: ["today-summary"] }),
+        queryClient.invalidateQueries({ queryKey: ["startup-snapshot"] }),
+      ]);
+    };
+
+    void listenUsageRefreshCompleted(() => {
+      refreshVisibleUsageData();
+    }).then((cleanup) => {
+      if (disposed) {
+        cleanup();
+        return;
+      }
+      unlisten = cleanup;
+    });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [areAccountQueriesEnabled, queryClient]);
+
+  useEffect(() => {
+    if (!areAccountQueriesEnabled) {
+      usageListFingerprintRef.current = null;
+      return;
+    }
+
+    if (!usagesQuery.isFetched) {
+      return;
+    }
+
+    const previousFingerprint = usageListFingerprintRef.current;
+    usageListFingerprintRef.current = usageListFingerprint;
+    if (previousFingerprint == null || previousFingerprint === usageListFingerprint) {
+      return;
+    }
+
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["accounts", "list"] }),
+      queryClient.invalidateQueries({ queryKey: ["usage-aggregate"] }),
+      queryClient.invalidateQueries({ queryKey: ["today-summary"] }),
+      queryClient.invalidateQueries({ queryKey: ["startup-snapshot"] }),
+    ]);
+  }, [
+    areAccountQueriesEnabled,
+    queryClient,
+    usageListFingerprint,
+    usagesQuery.isFetched,
+  ]);
 
   const accounts = useMemo(() => {
     return attachUsagesToAccounts(

@@ -1,4 +1,5 @@
-use tauri::Manager;
+use serde::Serialize;
+use tauri::{Emitter, Manager};
 
 mod app_shell;
 mod app_storage;
@@ -11,6 +12,16 @@ use app_shell::{
     notify_existing_instance_focused, setup_tray, show_main_window, sync_startup_window_state,
     CLOSE_TO_TRAY_ON_CLOSE, TRAY_AVAILABLE,
 };
+
+const USAGE_REFRESH_COMPLETED_EVENT: &str = "usage-refresh-completed";
+
+#[derive(Clone, Serialize)]
+struct UsageRefreshCompletedPayload {
+    source: &'static str,
+    processed: usize,
+    total: usize,
+    completed_at: i64,
+}
 
 /// 函数 `run`
 ///
@@ -49,6 +60,20 @@ pub fn run() {
             if let Ok(log_dir) = app.path().app_log_dir() {
                 log::info!("log dir: {}", log_dir.display());
             }
+            let usage_refresh_event_app = app.handle().clone();
+            codexmanager_service::set_usage_refresh_completed_handler(move |event| {
+                let payload = UsageRefreshCompletedPayload {
+                    source: event.source,
+                    processed: event.processed,
+                    total: event.total,
+                    completed_at: event.completed_at,
+                };
+                if let Err(err) = usage_refresh_event_app
+                    .emit(USAGE_REFRESH_COMPLETED_EVENT, payload)
+                {
+                    log::warn!("emit usage refresh completed event failed: {}", err);
+                }
+            });
             if let Err(err) = setup_tray(app.handle()) {
                 TRAY_AVAILABLE.store(false, std::sync::atomic::Ordering::Relaxed);
                 CLOSE_TO_TRAY_ON_CLOSE.store(false, std::sync::atomic::Ordering::Relaxed);

@@ -6,6 +6,7 @@ pub(crate) const AUTH_BEARER: &str = "authorization_bearer";
 pub(crate) const AUTH_X_API_KEY: &str = "x_api_key";
 pub(crate) const ROTATION_ACCOUNT: &str = "account_rotation";
 pub(crate) const ROTATION_AGGREGATE_API: &str = "aggregate_api_rotation";
+pub(crate) const ROTATION_HYBRID: &str = "hybrid_rotation";
 
 /// 函数 `normalize_key`
 ///
@@ -167,6 +168,12 @@ pub(crate) fn normalize_rotation_strategy(value: Option<String>) -> Result<Strin
             | "aggregateapirotation"
             | "聚合api"
             | "聚合api轮转" => Ok(ROTATION_AGGREGATE_API.to_string()),
+            "hybrid"
+            | "mixed"
+            | "hybrid_rotation"
+            | "mixed_rotation"
+            | "混合轮转"
+            | "账号优先聚合兜底" => Ok(ROTATION_HYBRID.to_string()),
             other => Err(format!("unsupported rotation strategy: {other}")),
         },
         None => Ok(ROTATION_ACCOUNT.to_string()),
@@ -244,9 +251,39 @@ mod tests {
     use super::{
         is_anthropic_request_path, is_gemini_count_tokens_request_path,
         is_gemini_generate_content_request_path, normalize_protocol_type,
-        resolve_gateway_protocol_type, PROTOCOL_ANTHROPIC_NATIVE, PROTOCOL_GEMINI_NATIVE,
-        PROTOCOL_OPENAI_COMPAT,
+        normalize_rotation_strategy, resolve_gateway_protocol_type, PROTOCOL_ANTHROPIC_NATIVE,
+        PROTOCOL_GEMINI_NATIVE, PROTOCOL_OPENAI_COMPAT, ROTATION_ACCOUNT, ROTATION_AGGREGATE_API,
+        ROTATION_HYBRID,
     };
+
+    #[test]
+    fn normalize_rotation_strategy_accepts_hybrid_aliases() {
+        for value in [
+            "hybrid_rotation",
+            "hybrid",
+            "mixed",
+            "mixed-rotation",
+            "混合轮转",
+            "账号优先聚合兜底",
+        ] {
+            assert_eq!(
+                normalize_rotation_strategy(Some(value.to_string())).as_deref(),
+                Ok(ROTATION_HYBRID)
+            );
+        }
+    }
+
+    #[test]
+    fn normalize_rotation_strategy_keeps_existing_values() {
+        assert_eq!(
+            normalize_rotation_strategy(None).as_deref(),
+            Ok(ROTATION_ACCOUNT)
+        );
+        assert_eq!(
+            normalize_rotation_strategy(Some("aggregate_api_rotation".to_string())).as_deref(),
+            Ok(ROTATION_AGGREGATE_API)
+        );
+    }
 
     #[test]
     fn wildcard_protocol_routes_messages_path_to_anthropic() {

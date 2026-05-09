@@ -401,6 +401,10 @@ export const accountClient = {
     );
     return normalizeUsageSnapshot(unwrapUsageSnapshotPayload(result));
   },
+  async getLatestUsage(): Promise<AccountUsage | null> {
+    const result = await invoke<unknown>("service_usage_read", withAddr());
+    return normalizeUsageSnapshot(unwrapUsageSnapshotPayload(result));
+  },
   async listUsage(): Promise<AccountUsage[]> {
     const result = await invoke<unknown>("service_usage_list", withAddr());
     return normalizeUsageList(result);
@@ -510,7 +514,7 @@ export const accountClient = {
           typeof params.actionCustomEnabled === "boolean"
             ? params.actionCustomEnabled
             : null,
-        action: params.action || null,
+        action: params.action ?? null,
         username: params.username || null,
         password: params.password || null,
       })
@@ -538,7 +542,7 @@ export const accountClient = {
           typeof params.actionCustomEnabled === "boolean"
             ? params.actionCustomEnabled
             : null,
-        action: params.action || null,
+        action: params.action ?? null,
         username: params.username || null,
         password: params.password || null,
       })

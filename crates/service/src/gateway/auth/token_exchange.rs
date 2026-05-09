@@ -137,10 +137,40 @@ fn exchange_and_persist_api_key_access_token(
     issuer: &str,
     client_id: &str,
 ) -> Result<String, String> {
-    let exchanged = auth_tokens::obtain_api_key(issuer, client_id, &token.id_token)?;
-    token.api_key_access_token = Some(exchanged.clone());
-    let _ = storage.insert_token(token);
-    Ok(exchanged)
+    let mut errors = Vec::new();
+    for subject_token in api_key_exchange_subject_tokens(token) {
+        match auth_tokens::obtain_api_key(issuer, client_id, &subject_token) {
+            Ok(exchanged) => {
+                token.api_key_access_token = Some(exchanged.clone());
+                let _ = storage.insert_token(token);
+                return Ok(exchanged);
+            }
+            Err(err) => errors.push(err),
+        }
+    }
+
+    let exchange_error = errors
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| "api key exchange subject token is missing".to_string());
+    Err(exchange_error)
+}
+
+fn api_key_exchange_subject_tokens(token: &Token) -> Vec<String> {
+    let mut subjects = Vec::new();
+    // 中文注释：直接导入 api/auth/session JSON 时通常只有 accessToken；
+    // 登录授权路径已优先缓存 api_key_access_token，缓存缺失时也先按最新 access_token 兑换。
+    push_unique_subject_token(&mut subjects, token.access_token.as_str());
+    push_unique_subject_token(&mut subjects, token.id_token.as_str());
+    subjects
+}
+
+fn push_unique_subject_token(subjects: &mut Vec<String>, candidate: &str) {
+    let value = candidate.trim();
+    if value.is_empty() || subjects.iter().any(|existing| existing == value) {
+        return;
+    }
+    subjects.push(value.to_string());
 }
 
 /// 函数 `fallback_to_access_token`

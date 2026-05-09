@@ -429,7 +429,8 @@ fn map_account_summary(
         None => (None, None),
     };
     let subscription_plan = subscription.and_then(|value| value.plan_type.clone());
-    let plan_type = subscription_plan.clone().or(fallback_plan_type);
+    let subscription_plan_type = subscription.and_then(resolve_subscription_plan_type);
+    let plan_type = subscription_plan_type.or(fallback_plan_type);
     to_account_summary_with_reason(
         account,
         preferred,
@@ -443,4 +444,14 @@ fn map_account_summary(
         account_metadata.and_then(|value| value.note.clone()),
         account_metadata.and_then(|value| value.tags.clone()),
     )
+}
+
+fn resolve_subscription_plan_type(subscription: &AccountSubscription) -> Option<String> {
+    if let Some(plan_type) = subscription.plan_type.clone() {
+        return Some(plan_type);
+    }
+    if !subscription.has_subscription {
+        return Some("free".to_string());
+    }
+    None
 }

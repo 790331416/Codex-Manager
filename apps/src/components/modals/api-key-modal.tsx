@@ -58,6 +58,7 @@ function normalizeEditableServiceTier(value?: string | null): string {
 const ROTATION_STRATEGY_LABELS: Record<string, string> = {
   account_rotation: "账号轮转",
   aggregate_api_rotation: "聚合API轮转",
+  hybrid_rotation: "混合轮转（账号优先）",
 };
 
 const ACCOUNT_PLAN_FILTER_LABELS: Record<string, string> = {
@@ -109,6 +110,9 @@ export function ApiKeyModal({ open, onOpenChange, apiKey }: ApiKeyModalProps) {
   const [isLoading, setIsLoading] = useState(false);
   const queryClient = useQueryClient();
   const isServiceReady = canAccessManagementRpc && serviceStatus.connected;
+  const usesAccountPlanFilter =
+    rotationStrategy === "account_rotation" ||
+    rotationStrategy === "hybrid_rotation";
   const unavailableMessage = canAccessManagementRpc
     ? t("服务未连接，平台密钥与模型配置暂不可编辑；连接恢复后可继续操作。")
     : t("当前运行环境暂不支持平台密钥管理。");
@@ -225,7 +229,7 @@ export function ApiKeyModal({ open, onOpenChange, apiKey }: ApiKeyModalProps) {
         staticHeadersJson: null,
         rotationStrategy,
         accountPlanFilter:
-          rotationStrategy === "account_rotation" && accountPlanFilter !== "all"
+          usesAccountPlanFilter && accountPlanFilter !== "all"
             ? accountPlanFilter
             : null,
       };
@@ -332,15 +336,20 @@ export function ApiKeyModal({ open, onOpenChange, apiKey }: ApiKeyModalProps) {
                   <SelectItem value="aggregate_api_rotation">
                     {t("聚合API轮转")}
                   </SelectItem>
+                  <SelectItem value="hybrid_rotation">
+                    {t("混合轮转（账号优先）")}
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <p className="col-span-2 -mt-1 text-[11px] text-muted-foreground">
-              {t("账号轮转保持现有路由逻辑；聚合API轮转会直接透传请求。")}
+              {t(
+                "账号轮转只走账号池；聚合API轮转只走聚合API；混合轮转先走账号池，账号耗尽后使用聚合API兜底。",
+              )}
             </p>
           </div>
 
-          {rotationStrategy === "account_rotation" ? (
+          {usesAccountPlanFilter ? (
             <div className="grid gap-2">
               <Label>{t("账号组筛选")}</Label>
               <Select
@@ -370,7 +379,7 @@ export function ApiKeyModal({ open, onOpenChange, apiKey }: ApiKeyModalProps) {
               </Select>
               <p className="text-[11px] text-muted-foreground">
                 {t(
-                  "仅对账号轮转生效，可限制这把平台密钥只从指定账号计划类型中选路由账号。",
+                  "仅对账号轮转和混合轮转生效，可限制这把平台密钥只从指定账号计划类型中选路由账号。",
                 )}
               </p>
             </div>

@@ -668,7 +668,7 @@ export function normalizeApiKey(item: unknown): ApiKey | null {
 
   return {
     id,
-    name: asString(source.name) || "未命名",
+    name: asString(source.name),
     model: asString(source.modelSlug ?? source.model_slug),
     modelSlug: asString(source.modelSlug ?? source.model_slug),
     reasoningEffort: asString(source.reasoningEffort ?? source.reasoning_effort),

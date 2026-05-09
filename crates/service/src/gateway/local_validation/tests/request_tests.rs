@@ -445,6 +445,40 @@ fn aggregate_passthrough_openai_responses_defaults_omitted_stream_to_sse() {
 }
 
 #[test]
+fn hybrid_passthrough_fallback_body_uses_aggregate_override_shape() {
+    let api_key = sample_api_key(
+        crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
+        Some("gpt-5.4"),
+        Some("high"),
+        Some("fast"),
+    );
+    let body = br#"{"model":"gpt-4.1","input":"hi","reasoning":{"effort":"low"}}"#.to_vec();
+
+    let mut passthrough_body =
+        apply_passthrough_request_overrides("/v1/responses", body, &api_key, None).0;
+    passthrough_body = default_omitted_responses_stream_to_true(passthrough_body);
+    let payload: Value = serde_json::from_slice(&passthrough_body).expect("json body");
+
+    assert_eq!(
+        payload.get("model").and_then(Value::as_str),
+        Some("gpt-5.4")
+    );
+    assert_eq!(
+        payload
+            .get("reasoning")
+            .and_then(Value::as_object)
+            .and_then(|reasoning| reasoning.get("effort"))
+            .and_then(Value::as_str),
+        Some("high")
+    );
+    assert_eq!(
+        payload.get("service_tier").and_then(Value::as_str),
+        Some("priority")
+    );
+    assert_eq!(payload.get("stream").and_then(Value::as_bool), Some(true));
+}
+
+#[test]
 fn native_codex_client_detection_uses_codex_signals_instead_of_client_brand() {
     let native_headers = sample_incoming_headers(
         None,

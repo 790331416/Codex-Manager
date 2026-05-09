@@ -203,7 +203,7 @@ const GUIDE_REMINDERS = [
   "如果你在设置页改过服务端口，记得同步修改 `base_url`，否则 CLI 会连到旧端口。",
   "如果你在 Web 端想手动替换本地 Codex 缓存，优先用模型管理页右上角的导出按钮；它会下载同名 `models_cache.json` 供你手动放入本地 `.codex` 目录。",
   "如果 CLI 已经有其它 `model_providers` 配置，不需要全删，只要保证 `cm` 这一段完整且名字一致即可。",
-  "只有勾选“下次不再显示这份引导”并点击确认后，软件才会把这个状态写入数据库；否则下次进入仍会再次提醒。",
+  "勾选“下次不再显示这份引导”并点击“保存并关闭”后，软件会把这个状态写入数据库；否则仅在当前窗口会话内关闭提醒。",
 ] as const;
 
 export function CodexCliOnboardingDialog({
@@ -266,16 +266,6 @@ export function CodexCliOnboardingDialog({
     scrollContainerRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [currentStep, open]);
 
-  const handleOpenChange = (nextOpen: boolean) => {
-    if (isSaving) {
-      return;
-    }
-    if (!nextOpen) {
-      setDismissPermanently(false);
-    }
-    onOpenChange(nextOpen);
-  };
-
   const handleAcknowledge = async () => {
     setIsSaving(true);
     try {
@@ -284,6 +274,30 @@ export function CodexCliOnboardingDialog({
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleSessionClose = () => {
+    setDismissPermanently(false);
+    onOpenChange(false);
+  };
+
+  const handleRequestClose = () => {
+    if (dismissPermanently) {
+      void handleAcknowledge();
+      return;
+    }
+    handleSessionClose();
+  };
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (isSaving) {
+      return;
+    }
+    if (!nextOpen) {
+      handleRequestClose();
+      return;
+    }
+    onOpenChange(nextOpen);
   };
 
   const handleCopyConfig = async () => {
@@ -536,15 +550,17 @@ export function CodexCliOnboardingDialog({
                   </Button>
                 </>
               ) : null}
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => handleOpenChange(false)}
-                disabled={isSaving}
-              >
-                {t("本次关闭")}
-              </Button>
-              {isLastStep ? (
+              {!dismissPermanently ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleSessionClose}
+                  disabled={isSaving}
+                >
+                  {t("本次关闭")}
+                </Button>
+              ) : null}
+              {isLastStep || dismissPermanently ? (
                 <Button
                   type="button"
                   onClick={() => void handleAcknowledge()}

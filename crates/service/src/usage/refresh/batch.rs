@@ -7,10 +7,11 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::{
-    build_workspace_map_from_accounts, open_storage, record_usage_refresh_failure,
-    record_usage_refresh_metrics, refresh_usage_for_token, DEFAULT_USAGE_POLL_BATCH_LIMIT,
-    DEFAULT_USAGE_POLL_CYCLE_BUDGET_SECS, ENV_USAGE_POLL_BATCH_LIMIT,
-    ENV_USAGE_POLL_CYCLE_BUDGET_SECS, USAGE_POLL_CURSOR, USAGE_REFRESH_WORKERS,
+    build_workspace_map_from_accounts, notify_usage_refresh_completed, open_storage,
+    record_usage_refresh_failure, record_usage_refresh_metrics, refresh_usage_for_token,
+    DEFAULT_USAGE_POLL_BATCH_LIMIT, DEFAULT_USAGE_POLL_CYCLE_BUDGET_SECS,
+    ENV_USAGE_POLL_BATCH_LIMIT, ENV_USAGE_POLL_CYCLE_BUDGET_SECS, USAGE_POLL_CURSOR,
+    USAGE_REFRESH_WORKERS,
 };
 
 /// 函数 `refresh_usage_for_all_accounts`
@@ -35,7 +36,9 @@ pub(crate) fn refresh_usage_for_all_accounts() -> Result<(), String> {
     if tasks.is_empty() {
         return Ok(());
     }
-    run_usage_refresh_tasks(tasks)?;
+    let total = tasks.len();
+    let processed = run_usage_refresh_tasks(tasks)?;
+    notify_usage_refresh_completed("manual_all", processed, total);
     Ok(())
 }
 
@@ -100,6 +103,7 @@ pub(crate) fn refresh_usage_for_polling_batch() -> Result<(), String> {
             cycle_budget.map(|budget| budget.as_secs()).unwrap_or(0)
         );
     }
+    notify_usage_refresh_completed("polling", processed, total);
     Ok(())
 }
 

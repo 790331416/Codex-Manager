@@ -4,7 +4,7 @@ version = 3
 
 [[package]]
 name = "CodexManager"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "chrono",
  "codexmanager-core",
@@ -21,6 +21,7 @@ dependencies = [
  "tauri-plugin-log",
  "tauri-plugin-single-instance",
  "webbrowser",
+ "windows-sys 0.61.2",
  "zip",
 ]
 
@@ -757,7 +758,7 @@ dependencies = [
 
 [[package]]
 name = "codexmanager-core"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "base64 0.22.1",
  "rand 0.8.5",
@@ -770,7 +771,7 @@ dependencies = [
 
 [[package]]
 name = "codexmanager-service"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "axum",
  "base64 0.22.1",

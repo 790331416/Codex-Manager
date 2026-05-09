@@ -68,6 +68,24 @@ wire_api = "responses"
 6. To stop everything, visit `http://localhost:48761/__quit`. If the web process launched the service automatically, it will try to stop both.
 7. If you reverse-proxy or split-deploy frontend assets yourself, you must forward both `/api/runtime` and `/api/rpc`. Serving static assets alone is not enough.
 
+### Run the source build with embedded UI
+
+For source-based local runs, use:
+
+```bash
+./scripts/run-service-app.sh
+```
+
+The script builds the frontend with `pnpm -C apps run build:desktop`, then compiles `codexmanager-service`, `codexmanager-web`, and `codexmanager-start`. `codexmanager-web` embeds `apps/out` by default, so you no longer need to pass `CODEXMANAGER_WEB_ROOT` for normal local runs.
+
+Useful flags:
+
+- `--debug`: use a debug Rust build for faster local iteration.
+- `--clean-dist`: remove `apps/out` before building.
+- `--no-open`: do not open the browser automatically.
+
+You can still set `CODEXMANAGER_WEB_ROOT=/path/to/out` when you intentionally want to override the embedded UI with an external static directory.
+
 ## Docker deployment
 
 ### GitHub Packages / GHCR

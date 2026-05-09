@@ -65,6 +65,15 @@ pub(crate) fn is_responses_path(path: &str) -> bool {
 }
 
 fn ensure_non_empty_instructions(path: &str, obj: &mut Map<String, Value>) -> bool {
+    if is_compact_path(path) {
+        match obj.get("instructions") {
+            Some(Value::String(_)) => return false,
+            Some(Value::Null) | None => {}
+            Some(_) => return false,
+        }
+        obj.insert("instructions".to_string(), Value::String(String::new()));
+        return true;
+    }
     if !is_standard_responses_path(path) {
         return false;
     }
@@ -273,7 +282,7 @@ fn ensure_prompt_cache_key(
     prompt_cache_key: Option<&str>,
     force_override: bool,
 ) -> bool {
-    if !is_standard_responses_path(path) {
+    if !is_responses_path(path) {
         return false;
     }
     let Some(prompt_cache_key) = prompt_cache_key.map(str::trim).filter(|v| !v.is_empty()) else {
@@ -556,6 +565,7 @@ pub(crate) fn retain_official_fields(path: &str, obj: &mut Map<String, Value>) -
                 "metadata",
                 "model",
                 "parallel_tool_calls",
+                "prompt_cache_key",
                 "reasoning",
                 "text",
                 "tools",
@@ -600,6 +610,7 @@ pub(crate) fn retain_codex_fields(path: &str, obj: &mut Map<String, Value>) -> V
                 "input",
                 "tools",
                 "parallel_tool_calls",
+                "prompt_cache_key",
                 "reasoning",
                 "text",
             ],
@@ -694,6 +705,10 @@ pub(crate) fn apply_codex_http_request_rules(
         {
             result.changed = true;
         }
+    } else if (force_prompt_cache_key || use_codex_compat_rewrite)
+        && ensure_prompt_cache_key(path, obj, prompt_cache_key, force_prompt_cache_key)
+    {
+        result.changed = true;
     }
     if ensure_image_generation_tool(path, obj) {
         result.changed = true;

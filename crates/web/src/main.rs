@@ -12,12 +12,12 @@ use std::time::Duration;
 #[cfg(target_os = "linux")]
 use std::{net::Ipv4Addr, net::ToSocketAddrs};
 
-use axum::body::Bytes;
+use axum::body::{to_bytes, Body, Bytes};
 use axum::extract::{Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::Next;
 use axum::response::{Html, IntoResponse, Redirect, Response};
-use axum::routing::{get, post};
+use axum::routing::{any, get, post};
 use axum::{Json, Router};
 use rand::RngCore;
 use tokio::sync::{watch, Mutex};
@@ -534,6 +534,29 @@ async fn async_main() {
         auth::web_auth_middleware,
     ));
     let app = Router::new()
+        .route("/health", get(service_gateway::gateway_proxy))
+        .route("/metrics", get(service_gateway::gateway_proxy))
+        .route("/auth/callback", get(service_gateway::gateway_proxy))
+        .route(
+            "/auth/callback/{*path}",
+            get(service_gateway::gateway_proxy),
+        )
+        .route("/v1", any(service_gateway::gateway_proxy))
+        .route("/v1/{*path}", any(service_gateway::gateway_proxy))
+        .route("/v1alpha/{*path}", any(service_gateway::gateway_proxy))
+        .route("/v1beta/{*path}", any(service_gateway::gateway_proxy))
+        .route(
+            "/v1internal:generateContent",
+            any(service_gateway::gateway_proxy),
+        )
+        .route(
+            "/v1internal:streamGenerateContent",
+            any(service_gateway::gateway_proxy),
+        )
+        .route(
+            "/v1internal:countTokens",
+            any(service_gateway::gateway_proxy),
+        )
         .route("/api/runtime", get(runtime_info))
         .route("/__auth_status", get(auth::auth_status))
         .route("/__login", get(auth::login_page).post(auth::login_submit))

@@ -115,6 +115,62 @@ fn fallback_to_access_token_uses_runtime_access_token_when_exchange_fails() {
     assert_eq!(bearer, "runtime-access-token");
 }
 
+/// 函数 `api_key_exchange_subject_tokens_falls_back_to_imported_access_token`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-05-08
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn api_key_exchange_subject_tokens_falls_back_to_imported_access_token() {
+    let token = Token {
+        account_id: "acc-import-session".to_string(),
+        id_token: String::new(),
+        access_token: " imported-session-access ".to_string(),
+        refresh_token: String::new(),
+        api_key_access_token: None,
+        last_refresh: now_ts(),
+    };
+
+    assert_eq!(
+        api_key_exchange_subject_tokens(&token),
+        vec!["imported-session-access".to_string()]
+    );
+}
+
+/// 函数 `api_key_exchange_subject_tokens_prefers_access_token_before_id_token`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-05-08
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn api_key_exchange_subject_tokens_prefers_access_token_before_id_token() {
+    let token = Token {
+        account_id: "acc-login".to_string(),
+        id_token: "id-token".to_string(),
+        access_token: "access-token".to_string(),
+        refresh_token: String::new(),
+        api_key_access_token: None,
+        last_refresh: now_ts(),
+    };
+
+    assert_eq!(
+        api_key_exchange_subject_tokens(&token),
+        vec!["access-token".to_string(), "id-token".to_string()]
+    );
+}
+
 /// 函数 `usable_api_key_access_token_rejects_expired_jwt`
 ///
 /// 作者: gaohongshun

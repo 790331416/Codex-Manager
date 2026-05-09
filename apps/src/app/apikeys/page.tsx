@@ -7,6 +7,7 @@ import {
   Copy,
   Eye,
   EyeOff,
+  ExternalLink,
   MoreVertical,
   Plus,
   Settings2,
@@ -41,13 +42,21 @@ import { useDeferredDesktopActivation } from "@/hooks/useDeferredDesktopActivati
 import { usePageTransitionReady } from "@/hooks/usePageTransitionReady";
 import { useI18n } from "@/lib/i18n/provider";
 import { accountClient } from "@/lib/api/account-client";
+import { appClient } from "@/lib/api/app-client";
+import { isTauriRuntime } from "@/lib/api/transport";
 import { useAppStore } from "@/lib/store/useAppStore";
 import { copyTextToClipboard } from "@/lib/utils/clipboard";
+import {
+  buildCcSwitchProviderImportUrl,
+  buildCcSwitchProviderName,
+  normalizeCodexManagerGatewayEndpoint,
+} from "@/lib/utils/ccswitch";
 import { formatCompactNumber } from "@/lib/utils/usage";
 
 const ROTATION_STRATEGY_LABELS: Record<string, string> = {
   account_rotation: "账号轮转",
   aggregate_api_rotation: "聚合API轮转",
+  hybrid_rotation: "混合轮转（账号优先）",
 };
 
 /**
@@ -161,6 +170,7 @@ export default function ApiKeysPage() {
   const [apiKeyModalOpen, setApiKeyModalOpen] = useState(false);
   const [editingKeyId, setEditingKeyId] = useState<string | null>(null);
   const [deleteKeyId, setDeleteKeyId] = useState<string | null>(null);
+  const [ccSwitchImportingId, setCcSwitchImportingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (isPageActive) {
@@ -169,6 +179,7 @@ export default function ApiKeysPage() {
     setApiKeyModalOpen(false);
     setEditingKeyId(null);
     setDeleteKeyId(null);
+    setCcSwitchImportingId(null);
   }, [isPageActive]);
 
   const editingApiKey = useMemo(
@@ -322,6 +333,40 @@ export default function ApiKeysPage() {
     }
   };
 
+  const openCcSwitchImportUrl = async (url: string) => {
+    if (isTauriRuntime()) {
+      await appClient.openInBrowser(url);
+      return;
+    }
+    window.location.href = url;
+  };
+
+  const importToCcSwitch = async (key: (typeof apiKeys)[number]) => {
+    setCcSwitchImportingId(key.id);
+    try {
+      const secret = await ensureSecretLoaded(key.id);
+      const importUrl = buildCcSwitchProviderImportUrl({
+        app: "codex",
+        name: buildCcSwitchProviderName(key.name, key.id),
+        endpoint: normalizeCodexManagerGatewayEndpoint(serviceAddr),
+        apiKey: secret,
+        model: key.model || key.modelSlug || null,
+        notes: "Imported from CodexManager",
+        enabled: true,
+      });
+      await openCcSwitchImportUrl(importUrl);
+      toast.success(t("已唤起 ccswitch，请在确认窗口完成导入"));
+    } catch (error: unknown) {
+      toast.error(
+        `${t("唤起 ccswitch 失败")}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    } finally {
+      setCcSwitchImportingId(null);
+    }
+  };
+
   /**
    * 函数 `handleDelete`
    *
@@ -404,7 +449,7 @@ export default function ApiKeysPage() {
                 <TableHead>{t("绑定模型")}</TableHead>
                 <TableHead>{t("总使用 Token")}</TableHead>
                 <TableHead>{t("状态")}</TableHead>
-                <TableHead className="table-sticky-action-head w-[108px] text-center">
+                <TableHead className="table-sticky-action-head w-[144px] text-center">
                   {t("操作")}
                 </TableHead>
               </TableRow>
@@ -530,6 +575,21 @@ export default function ApiKeysPage() {
                           >
                             <Settings2 className="h-4 w-4" />
                           </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground transition-colors hover:text-primary"
+                            disabled={
+                              !isServiceReady ||
+                              ccSwitchImportingId === key.id ||
+                              loadingSecretId === key.id
+                            }
+                            onClick={() => void importToCcSwitch(key)}
+                            title={t("导入 ccswitch")}
+                            aria-label={t("导入 ccswitch")}
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                          </Button>
                           <DropdownMenu>
                             <DropdownMenuTrigger>
                               <Button
@@ -550,6 +610,13 @@ export default function ApiKeysPage() {
                                 onClick={() => openEditModal(key.id)}
                               >
                                 {t("设置模型与推理")}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className="gap-2"
+                                disabled={!isServiceReady || ccSwitchImportingId === key.id}
+                                onClick={() => void importToCcSwitch(key)}
+                              >
+                                <ExternalLink className="h-4 w-4" /> {t("导入 ccswitch")}
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 className="gap-2 text-red-500"

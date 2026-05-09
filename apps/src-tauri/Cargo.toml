@@ -1,6 +1,6 @@
 [package]
 name = "CodexManager"
-version = "0.2.8"
+version = "0.2.9"
 description = "A Tauri App"
 authors = ["you"]
 license = ""
@@ -31,3 +31,6 @@ semver = "1.0"
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
 rfd = "0.15"
 rusqlite = { version = "0.31", features = ["bundled", "backup"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

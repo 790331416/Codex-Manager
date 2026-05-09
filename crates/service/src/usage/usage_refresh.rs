@@ -7,3 +7,4 @@ pub(crate) use refresh::{
     refresh_usage_for_all_accounts, reload_background_tasks_runtime_from_env,
     set_background_tasks_settings, BackgroundTasksSettingsPatch,
 };
+pub use refresh::{set_usage_refresh_completed_handler, UsageRefreshCompletedEvent};

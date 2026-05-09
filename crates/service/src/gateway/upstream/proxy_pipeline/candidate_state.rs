@@ -435,6 +435,34 @@ mod tests {
     }
 
     #[test]
+    fn compact_body_for_attempt_preserves_existing_prompt_cache_key() {
+        let mut state = CandidateExecutionState::default();
+        let body = Bytes::from_static(
+            br#"{"model":"gpt-5.5","input":"hello","prompt_cache_key":"client-thread"}"#,
+        );
+        let mut setup = sample_setup();
+        setup.has_sticky_fallback_conversation = true;
+
+        let actual = state.body_for_attempt(
+            "/v1/responses/compact",
+            &body,
+            true,
+            &setup,
+            None,
+            Some("thread-from-conversation"),
+        );
+        let value: serde_json::Value =
+            serde_json::from_slice(actual.as_ref()).expect("parse rewritten body");
+
+        assert_eq!(
+            value
+                .get("prompt_cache_key")
+                .and_then(serde_json::Value::as_str),
+            Some("client-thread")
+        );
+    }
+
+    #[test]
     fn strip_session_affinity_preserves_same_workspace_when_thread_anchor_exists() {
         let mut state = CandidateExecutionState::default();
         let first = Account {

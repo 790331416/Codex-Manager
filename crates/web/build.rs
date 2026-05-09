@@ -31,11 +31,35 @@ fn main() {
 /// 无
 fn emit_embedded_ui_tracking(manifest_dir: &Path) {
     let dist_dir = manifest_dir.join("../../apps/out");
+    let embedded_dir =
+        PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("codexmanager-web-dist");
     println!("cargo:rerun-if-changed={}", dist_dir.display());
 
-    let fingerprint = if dist_dir.is_dir() {
-        fingerprint_tree(&dist_dir)
+    let fingerprint = if dist_dir.join("index.html").is_file() {
+        let fingerprint = fingerprint_tree(&dist_dir);
+        if let Err(err) = mirror_tree(&dist_dir, &embedded_dir) {
+            panic!(
+                "failed to prepare embedded frontend dist from {} to {}: {err}",
+                dist_dir.display(),
+                embedded_dir.display()
+            );
+        }
+        fingerprint
     } else {
+        if embedded_dir.exists() {
+            std::fs::remove_dir_all(&embedded_dir).unwrap_or_else(|err| {
+                panic!(
+                    "failed to clear embedded frontend dist {}: {err}",
+                    embedded_dir.display()
+                )
+            });
+        }
+        std::fs::create_dir_all(&embedded_dir).unwrap_or_else(|err| {
+            panic!(
+                "failed to create empty embedded frontend dist {}: {err}",
+                embedded_dir.display()
+            )
+        });
         "missing".to_string()
     };
     println!("cargo:rustc-env=CODEXMANAGER_WEB_DIST_FINGERPRINT={fingerprint}");
@@ -72,6 +96,7 @@ fn fingerprint_tree(root: &Path) -> String {
             let Ok(metadata) = entry.metadata() else {
                 continue;
             };
+            println!("cargo:rerun-if-changed={}", path.display());
             let modified = metadata
                 .modified()
                 .ok()
@@ -93,6 +118,45 @@ fn fingerprint_tree(root: &Path) -> String {
     } else {
         items.join("|")
     }
+}
+
+/// 函数 `mirror_tree`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-05-08
+///
+/// # 参数
+/// - source: 前端静态资源目录
+/// - target: Cargo 构建输出中的嵌入目录
+///
+/// # 返回
+/// 返回函数执行结果
+fn mirror_tree(source: &Path, target: &Path) -> std::io::Result<()> {
+    if target.exists() {
+        std::fs::remove_dir_all(target)?;
+    }
+    std::fs::create_dir_all(target)?;
+
+    let mut pending = VecDeque::from([source.to_path_buf()]);
+    while let Some(dir) = pending.pop_front() {
+        for entry in std::fs::read_dir(&dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let relative = path.strip_prefix(source).map_err(std::io::Error::other)?;
+            let destination = target.join(relative);
+            if path.is_dir() {
+                std::fs::create_dir_all(&destination)?;
+                pending.push_back(path);
+            } else {
+                if let Some(parent) = destination.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::copy(&path, &destination)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// 函数 `compile_windows_icon`

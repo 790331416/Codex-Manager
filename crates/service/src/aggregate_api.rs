@@ -239,7 +239,9 @@ fn normalize_action_override(
     match enabled {
         None => Ok(None),
         Some(false) => Ok(Some(None)),
-        Some(true) => normalize_action(action).map(|value| Some(Some(value.unwrap_or_default()))),
+        Some(true) => {
+            normalize_action(action).map(|value| Some(Some(value.unwrap_or_else(String::new))))
+        }
     }
 }
 
@@ -286,10 +288,10 @@ mod tests {
     }
 
     #[test]
-    fn empty_action_uses_default_path() {
+    fn empty_action_uses_base_url_without_default_path() {
         let api = aggregate_api_with_action(Some(""));
         let path = action_path_or_default(&api, "/v1/messages?beta=true");
-        assert_eq!(path, "/v1/messages?beta=true");
+        assert_eq!(path, "");
     }
 
     #[test]
@@ -355,7 +357,7 @@ fn serialize_userpass_secret(username: &str, password: &str) -> Result<String, S
 
 fn action_path_or_default(api: &AggregateApi, default: &str) -> String {
     match api.action.as_deref().map(str::trim) {
-        Some("") => default.to_string(),
+        Some("") => String::new(),
         Some(value) => {
             if value.starts_with('/') {
                 value.to_string()

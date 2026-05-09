@@ -311,6 +311,144 @@ pub(super) async fn rpc_proxy(
     out
 }
 
+const GATEWAY_PROXY_MAX_BODY_BYTES: usize = 256 * 1024 * 1024;
+
+/// 函数 `gateway_proxy_target_url`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-05-08
+///
+/// # 参数
+/// - service_addr: service 地址
+/// - uri: 原始请求 URI
+///
+/// # 返回
+/// 返回转发目标地址
+fn gateway_proxy_target_url(service_addr: &str, uri: &axum::http::Uri) -> String {
+    let path_and_query = uri
+        .path_and_query()
+        .map(|value| value.as_str())
+        .unwrap_or("/");
+    format!("http://{service_addr}{path_and_query}")
+}
+
+/// 函数 `is_hop_by_hop_header`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-05-08
+///
+/// # 参数
+/// - name: header 名
+///
+/// # 返回
+/// 是否为逐跳 header
+fn is_hop_by_hop_header(name: &str) -> bool {
+    name.eq_ignore_ascii_case("connection")
+        || name.eq_ignore_ascii_case("keep-alive")
+        || name.eq_ignore_ascii_case("proxy-authenticate")
+        || name.eq_ignore_ascii_case("proxy-authorization")
+        || name.eq_ignore_ascii_case("te")
+        || name.eq_ignore_ascii_case("trailer")
+        || name.eq_ignore_ascii_case("transfer-encoding")
+        || name.eq_ignore_ascii_case("upgrade")
+}
+
+/// 函数 `should_skip_gateway_request_header`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-05-08
+///
+/// # 参数
+/// - name: header 名
+/// - value: header 值
+///
+/// # 返回
+/// 是否过滤请求 header
+fn should_skip_gateway_request_header(name: &header::HeaderName, value: &HeaderValue) -> bool {
+    let lower = name.as_str();
+    is_hop_by_hop_header(lower)
+        || lower.eq_ignore_ascii_case("host")
+        || lower.eq_ignore_ascii_case("content-length")
+        || value.to_str().is_err()
+}
+
+/// 函数 `should_skip_gateway_response_header`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-05-08
+///
+/// # 参数
+/// - name: header 名
+///
+/// # 返回
+/// 是否过滤响应 header
+fn should_skip_gateway_response_header(name: &header::HeaderName) -> bool {
+    let lower = name.as_str();
+    is_hop_by_hop_header(lower) || lower.eq_ignore_ascii_case("content-length")
+}
+
+/// 函数 `gateway_proxy`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-05-08
+///
+/// # 参数
+/// - state: 应用状态
+/// - request: 请求
+///
+/// # 返回
+/// 返回 service 网关响应
+pub(super) async fn gateway_proxy(
+    State(state): State<Arc<AppState>>,
+    request: Request,
+) -> Response {
+    let (parts, body) = request.into_parts();
+    let target_url = gateway_proxy_target_url(state.service_addr.as_str(), &parts.uri);
+    let body = match to_bytes(body, GATEWAY_PROXY_MAX_BODY_BYTES).await {
+        Ok(body) => body,
+        Err(err) => {
+            return (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                format!("gateway proxy request body error: {err}"),
+            )
+                .into_response();
+        }
+    };
+
+    let mut outbound = state.client.request(parts.method, target_url).body(body);
+    for (name, value) in parts.headers.iter() {
+        if should_skip_gateway_request_header(name, value) {
+            continue;
+        }
+        outbound = outbound.header(name, value);
+    }
+
+    let resp = match outbound.send().await {
+        Ok(resp) => resp,
+        Err(err) => {
+            let msg = format_upstream_error_message(state.service_addr.as_str(), &err);
+            return (StatusCode::BAD_GATEWAY, msg).into_response();
+        }
+    };
+
+    let status = resp.status();
+    let headers = resp.headers().clone();
+    let mut out = Response::new(Body::from_stream(resp.bytes_stream()));
+    *out.status_mut() = status;
+    for (name, value) in headers.iter() {
+        if should_skip_gateway_response_header(name) {
+            continue;
+        }
+        out.headers_mut().append(name.clone(), value.clone());
+    }
+    out
+}
+
 /// 函数 `format_upstream_error_message`
 ///
 /// 作者: gaohongshun
@@ -358,7 +496,11 @@ pub(super) async fn quit(State(state): State<Arc<AppState>>) -> impl IntoRespons
 
 #[cfg(test)]
 mod tests {
-    use super::format_upstream_error_message;
+    use super::{
+        format_upstream_error_message, gateway_proxy_target_url,
+        should_skip_gateway_request_header, should_skip_gateway_response_header,
+    };
+    use axum::http::{header, HeaderValue, Uri};
 
     #[test]
     fn format_upstream_error_message_adds_docker_hint_for_host_internal() {
@@ -366,5 +508,27 @@ mod tests {
         let message = format_upstream_error_message("host.docker.internal:9760", &err);
         assert!(message.contains("host.docker.internal"));
         assert!(message.contains("codexmanager-service:48760"));
+    }
+
+    #[test]
+    fn gateway_proxy_target_url_preserves_path_and_query() {
+        let uri: Uri = "/v1/responses?stream=true".parse().expect("valid uri");
+        assert_eq!(
+            gateway_proxy_target_url("localhost:48760", &uri),
+            "http://localhost:48760/v1/responses?stream=true"
+        );
+    }
+
+    #[test]
+    fn gateway_proxy_header_filters_skip_hop_by_hop_headers() {
+        assert!(should_skip_gateway_request_header(
+            &header::HOST,
+            &HeaderValue::from_static("example.com")
+        ));
+        assert!(should_skip_gateway_response_header(&header::CONTENT_LENGTH));
+        assert!(!should_skip_gateway_request_header(
+            &header::AUTHORIZATION,
+            &HeaderValue::from_static("Bearer key")
+        ));
     }
 }

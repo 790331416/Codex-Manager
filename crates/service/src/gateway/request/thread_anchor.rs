@@ -37,35 +37,14 @@ pub(crate) fn resolve_fallback_thread_anchor(
     super::conversation_binding::effective_thread_anchor(local_conversation_id, binding)
 }
 
-pub(crate) fn clear_prompt_cache_key_when_native_anchor(
-    path: &str,
-    body: Vec<u8>,
-    headers: &IncomingHeaderSnapshot,
-) -> Vec<u8> {
-    if !has_native_thread_anchor(headers) || !path.starts_with("/v1/responses") {
-        return body;
-    }
-    let Ok(mut payload) = serde_json::from_slice::<serde_json::Value>(&body) else {
-        return body;
-    };
-    let Some(object) = payload.as_object_mut() else {
-        return body;
-    };
-    if object.remove("prompt_cache_key").is_none() {
-        return body;
-    }
-    serde_json::to_vec(&payload).unwrap_or(body)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        clear_prompt_cache_key_when_native_anchor, has_native_thread_anchor,
-        resolve_fallback_thread_anchor, resolve_local_conversation_id_with_sticky_fallback,
+        has_native_thread_anchor, resolve_fallback_thread_anchor,
+        resolve_local_conversation_id_with_sticky_fallback,
     };
     use axum::http::{HeaderMap, HeaderValue};
     use codexmanager_core::storage::ConversationBinding;
-    use serde_json::json;
 
     fn sample_headers(
         conversation_id: Option<&str>,
@@ -137,22 +116,5 @@ mod tests {
         );
 
         assert_eq!(actual, None);
-    }
-
-    #[test]
-    fn native_anchor_removes_prompt_cache_key_from_responses_body() {
-        let headers = sample_headers(Some("conversation-1"), None, Some("pk_test"));
-        let body = serde_json::to_vec(&json!({
-            "model": "gpt-5.4",
-            "input": "hello",
-            "prompt_cache_key": "client-thread"
-        }))
-        .expect("serialize request body");
-
-        let actual = clear_prompt_cache_key_when_native_anchor("/v1/responses", body, &headers);
-        let value: serde_json::Value =
-            serde_json::from_slice(&actual).expect("parse rewritten request body");
-
-        assert!(value.get("prompt_cache_key").is_none());
     }
 }

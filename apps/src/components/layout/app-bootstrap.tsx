@@ -33,6 +33,38 @@ import {
 
 const DEFAULT_SERVICE_ADDR = "localhost:48760";
 const STARTUP_WARMUP_LABEL = "[startup warmup]";
+const CODEX_CLI_GUIDE_SESSION_DISMISSED_KEY =
+  "codexmanager.codexCliGuide.sessionDismissed";
+
+function readCodexCliGuideSessionDismissed() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    return (
+      window.sessionStorage.getItem(CODEX_CLI_GUIDE_SESSION_DISMISSED_KEY) === "1"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function writeCodexCliGuideSessionDismissed(dismissed: boolean) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    if (dismissed) {
+      window.sessionStorage.setItem(CODEX_CLI_GUIDE_SESSION_DISMISSED_KEY, "1");
+      return;
+    }
+    window.sessionStorage.removeItem(CODEX_CLI_GUIDE_SESSION_DISMISSED_KEY);
+  } catch {
+    // Some embedded/web runtimes can deny storage; in-memory state still handles the current render.
+  }
+}
 /**
  * 函数 `sleep`
  *
@@ -85,8 +117,15 @@ export function AppBootstrap({ children }: { children: React.ReactNode }) {
   const serviceStatusRef = useRef(serviceStatus);
   const runtimeCapabilitiesRef = useRef(runtimeCapabilities);
   const [error, setError] = useState<string | null>(null);
-  const [guideSessionDismissed, setGuideSessionDismissed] = useState(false);
+  const [guideSessionDismissed, setGuideSessionDismissedState] = useState(
+    readCodexCliGuideSessionDismissed
+  );
   const supportsLocalServiceStart = canManageService;
+
+  const dismissCodexCliGuideForSession = useCallback(() => {
+    setGuideSessionDismissedState(true);
+    writeCodexCliGuideSessionDismissed(true);
+  }, []);
 
   useEffect(() => {
     serviceStatusRef.current = serviceStatus;
@@ -348,8 +387,8 @@ export function AppBootstrap({ children }: { children: React.ReactNode }) {
       closeCodexCliGuide();
       return;
     }
-    setGuideSessionDismissed(true);
-  }, [closeCodexCliGuide, isCodexCliGuideOpen]);
+    dismissCodexCliGuideForSession();
+  }, [closeCodexCliGuide, dismissCodexCliGuideForSession, isCodexCliGuideOpen]);
 
   const handleGuideAcknowledge = useCallback(
     async (dismissPermanently: boolean) => {
@@ -369,9 +408,9 @@ export function AppBootstrap({ children }: { children: React.ReactNode }) {
       }
 
       closeCodexCliGuide();
-      setGuideSessionDismissed(true);
+      dismissCodexCliGuideForSession();
     },
-    [closeCodexCliGuide, setAppSettings, t]
+    [closeCodexCliGuide, dismissCodexCliGuideForSession, setAppSettings, t]
   );
 
   useEffect(() => {

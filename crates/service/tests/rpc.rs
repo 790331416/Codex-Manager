@@ -756,6 +756,78 @@ fn rpc_account_list_includes_account_plan_type() {
     );
 }
 
+#[test]
+fn rpc_account_list_prefers_free_subscription_result_over_token_plan() {
+    let ctx = RpcTestContext::new("rpc-account-list-subscription-free-plan");
+    let storage = Storage::open(ctx.db_path()).expect("open db");
+    storage.init().expect("init schema");
+    let now = now_ts();
+    storage
+        .insert_account(&Account {
+            id: "acc-subscription-free".to_string(),
+            label: "Subscription Free Account".to_string(),
+            issuer: "https://auth.openai.com".to_string(),
+            chatgpt_account_id: Some("org-subscription-free".to_string()),
+            workspace_id: Some("org-subscription-free".to_string()),
+            group_name: None,
+            sort: 0,
+            status: "active".to_string(),
+            created_at: now,
+            updated_at: now,
+        })
+        .expect("insert account");
+    storage
+        .insert_token(&Token {
+            account_id: "acc-subscription-free".to_string(),
+            id_token: build_access_token(
+                "sub-subscription-free",
+                "subscription-free@example.com",
+                "org-subscription-free",
+                "plus",
+            ),
+            access_token: build_access_token(
+                "sub-subscription-free",
+                "subscription-free@example.com",
+                "org-subscription-free",
+                "plus",
+            ),
+            refresh_token: "refresh-subscription-free".to_string(),
+            api_key_access_token: None,
+            last_refresh: now,
+        })
+        .expect("insert token");
+    storage
+        .upsert_account_subscription("acc-subscription-free", false, None, None, None)
+        .expect("insert subscription result");
+
+    let server = codexmanager_service::start_one_shot_server().expect("start server");
+    let req = JsonRpcRequest {
+        id: 77.into(),
+        method: "account/list".to_string(),
+        params: None,
+        trace: None,
+    };
+    let json = serde_json::to_string(&req).expect("serialize");
+    let v = post_rpc(&server.addr, &json);
+    let item = v
+        .get("result")
+        .and_then(|value| value.get("items"))
+        .and_then(|value| value.as_array())
+        .and_then(|items| items.first())
+        .expect("account item");
+
+    assert_eq!(
+        item.get("planType").and_then(|value| value.as_str()),
+        Some("free")
+    );
+    assert_eq!(
+        item.get("hasSubscription")
+            .and_then(|value| value.as_bool()),
+        Some(false)
+    );
+    assert_eq!(item.get("subscriptionPlan"), Some(&serde_json::Value::Null));
+}
+
 /// 函数 `rpc_account_update_profile_updates_label_note_tags_and_sort`
 ///
 /// 作者: gaohongshun

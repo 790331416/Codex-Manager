@@ -97,7 +97,9 @@ pub(crate) fn handle_gateway_request(mut request: Request) -> Result<(), String>
             }
         };
 
-    let request = if validated.rotation_strategy == crate::apikey_profile::ROTATION_AGGREGATE_API {
+    let request = if validated.rotation_strategy == crate::apikey_profile::ROTATION_AGGREGATE_API
+        || validated.rotation_strategy == crate::apikey_profile::ROTATION_HYBRID
+    {
         request
     } else {
         match super::maybe_respond_local_models(
@@ -125,7 +127,9 @@ pub(crate) fn handle_gateway_request(mut request: Request) -> Result<(), String>
     let request_method_for_count_tokens = validated.request_method.clone();
     let model_for_count_tokens = validated.model_for_log.clone();
     let reasoning_for_count_tokens = validated.reasoning_for_log.clone();
-    let request = if validated.rotation_strategy == crate::apikey_profile::ROTATION_AGGREGATE_API {
+    let request = if validated.rotation_strategy == crate::apikey_profile::ROTATION_AGGREGATE_API
+        || validated.rotation_strategy == crate::apikey_profile::ROTATION_HYBRID
+    {
         request
     } else {
         match super::maybe_respond_local_count_tokens(

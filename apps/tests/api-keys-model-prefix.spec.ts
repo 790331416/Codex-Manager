@@ -51,7 +51,7 @@ const SETTINGS_SNAPSHOT = {
   appearancePreset: "classic",
 };
 
-test("api key modal reuses prefix model metadata for long model slugs", async ({ page }) => {
+async function mockRuntime(page: import("@playwright/test").Page) {
   await page.route("**/api/runtime", async (route) => {
     await route.fulfill({
       contentType: "application/json; charset=utf-8",
@@ -67,9 +67,33 @@ test("api key modal reuses prefix model metadata for long model slugs", async ({
       }),
     });
   });
+}
+
+async function mockApiKeyRpc(
+  page: import("@playwright/test").Page,
+  options: {
+    apiKeys?: unknown[];
+    onMethod?: (method: string, payload: Record<string, unknown>) => unknown | undefined;
+  } = {},
+) {
+  const apiKeys =
+    options.apiKeys ||
+    [
+      {
+        id: "key-spark",
+        name: "Spark Key",
+        model_slug: "gpt-5.3-codex-unknown",
+        reasoning_effort: "medium",
+        service_tier: "default",
+        protocol_type: "openai_compat",
+        rotation_strategy: "account_rotation",
+        status: "enabled",
+        created_at: 1_770_000_000,
+      },
+    ];
 
   await page.route("**/api/rpc", async (route) => {
-    const payload = route.request().postDataJSON();
+    const payload = route.request().postDataJSON() as Record<string, unknown>;
     const method = typeof payload?.method === "string" ? payload.method : "";
     const id = payload?.id ?? 1;
 
@@ -82,6 +106,12 @@ test("api key modal reuses prefix model metadata for long model slugs", async ({
           result,
         }),
       });
+
+    const customResult = options.onMethod?.(method, payload);
+    if (customResult !== undefined) {
+      await ok(customResult);
+      return;
+    }
 
     if (method === "appSettings/get") {
       await ok(SETTINGS_SNAPSHOT);
@@ -108,20 +138,7 @@ test("api key modal reuses prefix model metadata for long model slugs", async ({
       return;
     }
     if (method === "apikey/list") {
-      await ok({
-        items: [
-          {
-            id: "key-spark",
-            name: "Spark Key",
-            model_slug: "gpt-5.3-codex-unknown",
-            reasoning_effort: "medium",
-            service_tier: "default",
-            protocol_type: "openai_compat",
-            status: "enabled",
-            created_at: 1_770_000_000,
-          },
-        ],
-      });
+      await ok({ items: apiKeys });
       return;
     }
     if (method === "apikey/models") {
@@ -139,7 +156,7 @@ test("api key modal reuses prefix model metadata for long model slugs", async ({
       });
       return;
     }
-    if (method === "apikey/usage_stats") {
+    if (method === "apikey/usageStats") {
       await ok([]);
       return;
     }
@@ -157,6 +174,11 @@ test("api key modal reuses prefix model metadata for long model slugs", async ({
       }),
     });
   });
+}
+
+test("api key modal reuses prefix model metadata for long model slugs", async ({ page }) => {
+  await mockRuntime(page);
+  await mockApiKeyRpc(page);
 
   await page.goto("/apikeys/");
   await expect(page.getByRole("main").getByRole("heading", { name: "平台密钥" })).toBeVisible();
@@ -167,6 +189,82 @@ test("api key modal reuses prefix model metadata for long model slugs", async ({
 
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("heading", { name: "编辑平台密钥" })).toBeVisible();
-  await dialog.getByText("gpt-5.3-codex-unknown", { exact: true }).click();
+  await dialog.getByText("GPT-5.3 Codex", { exact: true }).click();
   await expect(page.getByText("GPT-5.3 Codex", { exact: true })).toBeVisible();
+});
+
+test("api key modal displays and submits hybrid rotation", async ({ page }) => {
+  const updatePayloads: Record<string, unknown>[] = [];
+  await mockRuntime(page);
+  await mockApiKeyRpc(page, {
+    apiKeys: [
+      {
+        id: "key-hybrid",
+        name: "Hybrid Key",
+        model_slug: "gpt-5.3-codex-unknown",
+        reasoning_effort: "medium",
+        service_tier: "default",
+        protocol_type: "openai_compat",
+        rotation_strategy: "hybrid_rotation",
+        account_plan_filter: "plus",
+        status: "enabled",
+        created_at: 1_770_000_001,
+      },
+    ],
+    onMethod: (method, payload) => {
+      if (method === "apikey/updateModel") {
+        updatePayloads.push(payload);
+        return { ok: true };
+      }
+      return undefined;
+    },
+  });
+
+  await page.goto("/apikeys/");
+  const row = page.locator("tr", { hasText: "Hybrid Key" });
+  await expect(row).toBeVisible();
+  await expect(row.getByText("混合轮转（账号优先）", { exact: true })).toBeVisible();
+
+  await row.getByTitle("编辑配置").click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("heading", { name: "编辑平台密钥" })).toBeVisible();
+  await expect(dialog.getByText("混合轮转（账号优先）", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("账号组筛选", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Plus", { exact: true })).toBeVisible();
+
+  await dialog.getByRole("button", { name: "完成" }).click();
+
+  await expect.poll(() => updatePayloads.length).toBe(1);
+  const params = updatePayloads[0]?.params as Record<string, unknown>;
+  expect(params.rotationStrategy).toBe("hybrid_rotation");
+  expect(params.accountPlanFilter).toBe("plus");
+});
+
+test("api key modal can select hybrid rotation on create", async ({ page }) => {
+  const createPayloads: Record<string, unknown>[] = [];
+  await mockRuntime(page);
+  await mockApiKeyRpc(page, {
+    apiKeys: [],
+    onMethod: (method, payload) => {
+      if (method === "apikey/create") {
+        createPayloads.push(payload);
+        return { id: "key-created", key: "cm-test-key" };
+      }
+      return undefined;
+    },
+  });
+
+  await page.goto("/apikeys/");
+  await page.getByRole("button", { name: "创建密钥" }).click();
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("heading", { name: "创建平台密钥" })).toBeVisible();
+  await dialog.getByText("账号轮转", { exact: true }).click();
+  await page.getByText("混合轮转（账号优先）", { exact: true }).click();
+  await expect(dialog.getByText("账号组筛选", { exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "完成" }).click();
+
+  await expect.poll(() => createPayloads.length).toBe(1);
+  const params = createPayloads[0]?.params as Record<string, unknown>;
+  expect(params.rotationStrategy).toBe("hybrid_rotation");
 });

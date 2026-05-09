@@ -1,4 +1,5 @@
 use std::fs;
+#[cfg(target_os = "windows")]
 use std::io;
 use std::io::Write;
 use std::net::TcpStream;

@@ -1389,6 +1389,65 @@ fn respond_invalid_compact_success_body(
     )
 }
 
+fn respond_compact_success_body(
+    request: Request,
+    status: StatusCode,
+    headers: Vec<Header>,
+    usage: UpstreamResponseUsage,
+    body: &[u8],
+    request_id: Option<&str>,
+    cf_ray: Option<&str>,
+    auth_error: Option<&str>,
+    identity_error_code: Option<&str>,
+    content_type: &Option<String>,
+    trace_id: Option<&str>,
+) -> UpstreamResponseBridgeResult {
+    if !compact_success_body_is_valid(body) {
+        return respond_invalid_compact_success_body(
+            request,
+            usage,
+            body,
+            request_id,
+            cf_ray,
+            auth_error,
+            identity_error_code,
+            trace_id,
+        );
+    }
+
+    let len = Some(body.len());
+    let response = Response::new(
+        status,
+        headers,
+        std::io::Cursor::new(body.to_vec()),
+        len,
+        None,
+    );
+    let delivery_error = request.respond(response).err().map(|err| err.to_string());
+    with_bridge_debug_meta(
+        UpstreamResponseBridgeResult {
+            usage,
+            stream_terminal_seen: true,
+            stream_terminal_error: None,
+            delivery_error,
+            upstream_error_hint: None,
+            delivered_status_code: None,
+            upstream_request_id: None,
+            upstream_cf_ray: None,
+            upstream_auth_error: None,
+            upstream_identity_error_code: None,
+            upstream_content_type: None,
+            last_sse_event_type: None,
+        },
+        &request_id.map(str::to_string),
+        &cf_ray.map(str::to_string),
+        &auth_error.map(str::to_string),
+        &identity_error_code.map(str::to_string),
+        content_type,
+        None,
+    )
+}
+
 /// 函数 `respond_invalid_compact_non_success_body`
 ///
 /// 作者: gaohongshun
@@ -2277,6 +2336,32 @@ pub(crate) fn respond_with_upstream(
                     None,
                 ));
             }
+            if is_stream && !is_sse && status.0 < 400 && is_compact_request_path(request_path) {
+                let upstream_body = upstream
+                    .bytes()
+                    .map_err(|err| format!("read upstream body failed: {err}"))?;
+                let usage = if is_json {
+                    serde_json::from_slice::<Value>(upstream_body.as_ref())
+                        .ok()
+                        .map(|value| parse_usage_from_json(&value))
+                        .unwrap_or_default()
+                } else {
+                    UpstreamResponseUsage::default()
+                };
+                return Ok(respond_compact_success_body(
+                    request,
+                    status,
+                    headers,
+                    usage,
+                    upstream_body.as_ref(),
+                    upstream_request_id.as_deref(),
+                    upstream_cf_ray.as_deref(),
+                    upstream_auth_error.as_deref(),
+                    upstream_identity_error_code.as_deref(),
+                    &upstream_content_type,
+                    trace_id,
+                ));
+            }
             if is_sse || is_stream {
                 let usage_collector = Arc::new(Mutex::new(PassthroughSseCollector::default()));
                 let response_body: Box<dyn std::io::Read + Send> =
@@ -3084,6 +3169,26 @@ pub(crate) fn respond_with_stream_upstream(
                     &upstream_identity_error_code,
                     &upstream_content_type,
                     None,
+                ));
+            }
+
+            if is_stream && !is_sse && status.0 < 400 && is_compact_request_path(request_path) {
+                let upstream_body = upstream
+                    .read_all_bytes()
+                    .map_err(|err| format!("read upstream body failed: {err}"))?;
+                let usage = UpstreamResponseUsage::default();
+                return Ok(respond_compact_success_body(
+                    request,
+                    status,
+                    headers,
+                    usage,
+                    upstream_body.as_ref(),
+                    upstream_request_id.as_deref(),
+                    upstream_cf_ray.as_deref(),
+                    upstream_auth_error.as_deref(),
+                    upstream_identity_error_code.as_deref(),
+                    &upstream_content_type,
+                    trace_id,
                 ));
             }
 

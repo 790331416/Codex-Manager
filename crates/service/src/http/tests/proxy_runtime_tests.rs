@@ -623,6 +623,50 @@ async fn unsupported_responses_websocket_returns_426() {
     server_handle.await.expect("join front proxy");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn hybrid_responses_websocket_returns_426() {
+    let _guard = crate::test_env_guard();
+    let db_path = new_test_db_path("codexmanager-proxy-runtime-ws-hybrid-unsupported");
+    let _db_guard = EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
+    let storage = init_test_storage(&db_path);
+    insert_api_key_record(
+        &storage,
+        "platform_key_ws_hybrid_unsupported",
+        crate::apikey_profile::ROTATION_HYBRID,
+        None,
+    );
+    tokio::task::spawn_blocking(|| {
+        crate::gateway::reload_runtime_config_from_env();
+        let _ = crate::gateway::front_proxy_max_body_bytes();
+    })
+    .await
+    .expect("reload runtime config");
+
+    let state = ProxyState {
+        backend_base_url: "http://127.0.0.1:1".to_string(),
+        client: Client::new(),
+    };
+    let (front_addr, shutdown_tx, server_handle) = start_front_proxy_test_server(state).await;
+    let request = build_ws_request(
+        &format!("ws://{front_addr}/v1/responses"),
+        "platform_key_ws_hybrid_unsupported",
+        &[("OpenAI-Beta", "responses_websockets=2026-02-06")],
+    );
+
+    let err = connect_async(request)
+        .await
+        .expect_err("websocket should fail");
+    match err {
+        tokio_tungstenite::tungstenite::Error::Http(response) => {
+            assert_eq!(response.status(), StatusCode::UPGRADE_REQUIRED);
+        }
+        other => panic!("unexpected websocket error: {other}"),
+    }
+
+    let _ = shutdown_tx.send(());
+    server_handle.await.expect("join front proxy");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn official_responses_websocket_proxies_frames_and_headers() {
     let _guard = crate::test_env_guard();
@@ -903,8 +947,8 @@ async fn official_responses_websocket_proxies_frames_and_headers() {
 }
 
 #[tokio::test]
-async fn official_responses_websocket_clears_explicit_prompt_cache_key_when_session_anchor_exists()
-{
+async fn official_responses_websocket_preserves_explicit_prompt_cache_key_when_session_anchor_exists(
+) {
     let _guard = crate::test_env_guard();
     let db_path = new_test_db_path("codexmanager-proxy-runtime-ws-explicit-prompt-cache-key");
     let _db_guard = EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
@@ -968,7 +1012,12 @@ async fn official_responses_websocket_clears_explicit_prompt_cache_key_when_sess
     let payload: serde_json::Value =
         serde_json::from_str(&upstream_frame).expect("parse upstream frame");
     assert_eq!(payload["type"], "response.create");
-    assert!(payload.get("prompt_cache_key").is_none());
+    assert_eq!(
+        payload
+            .get("prompt_cache_key")
+            .and_then(serde_json::Value::as_str),
+        Some("client_ws_thread_123")
+    );
 
     let client_event = tokio::time::timeout(Duration::from_secs(5), client_ws.next())
         .await

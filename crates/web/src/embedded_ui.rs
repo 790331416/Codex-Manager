@@ -2,7 +2,7 @@
 use include_dir::{include_dir, Dir};
 
 #[cfg(feature = "embedded-ui")]
-static DIST_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/../../apps/out");
+static DIST_DIR: Dir<'static> = include_dir!("$OUT_DIR/codexmanager-web-dist");
 #[cfg(feature = "embedded-ui")]
 const _DIST_FINGERPRINT: &str = env!("CODEXMANAGER_WEB_DIST_FINGERPRINT");
 

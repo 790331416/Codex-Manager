@@ -84,6 +84,27 @@ fn should_try_provider_executor_aggregate_route(
     )
 }
 
+fn is_hybrid_account_first_route(
+    execution_plan: super::executor::GatewayUpstreamExecutionPlan,
+) -> bool {
+    matches!(
+        execution_plan.route_kind,
+        GatewayUpstreamRouteKind::HybridAccountFirst
+    )
+}
+
+fn respond_when_account_candidates_empty(
+    execution_plan: super::executor::GatewayUpstreamExecutionPlan,
+) -> bool {
+    !is_hybrid_account_first_route(execution_plan)
+}
+
+fn should_fallback_to_aggregate_after_account_exhaustion(
+    execution_plan: super::executor::GatewayUpstreamExecutionPlan,
+) -> bool {
+    is_hybrid_account_first_route(execution_plan)
+}
+
 fn executor_kind_label(value: GatewayUpstreamExecutorKind) -> &'static str {
     match value {
         GatewayUpstreamExecutorKind::CodexResponses => "codex_responses",
@@ -96,9 +117,72 @@ fn route_kind_label(value: GatewayUpstreamRouteKind) -> &'static str {
     match value {
         GatewayUpstreamRouteKind::AccountRotation => "account_rotation",
         GatewayUpstreamRouteKind::AggregateApi => "aggregate_api",
+        GatewayUpstreamRouteKind::HybridAccountFirst => "hybrid_account_first",
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn resolve_aggregate_candidates_for_route(
+    storage: &crate::storage_helpers::StorageHandle,
+    protocol_type: &str,
+    aggregate_api_id: Option<&str>,
+) -> Result<Vec<codexmanager_core::storage::AggregateApi>, String> {
+    super::protocol::aggregate_api::resolve_aggregate_api_rotation_candidates(
+        storage,
+        protocol_type,
+        aggregate_api_id,
+    )
+}
+
+fn hybrid_route_error_message(account_error: Option<&str>, aggregate_error: &str) -> String {
+    match account_error.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(account_error) => crate::gateway::bilingual_error(
+            format!("账号池与聚合 API 均不可用：{account_error}；聚合 API：{aggregate_error}"),
+            format!("account pool and aggregate api are unavailable: {account_error}; aggregate api: {aggregate_error}"),
+        ),
+        None => crate::gateway::bilingual_error(
+            format!("账号池与聚合 API 均不可用；聚合 API：{aggregate_error}"),
+            format!("account pool and aggregate api are unavailable; aggregate api: {aggregate_error}"),
+        ),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn respond_hybrid_route_error(
+    request: Request,
+    storage: &crate::storage_helpers::StorageHandle,
+    trace_id: &str,
+    key_id: &str,
+    original_path: &str,
+    path: &str,
+    request_method: &str,
+    response_adapter: super::super::ResponseAdapter,
+    effective_service_tier_for_log: Option<&str>,
+    model_for_log: Option<&str>,
+    reasoning_for_log: Option<&str>,
+    started_at: Instant,
+    account_error: Option<&str>,
+    aggregate_error: String,
+) -> Result<(), String> {
+    let message = hybrid_route_error_message(account_error, aggregate_error.as_str());
+    respond_aggregate_route_error(
+        request,
+        storage,
+        trace_id,
+        key_id,
+        original_path,
+        path,
+        request_method,
+        response_adapter,
+        effective_service_tier_for_log,
+        model_for_log,
+        reasoning_for_log,
+        started_at,
+        message,
+    )
+}
+
+#[cfg(test)]
 fn provider_upstream_hint(
     value: GatewayUpstreamExecutorKind,
 ) -> Option<(&'static str, &'static str)> {
@@ -240,7 +324,9 @@ pub(in super::super) fn proxy_validated_request(
         incoming_headers,
         storage,
         original_path,
+        passthrough_path,
         path,
+        passthrough_body,
         body,
         is_stream,
         has_prompt_cache_key,
@@ -308,7 +394,7 @@ pub(in super::super) fn proxy_validated_request(
     );
 
     if should_try_provider_executor_aggregate_route(execution_plan) {
-        match super::protocol::aggregate_api::resolve_aggregate_api_rotation_candidates(
+        match resolve_aggregate_candidates_for_route(
             &storage,
             protocol_type.as_str(),
             aggregate_api_id.as_deref(),
@@ -334,12 +420,7 @@ pub(in super::super) fn proxy_validated_request(
                     aggregate_api_candidates,
                 );
             }
-            Err(err)
-                if matches!(
-                    execution_plan.route_kind,
-                    GatewayUpstreamRouteKind::AggregateApi
-                ) =>
-            {
+            Err(err) => {
                 return respond_aggregate_route_error(
                     request,
                     &storage,
@@ -354,33 +435,6 @@ pub(in super::super) fn proxy_validated_request(
                     reasoning_for_log.as_deref(),
                     started_at,
                     err,
-                );
-            }
-            Err(err) => {
-                let (provider_name, provider_type) =
-                    provider_upstream_hint(execution_plan.executor_kind)
-                        .unwrap_or(("Codex", "codex"));
-                return respond_aggregate_route_error(
-                    request,
-                    &storage,
-                    trace_id.as_str(),
-                    key_id.as_str(),
-                    original_path.as_str(),
-                    path.as_str(),
-                    request_method.as_str(),
-                    super::super::ResponseAdapter::Passthrough,
-                    effective_service_tier_for_log.as_deref(),
-                    model_for_log.as_deref(),
-                    reasoning_for_log.as_deref(),
-                    started_at,
-                    crate::gateway::bilingual_error(
-                        format!(
-                            "未配置 {provider_name} 上游 Provider，请添加 provider_type={provider_type} 的 Aggregate API"
-                        ),
-                        format!(
-                            "{provider_name} upstream provider is not configured; add aggregate api with provider_type={provider_type}: {err}"
-                        ),
-                    ),
                 );
             }
         }
@@ -398,11 +452,59 @@ pub(in super::super) fn proxy_validated_request(
         model_for_log.as_deref(),
         reasoning_for_log.as_deref(),
         account_plan_filter.as_deref(),
+        respond_when_account_candidates_empty(execution_plan),
     ) {
         CandidatePrecheckResult::Ready {
             request,
             candidates,
         } => (request, candidates),
+        CandidatePrecheckResult::Empty { request } => {
+            match resolve_aggregate_candidates_for_route(
+                &storage,
+                protocol_type.as_str(),
+                aggregate_api_id.as_deref(),
+            ) {
+                Ok(aggregate_api_candidates) => {
+                    return proxy_with_aggregate_candidates(
+                        request,
+                        &storage,
+                        trace_id.as_str(),
+                        key_id.as_str(),
+                        original_path.as_str(),
+                        passthrough_path.as_str(),
+                        request_method.as_str(),
+                        &method,
+                        &passthrough_body,
+                        client_is_stream,
+                        model_for_log.as_deref(),
+                        reasoning_for_log.as_deref(),
+                        effective_service_tier_for_log.as_deref(),
+                        aggregate_api_id.as_deref(),
+                        request_deadline,
+                        started_at,
+                        aggregate_api_candidates,
+                    );
+                }
+                Err(err) => {
+                    return respond_hybrid_route_error(
+                        request,
+                        &storage,
+                        trace_id.as_str(),
+                        key_id.as_str(),
+                        original_path.as_str(),
+                        passthrough_path.as_str(),
+                        request_method.as_str(),
+                        super::super::ResponseAdapter::Passthrough,
+                        effective_service_tier_for_log.as_deref(),
+                        model_for_log.as_deref(),
+                        reasoning_for_log.as_deref(),
+                        started_at,
+                        Some("无可用账号(no available account)"),
+                        err,
+                    );
+                }
+            }
+        }
         CandidatePrecheckResult::Responded => return Ok(()),
     };
     let setup = prepare_request_setup(
@@ -505,6 +607,53 @@ pub(in super::super) fn proxy_validated_request(
         skipped_inflight,
         last_attempt_error.as_deref(),
     );
+    if should_fallback_to_aggregate_after_account_exhaustion(execution_plan) {
+        match resolve_aggregate_candidates_for_route(
+            &storage,
+            protocol_type.as_str(),
+            aggregate_api_id.as_deref(),
+        ) {
+            Ok(aggregate_api_candidates) => {
+                return proxy_with_aggregate_candidates(
+                    request,
+                    &storage,
+                    trace_id.as_str(),
+                    key_id.as_str(),
+                    original_path.as_str(),
+                    passthrough_path.as_str(),
+                    request_method.as_str(),
+                    &method,
+                    &passthrough_body,
+                    client_is_stream,
+                    model_for_log.as_deref(),
+                    reasoning_for_log.as_deref(),
+                    effective_service_tier_for_log.as_deref(),
+                    aggregate_api_id.as_deref(),
+                    request_deadline,
+                    started_at,
+                    aggregate_api_candidates,
+                );
+            }
+            Err(err) => {
+                return respond_hybrid_route_error(
+                    request,
+                    &storage,
+                    trace_id.as_str(),
+                    key_id.as_str(),
+                    original_path.as_str(),
+                    passthrough_path.as_str(),
+                    request_method.as_str(),
+                    super::super::ResponseAdapter::Passthrough,
+                    effective_service_tier_for_log.as_deref(),
+                    model_for_log.as_deref(),
+                    reasoning_for_log.as_deref(),
+                    started_at,
+                    Some(final_error.as_str()),
+                    err,
+                );
+            }
+        }
+    }
 
     context.log_final_result(
         None,
@@ -526,7 +675,9 @@ pub(in super::super) fn proxy_validated_request(
 #[cfg(test)]
 mod tests {
     use super::{
-        exhausted_gateway_error_for_log, provider_upstream_hint, resolve_upstream_is_stream,
+        exhausted_gateway_error_for_log, hybrid_route_error_message, provider_upstream_hint,
+        resolve_upstream_is_stream, respond_when_account_candidates_empty,
+        should_fallback_to_aggregate_after_account_exhaustion,
         should_try_provider_executor_aggregate_route,
     };
     use crate::gateway::upstream::executor::{
@@ -628,6 +779,60 @@ mod tests {
                 route_kind: GatewayUpstreamRouteKind::AccountRotation,
             }
         ));
+    }
+
+    #[test]
+    fn hybrid_account_first_keeps_account_empty_for_aggregate_fallback() {
+        let hybrid = GatewayUpstreamExecutionPlan {
+            executor_kind: GatewayUpstreamExecutorKind::CodexResponses,
+            route_kind: GatewayUpstreamRouteKind::HybridAccountFirst,
+        };
+        let account_only = GatewayUpstreamExecutionPlan {
+            executor_kind: GatewayUpstreamExecutorKind::CodexResponses,
+            route_kind: GatewayUpstreamRouteKind::AccountRotation,
+        };
+        let aggregate_only = GatewayUpstreamExecutionPlan {
+            executor_kind: GatewayUpstreamExecutorKind::CodexResponses,
+            route_kind: GatewayUpstreamRouteKind::AggregateApi,
+        };
+
+        assert!(!respond_when_account_candidates_empty(hybrid));
+        assert!(respond_when_account_candidates_empty(account_only));
+        assert!(respond_when_account_candidates_empty(aggregate_only));
+    }
+
+    #[test]
+    fn only_hybrid_falls_back_to_aggregate_after_account_exhaustion() {
+        assert!(should_fallback_to_aggregate_after_account_exhaustion(
+            GatewayUpstreamExecutionPlan {
+                executor_kind: GatewayUpstreamExecutorKind::CodexResponses,
+                route_kind: GatewayUpstreamRouteKind::HybridAccountFirst,
+            }
+        ));
+        assert!(!should_fallback_to_aggregate_after_account_exhaustion(
+            GatewayUpstreamExecutionPlan {
+                executor_kind: GatewayUpstreamExecutorKind::CodexResponses,
+                route_kind: GatewayUpstreamRouteKind::AccountRotation,
+            }
+        ));
+        assert!(!should_fallback_to_aggregate_after_account_exhaustion(
+            GatewayUpstreamExecutionPlan {
+                executor_kind: GatewayUpstreamExecutorKind::CodexResponses,
+                route_kind: GatewayUpstreamRouteKind::AggregateApi,
+            }
+        ));
+    }
+
+    #[test]
+    fn hybrid_route_error_mentions_both_pools() {
+        let message = hybrid_route_error_message(
+            Some("无可用账号(no available account)"),
+            "aggregate api not found for provider codex",
+        );
+
+        assert!(message.contains("账号池与聚合 API 均不可用"));
+        assert!(message.contains("no available account"));
+        assert!(message.contains("aggregate api not found for provider codex"));
     }
 
     #[test]

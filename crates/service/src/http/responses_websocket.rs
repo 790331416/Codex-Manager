@@ -597,11 +597,6 @@ fn rewrite_client_frame(
         &context.api_key,
         context.prompt_cache_key.as_deref(),
     );
-    let rewritten_body = crate::gateway::clear_prompt_cache_key_when_native_anchor(
-        RESPONSES_ENDPOINT,
-        rewritten_body,
-        &context.incoming_headers,
-    );
     let mut rewritten_value = serde_json::from_slice::<Value>(&rewritten_body).map_err(|err| {
         WsSessionError::bad_gateway_bilingual(
             "重写 WebSocket 请求失败",
@@ -1810,7 +1805,7 @@ mod tests {
     }
 
     #[test]
-    fn websocket_frame_drops_prompt_cache_key_when_native_conversation_anchor_exists() {
+    fn websocket_frame_preserves_prompt_cache_key_when_native_conversation_anchor_exists() {
         let _guard = crate::test_env_guard();
         let context = WsRequestContext {
             api_key: sample_api_key(),
@@ -1827,7 +1822,12 @@ mod tests {
         let value: serde_json::Value =
             serde_json::from_str(&prepared.text).expect("parse prepared websocket frame");
 
-        assert!(value.get("prompt_cache_key").is_none());
+        assert_eq!(
+            value
+                .get("prompt_cache_key")
+                .and_then(serde_json::Value::as_str),
+            Some("client-thread")
+        );
     }
 
     #[test]

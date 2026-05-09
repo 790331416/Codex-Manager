@@ -12,6 +12,10 @@ const TEST_ID_TOKEN_WS_A: &str = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzdWItMSIsImVtY
 const TEST_ID_TOKEN_META: &str = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzdWItMSIsImVtYWlsIjoibWV0YUBleGFtcGxlLmNvbSIsIndvcmtzcGFjZV9pZCI6IndzLW1ldGEiLCJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiY2dwdC1tZXRhIn19.sig";
 const TEST_ACCESS_TOKEN_TEAM_USER_A: &str = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzdWJqZWN0LWEiLCJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoidGVhbS0xIiwiY2hhdGdwdF91c2VyX2lkIjoidXNlci1hIn19.sig";
 const TEST_ACCESS_TOKEN_TEAM_USER_B: &str = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzdWJqZWN0LWIiLCJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoidGVhbS0xIiwiY2hhdGdwdF91c2VyX2lkIjoidXNlci1iIn19.sig";
+const TEST_ID_TOKEN_SAME_SUB_TEAM: &str = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzYW1lLXVzZXIiLCJlbWFpbCI6InNhbWVAZXhhbXBsZS5jb20iLCJ3b3Jrc3BhY2VfaWQiOiJ3cy1zaGFyZWQiLCJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiY2dwdC10ZWFtIiwiY2hhdGdwdF9wbGFuX3R5cGUiOiJ0ZWFtIiwiY2hhdGdwdF91c2VyX2lkIjoic2FtZS11c2VyIn19.sig";
+const TEST_ID_TOKEN_SAME_SUB_PLUS: &str = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzYW1lLXVzZXIiLCJlbWFpbCI6InNhbWVAZXhhbXBsZS5jb20iLCJ3b3Jrc3BhY2VfaWQiOiJ3cy1zaGFyZWQiLCJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiY2dwdC1wbHVzIiwiY2hhdGdwdF9wbGFuX3R5cGUiOiJwbHVzIiwiY2hhdGdwdF91c2VyX2lkIjoic2FtZS11c2VyIn19.sig";
+const TEST_ID_TOKEN_SAME_SUB_TEAM_A: &str = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzYW1lLXVzZXIiLCJlbWFpbCI6InNhbWVAZXhhbXBsZS5jb20iLCJ3b3Jrc3BhY2VfaWQiOiJ3cy10ZWFtLWEiLCJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiY2dwdC10ZWFtLWEiLCJjaGF0Z3B0X3BsYW5fdHlwZSI6InRlYW0iLCJjaGF0Z3B0X3VzZXJfaWQiOiJzYW1lLXVzZXIifX0.sig";
+const TEST_ID_TOKEN_SAME_SUB_TEAM_B: &str = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzYW1lLXVzZXIiLCJlbWFpbCI6InNhbWVAZXhhbXBsZS5jb20iLCJ3b3Jrc3BhY2VfaWQiOiJ3cy10ZWFtLWIiLCJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiY2dwdC10ZWFtLWIiLCJjaGF0Z3B0X3BsYW5fdHlwZSI6InRlYW0iLCJjaGF0Z3B0X3VzZXJfaWQiOiJzYW1lLXVzZXIifX0.sig";
 
 /// 函数 `unique_temp_db_path`
 ///
@@ -375,6 +379,171 @@ fn import_single_item_distinguishes_team_members_sharing_account_hint() {
 
     assert!(!import_single_item(&storage, &mut idx, &user_a, 3).expect("reimport user a"));
     assert_eq!(storage.list_accounts().expect("list accounts").len(), 2);
+}
+
+/// 函数 `import_single_item_distinguishes_same_subject_with_different_chatgpt_accounts`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-05-08
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn import_single_item_distinguishes_same_subject_with_different_chatgpt_accounts() {
+    let storage = Storage::open_in_memory().expect("open in memory");
+    storage.init().expect("init");
+    let mut idx = ExistingAccountIndex::build(&storage).expect("build index");
+
+    let team = json!({
+        "tokens": {
+            "access_token": "team.access",
+            "id_token": TEST_ID_TOKEN_SAME_SUB_TEAM,
+            "refresh_token": "team.refresh"
+        }
+    });
+    let plus = json!({
+        "tokens": {
+            "access_token": "plus.access",
+            "id_token": TEST_ID_TOKEN_SAME_SUB_PLUS,
+            "refresh_token": "plus.refresh"
+        }
+    });
+
+    assert!(import_single_item(&storage, &mut idx, &team, 1).expect("import team"));
+    assert!(import_single_item(&storage, &mut idx, &plus, 2).expect("import plus"));
+
+    let accounts = storage.list_accounts().expect("list accounts");
+    assert_eq!(accounts.len(), 2);
+    assert!(accounts
+        .iter()
+        .any(|account| account.chatgpt_account_id.as_deref() == Some("cgpt-team")));
+    assert!(accounts
+        .iter()
+        .any(|account| account.chatgpt_account_id.as_deref() == Some("cgpt-plus")));
+
+    assert!(!import_single_item(&storage, &mut idx, &team, 3).expect("reimport team"));
+    assert_eq!(storage.list_accounts().expect("list accounts").len(), 2);
+}
+
+/// 函数 `import_single_item_distinguishes_same_subject_across_team_workspaces`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-05-08
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn import_single_item_distinguishes_same_subject_across_team_workspaces() {
+    let storage = Storage::open_in_memory().expect("open in memory");
+    storage.init().expect("init");
+    let mut idx = ExistingAccountIndex::build(&storage).expect("build index");
+
+    let team_a = json!({
+        "tokens": {
+            "access_token": "team-a.access",
+            "id_token": TEST_ID_TOKEN_SAME_SUB_TEAM_A,
+            "refresh_token": "team-a.refresh"
+        }
+    });
+    let team_b = json!({
+        "tokens": {
+            "access_token": "team-b.access",
+            "id_token": TEST_ID_TOKEN_SAME_SUB_TEAM_B,
+            "refresh_token": "team-b.refresh"
+        }
+    });
+
+    assert!(import_single_item(&storage, &mut idx, &team_a, 1).expect("import team a"));
+    assert!(import_single_item(&storage, &mut idx, &team_b, 2).expect("import team b"));
+
+    let accounts = storage.list_accounts().expect("list accounts");
+    assert_eq!(accounts.len(), 2);
+    assert!(accounts
+        .iter()
+        .any(|account| account.workspace_id.as_deref() == Some("ws-team-a")));
+    assert!(accounts
+        .iter()
+        .any(|account| account.workspace_id.as_deref() == Some("ws-team-b")));
+}
+
+/// 函数 `import_single_item_restores_account_when_old_import_overwrote_scoped_identity`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-05-08
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn import_single_item_restores_account_when_old_import_overwrote_scoped_identity() {
+    let storage = Storage::open_in_memory().expect("open in memory");
+    storage.init().expect("init");
+    let now = now_ts();
+    let old_team_scoped_id =
+        build_account_storage_id("same-user", Some("cgpt-team"), Some("ws-shared"), None);
+    storage
+        .insert_account(&Account {
+            id: old_team_scoped_id.clone(),
+            label: "same@example.com".to_string(),
+            issuer: "https://auth.openai.com".to_string(),
+            chatgpt_account_id: Some("cgpt-plus".to_string()),
+            workspace_id: Some("ws-shared".to_string()),
+            group_name: Some("IMPORT".to_string()),
+            sort: 0,
+            status: "active".to_string(),
+            created_at: now,
+            updated_at: now,
+        })
+        .expect("insert old overwritten account");
+    storage
+        .insert_token(&Token {
+            account_id: old_team_scoped_id.clone(),
+            id_token: TEST_ID_TOKEN_SAME_SUB_PLUS.to_string(),
+            access_token: "plus.access.old".to_string(),
+            refresh_token: "plus.refresh.old".to_string(),
+            api_key_access_token: None,
+            last_refresh: now,
+        })
+        .expect("insert plus token");
+
+    let mut idx = ExistingAccountIndex::build(&storage).expect("build index");
+    let team = json!({
+        "tokens": {
+            "access_token": "team.access",
+            "id_token": TEST_ID_TOKEN_SAME_SUB_TEAM,
+            "refresh_token": "team.refresh"
+        }
+    });
+    let plus = json!({
+        "tokens": {
+            "access_token": "plus.access",
+            "id_token": TEST_ID_TOKEN_SAME_SUB_PLUS,
+            "refresh_token": "plus.refresh"
+        }
+    });
+
+    assert!(import_single_item(&storage, &mut idx, &team, 1).expect("restore team"));
+    assert!(!import_single_item(&storage, &mut idx, &plus, 2).expect("refresh plus"));
+
+    let accounts = storage.list_accounts().expect("list accounts");
+    assert_eq!(accounts.len(), 2);
+    assert!(accounts
+        .iter()
+        .any(|account| account.chatgpt_account_id.as_deref() == Some("cgpt-team")));
+    assert!(accounts
+        .iter()
+        .any(|account| account.chatgpt_account_id.as_deref() == Some("cgpt-plus")));
 }
 
 /// 函数 `import_single_item_reuses_legacy_team_account_when_token_subject_matches`

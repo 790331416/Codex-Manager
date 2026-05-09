@@ -158,11 +158,17 @@ impl ExistingAccountIndex {
             .filter(|v| !v.is_empty())?;
         let scoped_id =
             build_account_storage_id(subject_key, chatgpt_account_id, workspace_id, None);
-        if self.by_id.contains_key(&scoped_id) {
-            return Some(scoped_id);
+        if let Some(account) = self.by_id.get(&scoped_id) {
+            if account_scope_matches(account, chatgpt_account_id, workspace_id) {
+                return Some(scoped_id);
+            }
+            return None;
         }
         if let Some(account_id) = self.by_subject_storage_id.get(&scoped_id) {
             return Some(account_id.clone());
+        }
+        if chatgpt_account_id.is_some() || workspace_id.is_some() {
+            return None;
         }
         if self.by_id.contains_key(subject_key) {
             return Some(subject_key.to_string());
@@ -255,6 +261,63 @@ impl ExistingAccountIndex {
             }
         }
     }
+}
+
+fn account_scope_matches(
+    account: &Account,
+    chatgpt_account_id: Option<&str>,
+    workspace_id: Option<&str>,
+) -> bool {
+    if let Some(chatgpt) = chatgpt_account_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        if account.chatgpt_account_id.as_deref().map(str::trim) != Some(chatgpt) {
+            return false;
+        }
+    }
+    if let Some(workspace) = workspace_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        if account.workspace_id.as_deref().map(str::trim) != Some(workspace) {
+            return false;
+        }
+    }
+    true
+}
+
+fn resolve_scoped_account_id_collision(
+    existing: &HashMap<String, Account>,
+    account_id: String,
+    chatgpt_account_id: Option<&str>,
+    workspace_id: Option<&str>,
+    payload: &ImportTokenPayload,
+) -> String {
+    let Some(account) = existing.get(&account_id) else {
+        return account_id;
+    };
+    if account_scope_matches(account, chatgpt_account_id, workspace_id) {
+        return account_id;
+    }
+
+    let fingerprint_source = payload
+        .refresh_token
+        .trim()
+        .is_empty()
+        .then_some(payload.access_token.as_str())
+        .unwrap_or(payload.refresh_token.as_str());
+    let fingerprint = token_fingerprint(fingerprint_source);
+    let mut candidate = account_key(&account_id, Some(&format!("conflict_fp_{fingerprint}")));
+    let mut suffix = 2usize;
+    while existing.contains_key(&candidate) {
+        candidate = account_key(
+            &account_id,
+            Some(&format!("conflict_fp_{fingerprint}_{suffix}")),
+        );
+        suffix = suffix.saturating_add(1);
+    }
+    candidate
 }
 
 /// 函数 `import_account_auth_json`
@@ -684,6 +747,13 @@ fn import_single_item(
             workspace_id.as_deref(),
             token_fingerprint_for_id,
         )?);
+    let account_id = resolve_scoped_account_id_collision(
+        &index.by_id,
+        account_id,
+        chatgpt_account_id.as_deref(),
+        workspace_id.as_deref(),
+        &payload,
+    );
 
     let label = meta
         .label

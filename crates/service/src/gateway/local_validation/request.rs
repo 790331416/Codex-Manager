@@ -1315,7 +1315,9 @@ pub(super) fn build_local_validation_result(
             incoming_headers,
             storage,
             original_path: normalized_path.clone(),
+            passthrough_path: normalized_path.clone(),
             path: normalized_path,
+            passthrough_body: Bytes::from(rewritten_body.clone()),
             body: Bytes::from(rewritten_body),
             is_stream,
             has_prompt_cache_key,
@@ -1340,6 +1342,23 @@ pub(super) fn build_local_validation_result(
         });
     }
 
+    let passthrough_path = normalized_path.clone();
+    let mut passthrough_body = apply_passthrough_request_overrides(
+        &normalized_path,
+        body.clone(),
+        &api_key,
+        initial_request_meta.service_tier.clone(),
+    )
+    .0;
+    if is_non_native_openai_responses_api_request(
+        effective_protocol_type,
+        normalized_path.as_str(),
+        native_codex_client,
+    ) {
+        passthrough_body = default_omitted_responses_stream_to_true(passthrough_body);
+    }
+    super::super::validate_text_input_limit_for_path(&normalized_path, &passthrough_body)
+        .map_err(|err| LocalValidationError::new(400, err.message()))?;
     let original_body = body.clone();
     let (mut path, mut response_adapter, mut gemini_stream_output_mode, mut tool_name_restore_map) =
         if effective_protocol_type == crate::apikey_profile::PROTOCOL_OPENAI_COMPAT
@@ -1533,7 +1552,6 @@ pub(super) fn build_local_validation_result(
     if should_normalize_compat_service_tier {
         body = normalize_compat_service_tier_for_codex_backend(body);
     }
-    body = super::super::clear_prompt_cache_key_when_native_anchor(&path, body, &incoming_headers);
     body = super::super::normalize_official_responses_http_body(&path, body);
     super::super::validate_text_input_limit_for_path(&path, &body)
         .map_err(|err| LocalValidationError::new(400, err.message()))?;
@@ -1562,7 +1580,9 @@ pub(super) fn build_local_validation_result(
         incoming_headers,
         storage,
         original_path: normalized_path,
+        passthrough_path,
         path,
+        passthrough_body: Bytes::from(passthrough_body),
         body: Bytes::from(body),
         is_stream,
         has_prompt_cache_key,

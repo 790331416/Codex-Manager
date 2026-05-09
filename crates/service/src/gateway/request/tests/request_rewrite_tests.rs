@@ -1764,7 +1764,12 @@ fn responses_compact_uses_codex_compat_rewrite() {
         Some("https://chatgpt.com/backend-api/codex"),
     );
     let value: serde_json::Value = serde_json::from_slice(&out).expect("parse output body");
-    assert!(value.get("instructions").is_none());
+    assert_eq!(
+        value
+            .get("instructions")
+            .and_then(serde_json::Value::as_str),
+        Some("")
+    );
     assert!(value.get("tools").is_some());
     assert_eq!(
         value
@@ -1837,6 +1842,7 @@ fn responses_compact_keeps_only_codex_compact_body_fields() {
         "instructions",
         "model",
         "parallel_tool_calls",
+        "prompt_cache_key",
         "reasoning",
         "text",
         "tools",
@@ -1849,7 +1855,12 @@ fn responses_compact_keeps_only_codex_compact_body_fields() {
     assert!(object.get("stream").is_none());
     assert!(object.get("store").is_none());
     assert!(object.get("include").is_none());
-    assert!(object.get("prompt_cache_key").is_none());
+    assert_eq!(
+        object
+            .get("prompt_cache_key")
+            .and_then(serde_json::Value::as_str),
+        Some("pc_compact")
+    );
     assert!(object.get("client_metadata").is_none());
     assert!(object.get("service_tier").is_none());
     assert!(object.get("metadata").is_none());
@@ -1860,6 +1871,71 @@ fn responses_compact_keeps_only_codex_compact_body_fields() {
     assert!(object.get("user").is_none());
     assert!(object.get("previous_response_id").is_none());
     assert!(object.get("unknown_field").is_none());
+}
+
+#[test]
+fn responses_compact_preserves_prompt_cache_key_without_codex_base_rewrite() {
+    let _guard = crate::test_env_guard();
+    let body = json!({
+        "model": "gpt-5.5",
+        "instructions": "compact instructions",
+        "input": "compact me",
+        "prompt_cache_key": "pc_compact",
+        "reasoning": { "effort": "low" },
+        "text": { "verbosity": "low" },
+        "tools": [],
+        "parallel_tool_calls": false
+    });
+    let out = apply_request_overrides_with_service_tier_and_prompt_cache_key_scope(
+        "/v1/responses/compact",
+        serde_json::to_vec(&body).expect("serialize request body"),
+        None,
+        None,
+        None,
+        None,
+        Some("pc_compact"),
+        false,
+    );
+    let value: serde_json::Value = serde_json::from_slice(&out).expect("parse output body");
+
+    assert_eq!(
+        value
+            .get("prompt_cache_key")
+            .and_then(serde_json::Value::as_str),
+        Some("pc_compact")
+    );
+}
+
+#[test]
+fn responses_compact_injects_prompt_cache_key_from_thread_anchor_for_codex_backend() {
+    let _guard = crate::test_env_guard();
+    let body = json!({
+        "model": "gpt-5.5",
+        "instructions": "compact instructions",
+        "input": "compact me",
+        "reasoning": { "effort": "low" },
+        "text": { "verbosity": "low" },
+        "tools": [],
+        "parallel_tool_calls": false
+    });
+    let out = apply_request_overrides_with_service_tier_and_forced_prompt_cache_key_scope(
+        "/v1/responses/compact",
+        serde_json::to_vec(&body).expect("serialize request body"),
+        None,
+        None,
+        None,
+        Some("https://chatgpt.com/backend-api/codex"),
+        Some("pc_from_thread"),
+        true,
+    );
+    let value: serde_json::Value = serde_json::from_slice(&out).expect("parse output body");
+
+    assert_eq!(
+        value
+            .get("prompt_cache_key")
+            .and_then(serde_json::Value::as_str),
+        Some("pc_from_thread")
+    );
 }
 
 /// 函数 `responses_compact_defaults_parallel_tool_calls_to_false_for_codex_backend`
@@ -1899,6 +1975,38 @@ fn responses_compact_defaults_parallel_tool_calls_to_false_for_codex_backend() {
         .get("tools")
         .and_then(serde_json::Value::as_array)
         .is_some());
+}
+
+#[test]
+fn responses_compact_defaults_missing_or_null_instructions_to_empty_string() {
+    let _guard = crate::test_env_guard();
+
+    for body in [
+        json!({
+            "model": "gpt-5.3-codex",
+            "input": "compact me"
+        }),
+        json!({
+            "model": "gpt-5.3-codex",
+            "instructions": null,
+            "input": "compact me"
+        }),
+    ] {
+        let out = apply_codex_compat_request_overrides(
+            "/v1/responses/compact",
+            serde_json::to_vec(&body).expect("serialize request body"),
+            None,
+            None,
+            Some("https://chatgpt.com/backend-api/codex"),
+        );
+        let value: serde_json::Value = serde_json::from_slice(&out).expect("parse output body");
+        assert_eq!(
+            value
+                .get("instructions")
+                .and_then(serde_json::Value::as_str),
+            Some("")
+        );
+    }
 }
 
 #[test]

@@ -6,6 +6,9 @@ pub(in super::super) enum CandidatePrecheckResult {
         request: Request,
         candidates: Vec<(Account, Token)>,
     },
+    Empty {
+        request: Request,
+    },
     Responded,
 }
 
@@ -33,6 +36,7 @@ pub(in super::super) fn prepare_candidates_for_proxy(
     model_for_log: Option<&str>,
     reasoning_for_log: Option<&str>,
     account_plan_filter: Option<&str>,
+    respond_when_empty: bool,
 ) -> CandidatePrecheckResult {
     let candidates: Vec<(Account, Token)> = match super::candidates::prepare_gateway_candidates(
         storage,
@@ -86,6 +90,10 @@ pub(in super::super) fn prepare_candidates_for_proxy(
             return CandidatePrecheckResult::Responded;
         }
     };
+
+    if candidates.is_empty() && !respond_when_empty {
+        return CandidatePrecheckResult::Empty { request };
+    }
 
     if candidates.is_empty() {
         super::super::super::write_request_log(

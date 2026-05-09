@@ -80,7 +80,7 @@ fn normalize_action_path(action: &str) -> String {
 
 fn effective_action_path(candidate: &AggregateApi, path: &str) -> String {
     match candidate.action.as_deref().map(str::trim) {
-        Some("") => path.to_string(),
+        Some("") => String::new(),
         Some(value) => normalize_action_path(value),
         None => path.to_string(),
     }
@@ -1308,10 +1308,10 @@ mod tests {
     }
 
     #[test]
-    fn empty_custom_action_falls_back_to_original_path() {
+    fn empty_custom_action_uses_base_url_without_original_path() {
         let api = aggregate_api_with_action(Some(""));
         let path = effective_action_path(&api, "/v1/messages?beta=true");
-        assert_eq!(path, "/v1/messages?beta=true");
+        assert_eq!(path, "");
     }
 
     #[test]
