@@ -719,10 +719,12 @@ pub fn wallet_precheck_for_api_key(storage: &Storage, key_id: &str) -> Result<()
     if !distribution_enabled_for_storage(storage) {
         return Ok(());
     }
-    let owner = storage
+    let Some(owner) = storage
         .find_api_key_owner(key_id)
         .map_err(|err| format!("read api key owner failed: {err}"))?
-        .ok_or_else(|| "API Key 未分配额度归属".to_string())?;
+    else {
+        return Ok(());
+    };
     let (owner_kind, owner_id) = owner_identity(&owner)?;
     if owner_kind == "user" {
         let _ = ensure_user_can_own_wallet(storage, owner_id)?;
@@ -756,10 +758,12 @@ pub fn wallet_charge_for_request(
         return Ok(None);
     };
     let now = now_ts();
-    let owner = storage
+    let Some(owner) = storage
         .find_api_key_owner(key_id)
         .map_err(|err| format!("read api key owner failed: {err}"))?
-        .ok_or_else(|| "API Key 未分配额度归属".to_string())?;
+    else {
+        return Ok(None);
+    };
     let (owner_kind, owner_id) = owner_identity(&owner)?;
     if owner_kind == "user" {
         let _ = ensure_user_can_own_wallet(storage, owner_id)?;

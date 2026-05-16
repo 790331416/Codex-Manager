@@ -2880,9 +2880,19 @@ fn rpc_account_manager_assigns_key_and_bills_wallet() {
 
     let storage = Storage::open(ctx.db_path()).expect("open storage");
     storage.init().expect("init storage");
-    let missing_owner_error = codexmanager_service::wallet_precheck_for_api_key(&storage, &key_id)
-        .expect_err("missing owner should fail");
-    assert!(missing_owner_error.contains("未分配"));
+    codexmanager_service::wallet_precheck_for_api_key(&storage, &key_id)
+        .expect("unassigned api key should bypass wallet precheck");
+    let missing_owner_charge = codexmanager_service::wallet_charge_for_request(
+        &storage,
+        Some(&key_id),
+        41,
+        0.25,
+        None,
+        Some("default"),
+        None,
+    )
+    .expect("unassigned api key should bypass wallet charge");
+    assert!(missing_owner_charge.is_none());
 
     let admin_owner_error = call_rpc(
         207,
