@@ -211,6 +211,14 @@ pub(crate) fn transient_network_reason_from_message(message: &str) -> Option<&'s
         || normalized.contains("tcp connect error")
         || normalized.contains("tls handshake eof")
         || normalized.contains("operation timed out")
+        || normalized.contains("stream_interrupted")
+        || normalized.contains("stream closed before response.completed")
+        || normalized.contains("response.incomplete")
+        || normalized.contains("upstream stream terminated unexpectedly")
+        || normalized.contains("upstream stream read failed")
+        || normalized.contains("上游中途断开，未返回具体错误信息")
+        || normalized.contains("连接中断（可能是网络波动或客户端主动取消）")
+        || normalized.contains("上游流式空闲超时")
     {
         return Some("transient_network");
     }
@@ -555,6 +563,16 @@ mod tests {
         assert!(network.should_failover);
         assert!(!network.should_mark_account_unavailable);
         assert!(!network.should_mark_default_cooldown);
+
+        let stream_interrupted = analyze_gateway_error("上游中途断开，未返回具体错误信息", true);
+        assert_eq!(stream_interrupted.kind, GatewayErrorKind::Network);
+        assert!(stream_interrupted.should_failover);
+        assert!(!stream_interrupted.should_mark_account_unavailable);
+
+        let stream_code = analyze_gateway_error("stream_interrupted", true);
+        assert_eq!(stream_code.kind, GatewayErrorKind::Network);
+        assert!(stream_code.should_failover);
+        assert!(!stream_code.should_mark_account_unavailable);
 
         let network_last = analyze_gateway_error(
             "upstream error: error sending request for url (https://chatgpt.com/backend-api/codex/responses)",
