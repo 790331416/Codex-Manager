@@ -2,6 +2,7 @@ use crate::app_storage::{
     read_account_import_contents_from_directory, read_account_import_contents_from_files,
     resolve_rpc_token_path_for_db,
 };
+use crate::commands::service::ensure_bind_target_available;
 use crate::commands::settings::effective_lightweight_mode_on_close_to_tray;
 use crate::rpc_client::{normalize_addr, resolve_socket_addrs, rpc_call, rpc_call_with_sockets};
 use std::fs;
@@ -182,6 +183,21 @@ fn rpc_call_falls_back_to_next_socket_after_empty_response() {
         .and_then(|v| v.get("userAgent").or_else(|| v.get("user_agent")))
         .and_then(|v| v.as_str());
     assert_eq!(user_agent, Some("codex_cli_rs/test"));
+}
+
+#[test]
+fn service_bind_probe_reports_occupied_loopback_port() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind occupied port");
+    let port = listener.local_addr().expect("addr").port();
+    let addr = format!("localhost:{port}");
+
+    let err = ensure_bind_target_available(&addr, &addr).expect_err("port should be occupied");
+
+    assert!(
+        err.contains("端口已被占用"),
+        "expected occupied port message, got {err}"
+    );
+    assert!(err.contains(&addr), "message should include addr, got {err}");
 }
 
 /// 函数 `rpc_token_path_stays_in_db_dir`

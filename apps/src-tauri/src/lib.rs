@@ -68,8 +68,8 @@ pub fn run() {
                     total: event.total,
                     completed_at: event.completed_at,
                 };
-                if let Err(err) = usage_refresh_event_app
-                    .emit(USAGE_REFRESH_COMPLETED_EVENT, payload)
+                if let Err(err) =
+                    usage_refresh_event_app.emit(USAGE_REFRESH_COMPLETED_EVENT, payload)
                 {
                     log::warn!("emit usage refresh completed event failed: {}", err);
                 }

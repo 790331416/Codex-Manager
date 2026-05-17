@@ -71,12 +71,12 @@ CodexManager를 후원해 주신 다음 스폰서께 감사드립니다.
   </tr>
   <tr>
     <td align="center" valign="middle" width="180">
-      <a href="https://gzxsy.vip/">
+      <a href="https://gzxsy.vip/register?aff=eapz">
         <img src="../../assets/images/sponsors/xingsiyan.jpg" alt="Xing Si Yan Gateway" width="120" />
       </a>
     </td>
     <td valign="top">
-      <strong>Xing Si Yan Gateway</strong> 는 Claude Code, Codex 등 모델 호출 시나리오를 위한 안정적인 중계와 부가 서비스를 제공합니다. 고가용성 API, 편리한 도입, 지속적인 전달 지원이 필요한 개발자와 팀에 적합합니다. 최신 플랜은 <a href="https://gzxsy.vip/">공식 사이트</a>에서 확인할 수 있습니다.
+      <strong>Xing Si Yan Gateway</strong> 는 Claude Code, Codex 등 모델 호출 시나리오를 위한 안정적인 중계와 부가 서비스를 제공합니다. 고가용성 API, 편리한 도입, 지속적인 전달 지원이 필요한 개발자와 팀에 적합합니다. 최신 플랜은 <a href="https://gzxsy.vip/register?aff=eapz">공식 사이트</a>에서 확인할 수 있습니다.
     </td>
   </tr>
 </table>

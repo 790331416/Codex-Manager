@@ -1,5 +1,7 @@
 use std::sync::atomic::Ordering;
 
+use tauri::Manager;
+
 use crate::service_runtime::stop_service;
 
 use super::prompts::{
@@ -17,7 +19,7 @@ use super::state::{
 };
 #[cfg(target_os = "macos")]
 use super::window::show_main_window;
-use super::window::MAIN_WINDOW_LABEL;
+use super::window::{hide_tray_preview_window, MAIN_WINDOW_LABEL, TRAY_PREVIEW_WINDOW_LABEL};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MainWindowCloseMode {
@@ -105,6 +107,12 @@ fn should_confirm_unsaved_settings_before_app_exit(
 /// # 返回
 /// 无
 pub(crate) fn handle_main_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
+    if window.label() == TRAY_PREVIEW_WINDOW_LABEL {
+        if let tauri::WindowEvent::Focused(false) = event {
+            hide_tray_preview_window(window.app_handle());
+        }
+        return;
+    }
     if window.label() != MAIN_WINDOW_LABEL {
         return;
     }

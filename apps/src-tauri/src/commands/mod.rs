@@ -1,8 +1,11 @@
 pub mod account;
+pub mod account_manager;
 pub mod aggregate_api;
 pub mod apikey;
+pub mod dashboard;
 pub mod login;
 pub mod plugin;
+pub mod quota;
 mod registry;
 pub mod requestlog;
 pub mod service;

@@ -9,7 +9,7 @@ use super::state::{
     has_unsaved_settings_draft_sections, mark_skip_next_unsaved_settings_exit_confirm,
     APP_EXIT_REQUESTED, KEEP_ALIVE_FOR_LIGHTWEIGHT_CLOSE, TRAY_AVAILABLE,
 };
-use super::window::show_main_window;
+use super::window::{show_main_window, toggle_tray_preview_window};
 
 const TRAY_MENU_SHOW_MAIN: &str = "tray_show_main";
 const TRAY_MENU_QUIT_APP: &str = "tray_quit_app";
@@ -76,13 +76,19 @@ pub(crate) fn setup_tray(app: &tauri::AppHandle) -> Result<(), tauri::Error> {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
+                position,
+                rect,
                 ..
             } = event
             {
-                show_main_window(&tray.app_handle());
+                toggle_tray_preview_window(tray.app_handle(), position, rect);
             }
         });
-    if let Some(icon) = app.default_window_icon() {
+    if let Ok(icon) =
+        tauri::image::Image::from_bytes(include_bytes!("../../icons/tray-template.png"))
+    {
+        tray = tray.icon(icon).icon_as_template(true);
+    } else if let Some(icon) = app.default_window_icon() {
         tray = tray.icon(icon.clone());
     }
     tray.build(app)?;

@@ -11,6 +11,9 @@ use tiny_http::Request;
 
 use super::{LocalValidationError, LocalValidationResult};
 
+const ENV_GATEWAY_BLOCKED_PATHS: &str = "CODEXMANAGER_GATEWAY_BLOCKED_PATHS";
+const DEFAULT_GATEWAY_BLOCKED_PATHS: &[&str] = &["/v1/props"];
+
 /// 函数 `resolve_effective_request_overrides`
 ///
 /// 作者: gaohongshun
@@ -59,6 +62,50 @@ fn resolve_effective_request_overrides(
 
 fn is_removed_openai_compat_request_path(normalized_path: &str) -> bool {
     normalized_path.starts_with("/v1/completions")
+}
+
+fn configured_gateway_blocked_path_patterns() -> Vec<String> {
+    let mut patterns: Vec<String> = DEFAULT_GATEWAY_BLOCKED_PATHS
+        .iter()
+        .map(|value| (*value).to_string())
+        .collect();
+    if let Ok(value) = std::env::var(ENV_GATEWAY_BLOCKED_PATHS) {
+        patterns.extend(parse_gateway_blocked_path_patterns(value.as_str()));
+    }
+    patterns
+}
+
+fn parse_gateway_blocked_path_patterns(value: &str) -> Vec<String> {
+    value
+        .split([',', ';', '\n'])
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn path_without_query(path: &str) -> &str {
+    path.split_once('?')
+        .map(|(prefix, _)| prefix)
+        .unwrap_or(path)
+}
+
+fn gateway_blocked_path_matches(path: &str, pattern: &str) -> bool {
+    let pattern = pattern.trim();
+    if pattern.is_empty() {
+        return false;
+    }
+    let path_only = path_without_query(path);
+    if let Some(prefix) = pattern.strip_suffix('*') {
+        return path.starts_with(prefix) || path_only.starts_with(prefix);
+    }
+    path == pattern || path_only == pattern
+}
+
+fn is_gateway_blocked_request_path(normalized_path: &str) -> bool {
+    configured_gateway_blocked_path_patterns()
+        .iter()
+        .any(|pattern| gateway_blocked_path_matches(normalized_path, pattern))
 }
 
 /// 函数 `ensure_anthropic_model_is_listed`
@@ -1227,6 +1274,15 @@ pub(super) fn build_local_validation_result(
             crate::gateway::bilingual_error(
                 "OpenAI 兼容请求链路已移除",
                 format!("removed request path: {normalized_path}"),
+            ),
+        ));
+    }
+    if is_gateway_blocked_request_path(normalized_path.as_str()) {
+        return Err(LocalValidationError::new(
+            404,
+            crate::gateway::bilingual_error(
+                "请求路径已被本地屏蔽",
+                format!("blocked request path: {normalized_path}"),
             ),
         ));
     }

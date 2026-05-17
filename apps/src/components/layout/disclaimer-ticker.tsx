@@ -49,9 +49,10 @@ export function DisclaimerTicker() {
 
   return (
     <>
-      <button
+      <Button
         type="button"
-        className="group flex w-full max-w-[220px] items-center gap-2 rounded-full border border-border/60 bg-card/35 px-2 py-1.5 text-left shadow-sm backdrop-blur-md transition-colors hover:bg-card/55 xl:max-w-[260px] 2xl:max-w-[340px]"
+        variant="outline"
+        className="group flex w-full max-w-[220px] items-center gap-2 rounded-full border border-border/60 bg-card/35 px-2 py-1.5 text-left shadow-sm transition-colors hover:bg-card/55 xl:max-w-[260px] 2xl:max-w-[340px]"
         onClick={() => setOpen(true)}
         title={t("免责声明")}
       >
@@ -68,9 +69,9 @@ export function DisclaimerTicker() {
         </div>
         <div className="flex shrink-0 items-center gap-1 whitespace-nowrap text-[10px] text-muted-foreground/70 transition-colors group-hover:text-muted-foreground">
           <span className="hidden xl:inline">{t("详情")}</span>
-          <ChevronRight className="h-3 w-3" />
+          <ChevronRight data-icon="inline-end" />
         </div>
-      </button>
+      </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-xl">

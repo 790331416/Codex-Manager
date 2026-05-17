@@ -3,7 +3,13 @@
 import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { accountClient, ManagedModelPayload } from "@/lib/api/account-client";
+import {
+  accountClient,
+  ManagedModelPayload,
+  ManagedModelSourceMappingPayload,
+  ManagedModelSourceModelPayload,
+  ManagedModelSourceSyncPayload,
+} from "@/lib/api/account-client";
 import { serviceClient } from "@/lib/api/service-client";
 import {
   buildCodexModelsCachePayload,
@@ -15,9 +21,10 @@ import { useDeferredDesktopActivation } from "@/hooks/useDeferredDesktopActivati
 import { useRuntimeCapabilities } from "@/hooks/useRuntimeCapabilities";
 import { useI18n } from "@/lib/i18n/provider";
 import { useAppStore } from "@/lib/store/useAppStore";
-import { ManagedModelCatalog } from "@/types";
+import { ManagedModelCatalog, ManagedModelRouting } from "@/types";
 
 const MANAGED_MODEL_QUERY_KEY = ["managed-model-catalog"];
+const MANAGED_MODEL_ROUTING_QUERY_KEY = ["managed-model-routing"];
 
 type BatchDeleteManagedModelsResult = {
   deleted: string[];
@@ -127,6 +134,12 @@ export function useManagedModels() {
     return catalog;
   };
 
+  const reloadManagedRouting = async (): Promise<ManagedModelRouting> => {
+    const routing = await accountClient.listManagedModelRouting();
+    queryClient.setQueryData(MANAGED_MODEL_ROUTING_QUERY_KEY, routing);
+    return routing;
+  };
+
   const query = useQuery({
     queryKey: MANAGED_MODEL_QUERY_KEY,
     queryFn: () => accountClient.listManagedModels(false),
@@ -134,9 +147,17 @@ export function useManagedModels() {
     retry: 1,
   });
 
+  const routingQuery = useQuery({
+    queryKey: MANAGED_MODEL_ROUTING_QUERY_KEY,
+    queryFn: () => accountClient.listManagedModelRouting(),
+    enabled: isQueryEnabled,
+    retry: 1,
+  });
+
   const invalidateAll = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: MANAGED_MODEL_QUERY_KEY }),
+      queryClient.invalidateQueries({ queryKey: MANAGED_MODEL_ROUTING_QUERY_KEY }),
       queryClient.invalidateQueries({ queryKey: ["apikey-models"] }),
       queryClient.invalidateQueries({ queryKey: ["startup-snapshot"] }),
     ]);
@@ -291,6 +312,58 @@ export function useManagedModels() {
     },
   });
 
+  const sourceSyncMutation = useMutation({
+    mutationFn: (params: ManagedModelSourceSyncPayload) =>
+      accountClient.syncManagedModelSourceModels(params),
+    onSuccess: async (routing) => {
+      queryClient.setQueryData(MANAGED_MODEL_ROUTING_QUERY_KEY, routing);
+      await invalidateAll();
+      toast.success(t("来源模型已同步"));
+    },
+    onError: (error: unknown) => {
+      toast.error(`${t("同步来源模型失败")}: ${getAppErrorMessage(error)}`);
+    },
+  });
+
+  const sourceModelMutation = useMutation({
+    mutationFn: (params: ManagedModelSourceModelPayload) =>
+      accountClient.saveManagedModelSourceModel(params),
+    onSuccess: async () => {
+      await reloadManagedRouting();
+      await invalidateAll();
+      toast.success(t("来源模型已保存"));
+    },
+    onError: (error: unknown) => {
+      toast.error(`${t("保存来源模型失败")}: ${getAppErrorMessage(error)}`);
+    },
+  });
+
+  const sourceMappingMutation = useMutation({
+    mutationFn: (params: ManagedModelSourceMappingPayload) =>
+      accountClient.saveManagedModelSourceMapping(params),
+    onSuccess: async () => {
+      await reloadManagedRouting();
+      await invalidateAll();
+      toast.success(t("模型映射已保存"));
+    },
+    onError: (error: unknown) => {
+      toast.error(`${t("保存模型映射失败")}: ${getAppErrorMessage(error)}`);
+    },
+  });
+
+  const sourceMappingDeleteMutation = useMutation({
+    mutationFn: (mappingId: string) =>
+      accountClient.deleteManagedModelSourceMapping(mappingId),
+    onSuccess: async () => {
+      await reloadManagedRouting();
+      await invalidateAll();
+      toast.success(t("模型映射已删除"));
+    },
+    onError: (error: unknown) => {
+      toast.error(`${t("删除模型映射失败")}: ${getAppErrorMessage(error)}`);
+    },
+  });
+
   useEffect(() => {
     codexUserAgentRef.current = "";
     syncedCatalogFingerprintRef.current = "";
@@ -316,7 +389,9 @@ export function useManagedModels() {
   return {
     models: query.data?.items || [],
     catalog: query.data || { items: [] },
+    routing: routingQuery.data || { sourceModels: [], mappings: [] },
     isLoading: isServiceReady && (!isQueryEnabled || query.isLoading),
+    isRoutingLoading: isServiceReady && (!isQueryEnabled || routingQuery.isLoading),
     isServiceReady,
     refreshRemote: async () => {
       if (!ensureServiceReady("刷新模型")) return null;
@@ -346,10 +421,32 @@ export function useManagedModels() {
       await exportMutation.mutateAsync();
       return true;
     },
+    syncSourceModels: async (params: ManagedModelSourceSyncPayload) => {
+      if (!ensureServiceReady("同步来源模型")) return null;
+      return sourceSyncMutation.mutateAsync(params);
+    },
+    saveSourceModel: async (params: ManagedModelSourceModelPayload) => {
+      if (!ensureServiceReady("保存来源模型")) return null;
+      return sourceModelMutation.mutateAsync(params);
+    },
+    saveSourceMapping: async (params: ManagedModelSourceMappingPayload) => {
+      if (!ensureServiceReady("保存模型映射")) return null;
+      return sourceMappingMutation.mutateAsync(params);
+    },
+    deleteSourceMapping: async (mappingId: string) => {
+      if (!ensureServiceReady("删除模型映射")) return false;
+      await sourceMappingDeleteMutation.mutateAsync(mappingId);
+      return true;
+    },
     isRefreshing: refreshMutation.isPending,
     isSaving: saveMutation.isPending,
     isDeleting: deleteMutation.isPending || batchDeleteMutation.isPending,
     isExporting: exportMutation.isPending,
+    isRoutingSaving:
+      sourceSyncMutation.isPending ||
+      sourceModelMutation.isPending ||
+      sourceMappingMutation.isPending ||
+      sourceMappingDeleteMutation.isPending,
     canExportCodexCache:
       !isDesktopRuntime && isServiceReady && Boolean(query.data?.items?.length),
   };

@@ -17,6 +17,11 @@ import { serviceClient } from "@/lib/api/service-client";
 import { useAppStore } from "@/lib/store/useAppStore";
 import { pickBestRecommendations, pickCurrentAccount } from "@/lib/utils/usage";
 
+interface UseDashboardStatsOptions {
+  forceActive?: boolean;
+  requestLogLimit?: number;
+}
+
 /**
  * 函数 `useDashboardStats`
  *
@@ -30,11 +35,14 @@ import { pickBestRecommendations, pickCurrentAccount } from "@/lib/utils/usage";
  * # 返回
  * 返回函数执行结果
  */
-export function useDashboardStats() {
+export function useDashboardStats(options: UseDashboardStatsOptions = {}) {
   const serviceStatus = useAppStore((state) => state.serviceStatus);
   const localDayRange = useLocalDayRange();
   const isServiceReady = serviceStatus.connected;
-  const isPageActive = useDesktopPageActive("/");
+  const defaultPageActive = useDesktopPageActive("/");
+  const isPageActive = options.forceActive ?? defaultPageActive;
+  const requestLogLimit =
+    options.requestLogLimit ?? STARTUP_SNAPSHOT_REQUEST_LOG_LIMIT;
   const isSnapshotQueryEnabled = useDeferredDesktopActivation(
     isServiceReady && isPageActive,
   );
@@ -51,12 +59,12 @@ export function useDashboardStats() {
   const snapshotQuery = useQuery({
     queryKey: buildStartupSnapshotQueryKey(
       serviceStatus.addr,
-      STARTUP_SNAPSHOT_REQUEST_LOG_LIMIT,
+      requestLogLimit,
       localDayRange.dayStartTs,
     ),
     queryFn: () =>
       serviceClient.getStartupSnapshot({
-        requestLogLimit: STARTUP_SNAPSHOT_REQUEST_LOG_LIMIT,
+        requestLogLimit,
         dayStartTs: localDayRange.dayStartTs,
         dayEndTs: localDayRange.dayEndTs,
       }),
@@ -110,6 +118,7 @@ export function useDashboardStats() {
 
   return {
     stats: {
+      apiKeyCount: data?.apiKeys.length || 0,
       total: totalAccounts,
       available: availableAccounts,
       unavailable: unavailableAccounts,

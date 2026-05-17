@@ -106,6 +106,31 @@ pub(crate) fn read_requestlog_today_summary(
     })
 }
 
+pub(crate) fn read_requestlog_today_summary_for_key_ids(
+    day_start_ts: Option<i64>,
+    day_end_ts: Option<i64>,
+    key_ids: &[String],
+) -> Result<RequestLogTodaySummaryResult, String> {
+    let storage = open_storage().ok_or_else(|| "open storage failed".to_string())?;
+    let (start_ts, end_ts) = resolve_day_bounds_ts(day_start_ts, day_end_ts)?;
+    let summary = storage
+        .summarize_request_logs_between_for_keys(start_ts, end_ts, key_ids)
+        .map_err(|err| format!("summarize request logs failed: {err}"))?;
+    let input_tokens = summary.input_tokens.max(0);
+    let cached_input_tokens = summary.cached_input_tokens.max(0);
+    let output_tokens = summary.output_tokens.max(0);
+    let reasoning_output_tokens = summary.reasoning_output_tokens.max(0);
+    let non_cached_input_tokens = input_tokens.saturating_sub(cached_input_tokens);
+    Ok(RequestLogTodaySummaryResult {
+        input_tokens,
+        cached_input_tokens,
+        output_tokens,
+        reasoning_output_tokens,
+        today_tokens: non_cached_input_tokens.saturating_add(output_tokens),
+        estimated_cost: summary.estimated_cost_usd.max(0.0),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::{resolve_day_bounds_ts, MAX_REQUESTED_DAY_RANGE_SECS};

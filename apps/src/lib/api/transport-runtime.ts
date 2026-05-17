@@ -19,6 +19,15 @@ const CONFIGURED_WEB_RPC_BASE_URL = normalizeRpcBaseUrl(
 let runtimeCapabilitiesCache: RuntimeCapabilities | null = null;
 let runtimeCapabilitiesPromise: Promise<RuntimeCapabilities> | null = null;
 
+function runtimeProbeUrl(): string {
+  if (typeof window === "undefined") {
+    return DEFAULT_RUNTIME_PROBE_URL;
+  }
+  const probeUrl = new URL(DEFAULT_RUNTIME_PROBE_URL, window.location.origin);
+  probeUrl.searchParams.set("_", String(Date.now()));
+  return probeUrl.toString();
+}
+
 async function probeRuntimeCapabilities(): Promise<RuntimeCapabilities | null> {
   if (typeof window === "undefined") {
     return null;
@@ -26,16 +35,18 @@ async function probeRuntimeCapabilities(): Promise<RuntimeCapabilities | null> {
 
   try {
     const response = await fetchWithRetry(
-      DEFAULT_RUNTIME_PROBE_URL,
+      runtimeProbeUrl(),
       {
         method: "GET",
+        cache: "no-store",
         headers: {
           Accept: "application/json",
         },
       },
       {
-        timeoutMs: 1500,
-        retries: 0,
+        timeoutMs: 2500,
+        retries: 2,
+        retryDelayMs: 250,
         shouldRetryStatus: () => false,
       }
     );

@@ -278,14 +278,17 @@ pub(super) async fn rpc_proxy(
     if !is_json_content_type(&headers) {
         return (StatusCode::UNSUPPORTED_MEDIA_TYPE, "{}").into_response();
     }
-    let resp = state
+    let mut request = state
         .client
         .post(&state.service_rpc_url)
         .header("content-type", "application/json")
-        .header("x-codexmanager-rpc-token", &state.rpc_token)
-        .body(body)
-        .send()
-        .await;
+        .header("x-codexmanager-rpc-token", &state.rpc_token);
+    if let Some(session) = auth::current_app_session_from_headers(&headers) {
+        request = request
+            .header("x-codexmanager-rpc-actor-role", session.user.role)
+            .header("x-codexmanager-rpc-actor-user-id", session.user.id);
+    }
+    let resp = request.body(body).send().await;
     let resp = match resp {
         Ok(v) => v,
         Err(err) => {
@@ -311,7 +314,119 @@ pub(super) async fn rpc_proxy(
     out
 }
 
-const GATEWAY_PROXY_MAX_BODY_BYTES: usize = 256 * 1024 * 1024;
+pub(super) async fn author_content(State(state): State<Arc<AppState>>) -> Response {
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "authorContent/get",
+        "params": {}
+    })
+    .to_string();
+
+    let resp = state
+        .client
+        .post(&state.service_rpc_url)
+        .header("content-type", "application/json")
+        .header("x-codexmanager-rpc-token", &state.rpc_token)
+        .body(body)
+        .send()
+        .await;
+    let resp = match resp {
+        Ok(value) => value,
+        Err(err) => {
+            let msg = format_upstream_error_message(state.service_addr.as_str(), &err);
+            return (StatusCode::BAD_GATEWAY, msg).into_response();
+        }
+    };
+
+    let status = resp.status();
+    let payload = match resp.json::<serde_json::Value>().await {
+        Ok(value) => value,
+        Err(err) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                format!("author content response parse failed: {err}"),
+            )
+                .into_response();
+        }
+    };
+
+    if !status.is_success() {
+        return (
+            StatusCode::BAD_GATEWAY,
+            payload
+                .get("error")
+                .and_then(|value| value.get("message"))
+                .and_then(|value| value.as_str())
+                .unwrap_or("author content upstream request failed")
+                .to_string(),
+        )
+            .into_response();
+    }
+
+    let result = payload
+        .get("result")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let mut out = Response::new(axum::body::Body::from(result.to_string()));
+    *out.status_mut() = StatusCode::OK;
+    out.headers_mut().insert(
+        "content-type",
+        axum::http::HeaderValue::from_static("application/json"),
+    );
+    out
+}
+
+pub(super) async fn usage_refresh_events(State(state): State<Arc<AppState>>) -> Response {
+    let target_url = format!("http://{}/events/usage-refresh", state.service_addr.trim());
+    let resp = state
+        .client
+        .get(&target_url)
+        .header("accept", "text/event-stream")
+        .header("x-codexmanager-rpc-token", &state.rpc_token)
+        .send()
+        .await;
+    let resp = match resp {
+        Ok(value) => value,
+        Err(err) => {
+            let msg = format_upstream_error_message(state.service_addr.as_str(), &err);
+            return (StatusCode::BAD_GATEWAY, msg).into_response();
+        }
+    };
+
+    let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let mut out = Response::new(Body::from_stream(resp.bytes_stream()));
+    *out.status_mut() = status;
+    out.headers_mut().insert(
+        "content-type",
+        axum::http::HeaderValue::from_static("text/event-stream"),
+    );
+    out.headers_mut().insert(
+        "cache-control",
+        axum::http::HeaderValue::from_static("no-cache"),
+    );
+    out.headers_mut().insert(
+        "x-accel-buffering",
+        axum::http::HeaderValue::from_static("no"),
+    );
+    out
+}
+
+const DEFAULT_GATEWAY_PROXY_MAX_BODY_BYTES: usize = 0;
+const ENV_GATEWAY_PROXY_MAX_BODY_BYTES: &str = "CODEXMANAGER_GATEWAY_PROXY_MAX_BODY_BYTES";
+
+fn env_usize_or(name: &str, default: usize) -> usize {
+    read_env_trim(name)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(default)
+}
+
+fn gateway_proxy_max_body_bytes() -> usize {
+    env_usize_or(
+        ENV_GATEWAY_PROXY_MAX_BODY_BYTES,
+        DEFAULT_GATEWAY_PROXY_MAX_BODY_BYTES,
+    )
+}
 
 /// 函数 `gateway_proxy_target_url`
 ///
@@ -409,18 +524,27 @@ pub(super) async fn gateway_proxy(
 ) -> Response {
     let (parts, body) = request.into_parts();
     let target_url = gateway_proxy_target_url(state.service_addr.as_str(), &parts.uri);
-    let body = match to_bytes(body, GATEWAY_PROXY_MAX_BODY_BYTES).await {
-        Ok(body) => body,
-        Err(err) => {
-            return (
-                StatusCode::PAYLOAD_TOO_LARGE,
-                format!("gateway proxy request body error: {err}"),
-            )
-                .into_response();
+    let max_body_bytes = gateway_proxy_max_body_bytes();
+
+    let outbound_body = if max_body_bytes == 0 {
+        reqwest::Body::wrap_stream(body.into_data_stream())
+    } else {
+        match to_bytes(body, max_body_bytes).await {
+            Ok(body) => reqwest::Body::from(body),
+            Err(err) => {
+                return (
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    format!("gateway proxy request body error: {err}"),
+                )
+                    .into_response();
+            }
         }
     };
 
-    let mut outbound = state.client.request(parts.method, target_url).body(body);
+    let mut outbound = state
+        .client
+        .request(parts.method, target_url)
+        .body(outbound_body);
     for (name, value) in parts.headers.iter() {
         if should_skip_gateway_request_header(name, value) {
             continue;
@@ -497,10 +621,40 @@ pub(super) async fn quit(State(state): State<Arc<AppState>>) -> impl IntoRespons
 #[cfg(test)]
 mod tests {
     use super::{
-        format_upstream_error_message, gateway_proxy_target_url,
+        format_upstream_error_message, gateway_proxy_max_body_bytes, gateway_proxy_target_url,
         should_skip_gateway_request_header, should_skip_gateway_response_header,
+        ENV_GATEWAY_PROXY_MAX_BODY_BYTES,
     };
     use axum::http::{header, HeaderValue, Uri};
+
+    struct EnvGuard {
+        key: &'static str,
+        original: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let original = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, original }
+        }
+
+        fn clear(key: &'static str) -> Self {
+            let original = std::env::var_os(key);
+            std::env::remove_var(key);
+            Self { key, original }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(value) = &self.original {
+                std::env::set_var(self.key, value);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
 
     #[test]
     fn format_upstream_error_message_adds_docker_hint_for_host_internal() {
@@ -517,6 +671,20 @@ mod tests {
             gateway_proxy_target_url("localhost:48760", &uri),
             "http://localhost:48760/v1/responses?stream=true"
         );
+    }
+
+    #[test]
+    fn gateway_proxy_body_limit_defaults_to_unbounded() {
+        let _guard = EnvGuard::clear(ENV_GATEWAY_PROXY_MAX_BODY_BYTES);
+
+        assert_eq!(gateway_proxy_max_body_bytes(), 0);
+    }
+
+    #[test]
+    fn gateway_proxy_body_limit_allows_env_override() {
+        let _guard = EnvGuard::set(ENV_GATEWAY_PROXY_MAX_BODY_BYTES, "536870912");
+
+        assert_eq!(gateway_proxy_max_body_bytes(), 536_870_912);
     }
 
     #[test]

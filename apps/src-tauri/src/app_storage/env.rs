@@ -423,7 +423,8 @@ mod tests {
     #[test]
     fn runtime_rpc_token_path_prefers_env_relative_to_exe_dir() {
         let _guard = EnvGuard::set(ENV_RPC_TOKEN_FILE, Some("./data/custom.rpc-token"));
-        let db_path = PathBuf::from("C:/Users/test/AppData/Roaming/com.codexmanager.desktop/codexmanager.db");
+        let db_path =
+            PathBuf::from("C:/Users/test/AppData/Roaming/com.codexmanager.desktop/codexmanager.db");
         let expected = super::exe_dir().join("./data/custom.rpc-token");
         assert_eq!(resolve_runtime_rpc_token_path(&db_path), expected);
     }

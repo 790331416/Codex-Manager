@@ -289,6 +289,25 @@ impl<'a> GatewayUpstreamExecutionContext<'a> {
         elapsed_ms: u128,
         attempted_account_ids: Option<&[String]>,
     ) {
+        let platform_model_for_log = self.model_for_log.or(model_for_log);
+        let mapped_upstream_model = final_account_id.and_then(|account_id| {
+            let platform_model = platform_model_for_log?;
+            self.storage
+                .find_enabled_model_source_mapping(platform_model, "openai_account", account_id)
+                .ok()
+                .flatten()
+                .map(|mapping| mapping.upstream_model)
+                .filter(|upstream_model| !upstream_model.trim().is_empty())
+        });
+        let upstream_model_for_log = final_account_id
+            .and_then(|_| {
+                model_for_log.filter(|candidate_model| {
+                    platform_model_for_log
+                        .map(|platform_model| platform_model != *candidate_model)
+                        .unwrap_or(false)
+                })
+            })
+            .or(mapped_upstream_model.as_deref());
         super::super::super::request_log::write_request_log_with_attempts(
             self.storage,
             super::super::super::request_log::RequestLogTraceContext {
@@ -299,13 +318,16 @@ impl<'a> GatewayUpstreamExecutionContext<'a> {
                 request_type: Some("http"),
                 service_tier: self.service_tier_for_log,
                 effective_service_tier: self.effective_service_tier_for_log,
+                upstream_model: upstream_model_for_log,
+                actual_source_kind: final_account_id.map(|_| "openai_account"),
+                actual_source_id: final_account_id,
                 ..Default::default()
             },
             Some(self.key_id),
             final_account_id,
             self.path,
             self.request_method,
-            model_for_log,
+            platform_model_for_log,
             self.reasoning_for_log,
             upstream_url,
             Some(status_code),

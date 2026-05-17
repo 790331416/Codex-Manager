@@ -227,6 +227,7 @@ use cooldown::{
 #[cfg(test)]
 pub(super) use failover::should_failover_after_refresh;
 use failover::should_failover_from_cached_snapshot;
+use failover::should_failover_from_low_quota_snapshot;
 use http_bridge::respond_with_upstream;
 pub(crate) use http_bridge::summarize_upstream_error_hint_from_body;
 pub(crate) use http_bridge::PassthroughSseProtocol;
@@ -470,6 +471,21 @@ pub(crate) fn set_route_strategy(strategy: &str) -> Result<&'static str, String>
 /// 返回函数执行结果
 pub(crate) fn current_free_account_max_model() -> String {
     runtime_config::current_free_account_max_model()
+}
+
+/// 函数 `current_compact_model_override`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-02
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 返回函数执行结果
+pub(crate) fn current_compact_model_override() -> Option<String> {
+    runtime_config::current_compact_model_override()
 }
 
 /// 函数 `current_model_forward_rules`

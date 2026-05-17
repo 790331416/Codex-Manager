@@ -72,7 +72,7 @@ pub fn set_web_access_password(password: Option<&str>) -> Result<bool, String> {
 ///
 /// # 返回
 /// 返回函数执行结果
-pub fn web_auth_status_value() -> Result<Value, String> {
+pub fn web_access_auth_status_value() -> Result<Value, String> {
     Ok(serde_json::json!({
         "passwordConfigured": web_access_password_configured(),
     }))

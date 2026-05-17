@@ -3,6 +3,7 @@ use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::Serialize;
 use serde_json::json;
+use std::io::{BufRead, BufReader, Read};
 use std::time::Duration;
 use std::time::Instant;
 
@@ -187,6 +188,7 @@ fn warmup_single_account(
                         started_at.elapsed().as_millis() as i64,
                         ok_message.as_str(),
                     );
+                    let _ = crate::usage_refresh::enqueue_usage_refresh_for_account(&account.id);
                     AccountWarmupItemResult {
                         account_id: account.id,
                         account_name,
@@ -377,12 +379,12 @@ fn send_warmup_request(
         .send()
         .map_err(|err| format!("warmup request failed: {err}"))?;
 
-    if response.status().is_success() {
-        return Ok(());
-    }
-
     let status = response.status();
     let headers = response.headers().clone();
+    if status.is_success() {
+        return consume_warmup_stream(response);
+    }
+
     let body_text = response.text().unwrap_or_default();
     Err(summarize_warmup_error(
         status.as_u16(),
@@ -391,17 +393,137 @@ fn send_warmup_request(
     ))
 }
 
+fn consume_warmup_stream<R: Read>(reader: R) -> Result<(), String> {
+    let mut reader = BufReader::new(reader);
+    let mut line = String::new();
+    let mut event_name: Option<String> = None;
+    let mut data_lines: Vec<String> = Vec::new();
+
+    loop {
+        line.clear();
+        let bytes = reader
+            .read_line(&mut line)
+            .map_err(|err| format!("warmup stream read failed: {err}"))?;
+        if bytes == 0 {
+            if process_warmup_sse_event(event_name.as_deref(), &data_lines)? {
+                return Ok(());
+            }
+            return Err("warmup stream ended before response.completed".to_string());
+        }
+
+        let trimmed = line.trim_end_matches(['\r', '\n']);
+        if trimmed.is_empty() {
+            if process_warmup_sse_event(event_name.as_deref(), &data_lines)? {
+                return Ok(());
+            }
+            event_name = None;
+            data_lines.clear();
+            continue;
+        }
+        if let Some(value) = trimmed.strip_prefix("event:") {
+            event_name = Some(value.trim().to_string());
+            continue;
+        }
+        if let Some(value) = trimmed.strip_prefix("data:") {
+            data_lines.push(value.trim().to_string());
+        }
+    }
+}
+
+fn process_warmup_sse_event(
+    event_name: Option<&str>,
+    data_lines: &[String],
+) -> Result<bool, String> {
+    let event_name = event_name.map(str::trim).filter(|value| !value.is_empty());
+    if let Some(event) = event_name {
+        if is_warmup_terminal_event(event) {
+            return Ok(true);
+        }
+    }
+
+    if data_lines.is_empty() {
+        if let Some(event) = event_name {
+            if is_warmup_error_event(event) {
+                return Err(format!("warmup stream error event: {event}"));
+            }
+        }
+        return Ok(false);
+    }
+    let data = data_lines.join("\n");
+    let trimmed = data.trim();
+    if trimmed == "[DONE]" {
+        return Ok(true);
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+        return Ok(false);
+    };
+    let event_type = value
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .or(event_name);
+    if let Some(event_type) = event_type {
+        if is_warmup_terminal_event(event_type) {
+            return Ok(true);
+        }
+        if is_warmup_error_event(event_type) {
+            return Err(format!(
+                "warmup stream error event: {}; {}",
+                event_type,
+                summarize_warmup_stream_error(&value)
+            ));
+        }
+    }
+    if let Some(event) = event_name {
+        if is_warmup_error_event(event) {
+            return Err(format!("warmup stream error event: {event}"));
+        }
+    }
+    Ok(false)
+}
+
+fn is_warmup_terminal_event(value: &str) -> bool {
+    matches!(value.trim(), "response.completed" | "response.done")
+}
+
+fn is_warmup_error_event(value: &str) -> bool {
+    matches!(
+        value.trim(),
+        "error" | "response.failed" | "response.incomplete"
+    )
+}
+
+fn summarize_warmup_stream_error(value: &serde_json::Value) -> String {
+    value
+        .get("error")
+        .or_else(|| {
+            value
+                .get("response")
+                .and_then(|response| response.get("error"))
+        })
+        .and_then(|error| {
+            error
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .or_else(|| error.as_str())
+        })
+        .map(str::trim)
+        .filter(|message| !message.is_empty())
+        .unwrap_or("unknown stream error")
+        .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        build_warmup_headers, resolve_target_accounts, resolve_warmup_model_slug,
-        should_retry_warmup_with_refresh, DEFAULT_WARMUP_MODEL,
+        build_warmup_headers, consume_warmup_stream, resolve_target_accounts,
+        resolve_warmup_model_slug, should_retry_warmup_with_refresh, DEFAULT_WARMUP_MODEL,
     };
     use crate::apikey_models::save_managed_model_catalog_with_storage;
     use codexmanager_core::rpc::types::{
         ManagedModelCatalogEntry, ManagedModelCatalogResult, ModelInfo,
     };
     use codexmanager_core::storage::{now_ts, Account, Storage, Token};
+    use std::io::Cursor;
 
     fn make_model(slug: &str, sort_index: i64, supported_in_api: bool) -> ManagedModelCatalogEntry {
         ManagedModelCatalogEntry {
@@ -547,6 +669,40 @@ mod tests {
         assert!(headers.get("openai-organization").is_none());
         assert!(headers.get("openai-project").is_none());
         assert!(headers.get("client_version").is_none());
+    }
+
+    #[test]
+    fn consume_warmup_stream_waits_for_response_completed() {
+        let stream = Cursor::new(
+            "event: response.created\n\
+             data: {\"type\":\"response.created\"}\n\n\
+             event: response.completed\n\
+             data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\"}}\n\n",
+        );
+
+        assert!(consume_warmup_stream(stream).is_ok());
+    }
+
+    #[test]
+    fn consume_warmup_stream_rejects_incomplete_stream() {
+        let stream = Cursor::new(
+            "event: response.created\n\
+             data: {\"type\":\"response.created\"}\n\n",
+        );
+
+        let err = consume_warmup_stream(stream).expect_err("stream should be incomplete");
+        assert!(err.contains("before response.completed"));
+    }
+
+    #[test]
+    fn consume_warmup_stream_reports_error_event() {
+        let stream = Cursor::new(
+            "event: response.failed\n\
+             data: {\"type\":\"response.failed\",\"error\":{\"message\":\"quota exceeded\"}}\n\n",
+        );
+
+        let err = consume_warmup_stream(stream).expect_err("stream should fail");
+        assert!(err.contains("quota exceeded"));
     }
 }
 

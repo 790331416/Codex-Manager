@@ -52,7 +52,7 @@ const SETTINGS_SNAPSHOT = {
 };
 
 async function mockRuntime(page: import("@playwright/test").Page) {
-  await page.route("**/api/runtime", async (route) => {
+  await page.route("**/api/runtime**", async (route) => {
     await route.fulfill({
       contentType: "application/json; charset=utf-8",
       body: JSON.stringify({
@@ -92,7 +92,7 @@ async function mockApiKeyRpc(
       },
     ];
 
-  await page.route("**/api/rpc", async (route) => {
+  await page.route("**/api/rpc**", async (route) => {
     const payload = route.request().postDataJSON() as Record<string, unknown>;
     const method = typeof payload?.method === "string" ? payload.method : "";
     const id = payload?.id ?? 1;
@@ -259,6 +259,8 @@ test("api key modal can select hybrid rotation on create", async ({ page }) => {
 
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("heading", { name: "创建平台密钥" })).toBeVisible();
+  await expect(dialog.getByLabel("自定义 API Key (可选)")).toBeVisible();
+  await dialog.getByLabel("自定义 API Key (可选)").fill("sk-cm-custom-fixed");
   await dialog.getByText("账号轮转", { exact: true }).click();
   await page.getByText("混合轮转（账号优先）", { exact: true }).click();
   await expect(dialog.getByText("账号组筛选", { exact: true })).toBeVisible();
@@ -267,4 +269,5 @@ test("api key modal can select hybrid rotation on create", async ({ page }) => {
   await expect.poll(() => createPayloads.length).toBe(1);
   const params = createPayloads[0]?.params as Record<string, unknown>;
   expect(params.rotationStrategy).toBe("hybrid_rotation");
+  expect(params.customKey).toBe("sk-cm-custom-fixed");
 });

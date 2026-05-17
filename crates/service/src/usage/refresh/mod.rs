@@ -1,7 +1,7 @@
 use codexmanager_core::auth::{extract_token_exp, DEFAULT_CLIENT_ID, DEFAULT_ISSUER};
 use codexmanager_core::storage::{now_ts, Account, Storage, Token};
 use codexmanager_core::usage::parse_usage_snapshot;
-use crossbeam_channel::unbounded;
+use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TrySendError};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -56,6 +56,8 @@ const ENV_USAGE_POLLING_ENABLED: &str = "CODEXMANAGER_USAGE_POLLING_ENABLED";
 const ENV_USAGE_POLL_INTERVAL_SECS: &str = "CODEXMANAGER_USAGE_POLL_INTERVAL_SECS";
 const ENV_USAGE_POLL_BATCH_LIMIT: &str = "CODEXMANAGER_USAGE_POLL_BATCH_LIMIT";
 const ENV_USAGE_POLL_CYCLE_BUDGET_SECS: &str = "CODEXMANAGER_USAGE_POLL_CYCLE_BUDGET_SECS";
+const ENV_AUTO_REFRESH_AFTER_ACCOUNT_ADD: &str =
+    "CODEXMANAGER_AUTO_USAGE_REFRESH_AFTER_ACCOUNT_ADD";
 const ENV_GATEWAY_KEEPALIVE_ENABLED: &str = "CODEXMANAGER_GATEWAY_KEEPALIVE_ENABLED";
 const ENV_GATEWAY_KEEPALIVE_INTERVAL_SECS: &str = "CODEXMANAGER_GATEWAY_KEEPALIVE_INTERVAL_SECS";
 const ENV_TOKEN_REFRESH_POLLING_ENABLED: &str = "CODEXMANAGER_TOKEN_REFRESH_POLLING_ENABLED";
@@ -141,6 +143,9 @@ type UsageRefreshCompletedHandler = Arc<dyn Fn(UsageRefreshCompletedEvent) + Sen
 
 static USAGE_REFRESH_COMPLETED_HANDLER: OnceLock<Mutex<Option<UsageRefreshCompletedHandler>>> =
     OnceLock::new();
+static USAGE_REFRESH_COMPLETED_SUBSCRIBERS: OnceLock<
+    Mutex<Vec<Sender<UsageRefreshCompletedEvent>>>,
+> = OnceLock::new();
 
 pub(crate) use self::batch::refresh_usage_for_all_accounts;
 use self::batch::refresh_usage_for_polling_batch;
@@ -168,18 +173,37 @@ where
     *guard = Some(Arc::new(handler));
 }
 
+pub(crate) fn subscribe_usage_refresh_completed() -> Receiver<UsageRefreshCompletedEvent> {
+    let (sender, receiver) = bounded(32);
+    let subscribers = USAGE_REFRESH_COMPLETED_SUBSCRIBERS.get_or_init(|| Mutex::new(Vec::new()));
+    let mut guard =
+        crate::lock_utils::lock_recover(subscribers, "usage_refresh_completed_subscribers");
+    guard.push(sender);
+    receiver
+}
+
 pub(crate) fn notify_usage_refresh_completed(source: &'static str, processed: usize, total: usize) {
+    let event = UsageRefreshCompletedEvent {
+        source,
+        processed,
+        total,
+        completed_at: now_ts(),
+    };
     let handler = USAGE_REFRESH_COMPLETED_HANDLER.get().and_then(|slot| {
         let guard = crate::lock_utils::lock_recover(slot, "usage_refresh_completed_handler");
         guard.clone()
     });
 
     if let Some(handler) = handler {
-        handler(UsageRefreshCompletedEvent {
-            source,
-            processed,
-            total,
-            completed_at: now_ts(),
+        handler(event.clone());
+    }
+
+    if let Some(subscribers) = USAGE_REFRESH_COMPLETED_SUBSCRIBERS.get() {
+        let mut guard =
+            crate::lock_utils::lock_recover(subscribers, "usage_refresh_completed_subscribers");
+        guard.retain(|sender| match sender.try_send(event.clone()) {
+            Ok(()) | Err(TrySendError::Full(_)) => true,
+            Err(TrySendError::Disconnected(_)) => false,
         });
     }
 }
@@ -290,6 +314,32 @@ pub(crate) fn enqueue_usage_refresh_for_account(account_id: &str) -> bool {
             );
         }
     })
+}
+
+pub(crate) fn enqueue_usage_refresh_after_account_add(account_id: &str) -> bool {
+    if !auto_refresh_after_account_add_enabled() {
+        return false;
+    }
+    let queued = enqueue_usage_refresh_for_account(account_id);
+    if queued {
+        log::info!("queued usage refresh after account add: account_id={account_id}");
+    }
+    queued
+}
+
+fn auto_refresh_after_account_add_enabled() -> bool {
+    env_bool_or(ENV_AUTO_REFRESH_AFTER_ACCOUNT_ADD, true)
+}
+
+fn env_bool_or(name: &str, default: bool) -> bool {
+    let Some(raw) = std::env::var(name).ok() else {
+        return default;
+    };
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => true,
+        "0" | "false" | "no" | "off" => false,
+        _ => default,
+    }
 }
 
 /// 函数 `reset_usage_poll_cursor_for_tests`

@@ -21,9 +21,7 @@ const ENV_SERVICE_ADDR: &str = "CODEXMANAGER_SERVICE_ADDR";
 /// 返回函数执行结果
 pub(super) fn validate_initialize_response(v: &serde_json::Value) -> Result<(), String> {
     // 连接探测必须确认对端确实是 CodexManager 服务，避免端口被其他服务占用时误判“已连接”。
-    let result = v
-        .get("result")
-        .and_then(|r| r.as_object());
+    let result = v.get("result").and_then(|r| r.as_object());
     let user_agent = result
         .and_then(|r| r.get("userAgent").or_else(|| r.get("user_agent")))
         .and_then(|s| s.as_str())

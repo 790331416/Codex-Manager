@@ -34,6 +34,7 @@ fn gateway_usage_limit_in_sse_marks_request_as_failover() {
 
     let storage = Storage::open(&db_path).expect("open db");
     storage.init().expect("init db");
+    seed_model_catalog_models(&storage, &["gpt-5.3-codex"]);
     let now = now_ts();
 
     // 两个候选账号都健康（10%），以保证 has_more_candidates=true 让
@@ -188,6 +189,7 @@ fn gateway_low_quota_account_is_skipped_on_first_request() {
 
     let storage = Storage::open(&db_path).expect("open db");
     storage.init().expect("init db");
+    seed_model_catalog_models(&storage, &["gpt-5.3-codex"]);
     let now = now_ts();
 
     // sort=0 的账号快照 99%（快耗尽），sort=1 的健康（10%）。

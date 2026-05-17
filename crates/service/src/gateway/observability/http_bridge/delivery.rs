@@ -1,3 +1,4 @@
+use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use std::sync::{Arc, Mutex};
 use tiny_http::{Header, Request, Response, StatusCode};
@@ -653,6 +654,9 @@ fn convert_success_body_for_adapter(
         ResponseAdapter::ChatCompletionsFromResponses => {
             convert_responses_body_to_chat_completions(body)
         }
+        ResponseAdapter::CompactFromChatCompletions => {
+            convert_chat_completions_body_to_compact(body)
+        }
         ResponseAdapter::ImagesB64JsonFromResponses => {
             convert_responses_body_to_images(body, ImagesResponseFormat::B64Json)
         }
@@ -785,6 +789,53 @@ fn convert_responses_body_to_chat_completions(body: &[u8]) -> Option<Vec<u8>> {
     serde_json::to_vec(&completion).ok()
 }
 
+fn collect_chat_completion_message_text(value: &Value, out: &mut String) {
+    match value {
+        Value::String(text) => out.push_str(text),
+        Value::Array(items) => {
+            for item in items {
+                collect_chat_completion_message_text(item, out);
+            }
+        }
+        Value::Object(obj) => {
+            if let Some(text) = obj.get("text").and_then(Value::as_str) {
+                out.push_str(text);
+            } else if let Some(content) = obj.get("content") {
+                collect_chat_completion_message_text(content, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn convert_chat_completions_body_to_compact(body: &[u8]) -> Option<Vec<u8>> {
+    let value = serde_json::from_slice::<Value>(body).ok()?;
+    let mut text = String::new();
+    if let Some(message_content) = value
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+    {
+        collect_chat_completion_message_text(message_content, &mut text);
+    }
+    if text.trim().is_empty() {
+        return None;
+    }
+    serde_json::to_vec(&json!({
+        "output": [{
+            "type": "message",
+            "role": "assistant",
+            "content": [{
+                "type": "output_text",
+                "text": text
+            }]
+        }]
+    }))
+    .ok()
+}
+
 fn convert_responses_body_to_images(
     body: &[u8],
     response_format: ImagesResponseFormat,
@@ -889,6 +940,14 @@ fn convert_error_body_for_adapter(response_adapter: ResponseAdapter, message: &s
             }
         }))
         .unwrap_or_else(|_| message.as_bytes().to_vec()),
+        ResponseAdapter::CompactFromChatCompletions => serde_json::to_vec(&json!({
+            "error": {
+                "message": message,
+                "type": "upstream_error",
+                "code": "upstream_error"
+            }
+        }))
+        .unwrap_or_else(|_| message.as_bytes().to_vec()),
         ResponseAdapter::ImagesB64JsonFromResponses | ResponseAdapter::ImagesUrlFromResponses => {
             serde_json::to_vec(&json!({
                 "error": {
@@ -914,6 +973,7 @@ fn compatibility_stream_content_type(
     match response_adapter {
         ResponseAdapter::AnthropicMessagesFromResponses => "text/event-stream",
         ResponseAdapter::ChatCompletionsFromResponses => "text/event-stream",
+        ResponseAdapter::CompactFromChatCompletions => "application/json",
         ResponseAdapter::ImagesB64JsonFromResponses | ResponseAdapter::ImagesUrlFromResponses => {
             "text/event-stream"
         }
@@ -1055,10 +1115,122 @@ fn classify_compact_non_success_kind(
 /// # 返回
 /// 返回函数执行结果
 fn compact_success_body_is_valid(body: &[u8]) -> bool {
-    serde_json::from_slice::<Value>(body)
-        .ok()
-        .and_then(|value| value.get("output").cloned())
-        .is_some_and(|output| output.is_array())
+    serde_json::from_slice::<CompactHistoryResponse>(body).is_ok()
+}
+
+#[derive(Debug, Deserialize)]
+struct CompactHistoryResponse {
+    #[allow(dead_code)]
+    output: Vec<ResponseItem>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ResponseItem {
+    Message {
+        #[allow(dead_code)]
+        role: String,
+        #[allow(dead_code)]
+        content: Vec<Value>,
+    },
+    Reasoning {
+        #[allow(dead_code)]
+        summary: Vec<Value>,
+        #[allow(dead_code)]
+        encrypted_content: Option<String>,
+        #[allow(dead_code)]
+        content: Option<Vec<Value>>,
+    },
+    LocalShellCall {
+        #[allow(dead_code)]
+        call_id: Option<String>,
+        #[allow(dead_code)]
+        status: Value,
+        #[allow(dead_code)]
+        action: Value,
+    },
+    FunctionCall {
+        #[allow(dead_code)]
+        name: String,
+        #[allow(dead_code)]
+        namespace: Option<String>,
+        #[allow(dead_code)]
+        arguments: String,
+        #[allow(dead_code)]
+        call_id: String,
+    },
+    ToolSearchCall {
+        #[allow(dead_code)]
+        call_id: Option<String>,
+        #[allow(dead_code)]
+        status: Option<String>,
+        #[allow(dead_code)]
+        execution: String,
+        #[allow(dead_code)]
+        arguments: Value,
+    },
+    FunctionCallOutput {
+        #[allow(dead_code)]
+        call_id: String,
+        #[allow(dead_code)]
+        output: Value,
+    },
+    CustomToolCall {
+        #[allow(dead_code)]
+        status: Option<String>,
+        #[allow(dead_code)]
+        call_id: String,
+        #[allow(dead_code)]
+        name: String,
+        #[allow(dead_code)]
+        input: String,
+    },
+    CustomToolCallOutput {
+        #[allow(dead_code)]
+        call_id: String,
+        #[allow(dead_code)]
+        name: Option<String>,
+        #[allow(dead_code)]
+        output: Value,
+    },
+    ToolSearchOutput {
+        #[allow(dead_code)]
+        call_id: Option<String>,
+        #[allow(dead_code)]
+        status: String,
+        #[allow(dead_code)]
+        execution: String,
+        #[allow(dead_code)]
+        tools: Vec<Value>,
+    },
+    WebSearchCall {
+        #[allow(dead_code)]
+        status: Option<String>,
+        #[allow(dead_code)]
+        action: Option<Value>,
+    },
+    ImageGenerationCall {
+        #[allow(dead_code)]
+        id: String,
+        #[allow(dead_code)]
+        status: String,
+        #[allow(dead_code)]
+        revised_prompt: Option<String>,
+        #[allow(dead_code)]
+        result: String,
+    },
+    #[serde(alias = "compaction_summary")]
+    Compaction {
+        #[allow(dead_code)]
+        encrypted_content: String,
+    },
+    CompactionTrigger,
+    ContextCompaction {
+        #[allow(dead_code)]
+        encrypted_content: Option<String>,
+    },
+    #[serde(other)]
+    Other,
 }
 
 /// 函数 `build_invalid_compact_success_message`
@@ -1111,7 +1283,7 @@ fn build_invalid_compact_success_message(
         );
     }
     format!(
-        "invalid upstream compact response: missing output array{}",
+        "invalid upstream compact response: cannot parse compact output{}",
         compact_debug_suffix(
             Some(kind),
             request_id,
@@ -1863,6 +2035,7 @@ pub(crate) fn respond_with_upstream(
                     None,
                 ));
             }
+            ResponseAdapter::CompactFromChatCompletions => unreachable!(),
             ResponseAdapter::ImagesB64JsonFromResponses
             | ResponseAdapter::ImagesUrlFromResponses => {
                 let response_format = if response_adapter == ResponseAdapter::ImagesUrlFromResponses
@@ -2447,6 +2620,82 @@ pub(crate) fn respond_with_upstream(
                 None,
             ))
         }
+        ResponseAdapter::CompactFromChatCompletions => {
+            let status = StatusCode(upstream.status().as_u16());
+            let mut headers = Vec::new();
+            for (name, value) in upstream.headers().iter() {
+                let name_str = name.as_str();
+                if name_str.eq_ignore_ascii_case("transfer-encoding")
+                    || name_str.eq_ignore_ascii_case("content-length")
+                    || name_str.eq_ignore_ascii_case("connection")
+                {
+                    continue;
+                }
+                if let Ok(header) = Header::from_bytes(name_str.as_bytes(), value.as_bytes()) {
+                    headers.push(header);
+                }
+            }
+            replace_content_type_header(&mut headers, "application/json");
+            if let Some(trace_id) = trace_id {
+                push_trace_id_header(&mut headers, trace_id);
+            }
+            let upstream_body = upstream
+                .bytes()
+                .map_err(|err| format!("read upstream body failed: {err}"))?;
+            let usage = serde_json::from_slice::<Value>(upstream_body.as_ref())
+                .ok()
+                .map(|value| parse_usage_from_json(&value))
+                .unwrap_or_default();
+            let response_body = if status.0 < 400 {
+                convert_chat_completions_body_to_compact(upstream_body.as_ref())
+                    .unwrap_or_else(|| upstream_body.to_vec())
+            } else {
+                upstream_body.to_vec()
+            };
+            let upstream_error_hint = (status.0 >= 400)
+                .then(|| {
+                    with_upstream_debug_suffix(
+                        extract_error_hint_from_body(status.0, upstream_body.as_ref()),
+                        None,
+                        upstream_request_id.as_deref(),
+                        upstream_cf_ray.as_deref(),
+                        upstream_auth_error.as_deref(),
+                        upstream_identity_error_code.as_deref(),
+                    )
+                })
+                .flatten();
+            let len = Some(response_body.len());
+            let response = Response::new(
+                status,
+                headers,
+                std::io::Cursor::new(response_body),
+                len,
+                None,
+            );
+            let delivery_error = request.respond(response).err().map(|err| err.to_string());
+            Ok(with_bridge_debug_meta(
+                UpstreamResponseBridgeResult {
+                    usage,
+                    stream_terminal_seen: true,
+                    stream_terminal_error: None,
+                    delivery_error,
+                    upstream_error_hint,
+                    delivered_status_code: None,
+                    upstream_request_id: None,
+                    upstream_cf_ray: None,
+                    upstream_auth_error: None,
+                    upstream_identity_error_code: None,
+                    upstream_content_type: None,
+                    last_sse_event_type: None,
+                },
+                &upstream_request_id,
+                &upstream_cf_ray,
+                &upstream_auth_error,
+                &upstream_identity_error_code,
+                &upstream_content_type,
+                None,
+            ))
+        }
         ResponseAdapter::AnthropicMessagesFromResponses
         | ResponseAdapter::ChatCompletionsFromResponses
         | ResponseAdapter::ImagesB64JsonFromResponses
@@ -2730,6 +2979,7 @@ pub(crate) fn respond_with_stream_upstream(
                     None,
                 ));
             }
+            ResponseAdapter::CompactFromChatCompletions => unreachable!(),
             ResponseAdapter::ImagesB64JsonFromResponses
             | ResponseAdapter::ImagesUrlFromResponses => {
                 let response_format = if response_adapter == ResponseAdapter::ImagesUrlFromResponses
@@ -3283,6 +3533,82 @@ pub(crate) fn respond_with_stream_upstream(
                 None,
             ))
         }
+        ResponseAdapter::CompactFromChatCompletions => {
+            let status = StatusCode(upstream.status().as_u16());
+            let mut headers = Vec::new();
+            for (name, value) in upstream.headers().iter() {
+                let name_str = name.as_str();
+                if name_str.eq_ignore_ascii_case("transfer-encoding")
+                    || name_str.eq_ignore_ascii_case("content-length")
+                    || name_str.eq_ignore_ascii_case("connection")
+                {
+                    continue;
+                }
+                if let Ok(header) = Header::from_bytes(name_str.as_bytes(), value.as_bytes()) {
+                    headers.push(header);
+                }
+            }
+            replace_content_type_header(&mut headers, "application/json");
+            if let Some(trace_id) = trace_id {
+                push_trace_id_header(&mut headers, trace_id);
+            }
+            let upstream_body = upstream
+                .read_all_bytes()
+                .map_err(|err| format!("read upstream body failed: {err}"))?;
+            let usage = serde_json::from_slice::<Value>(upstream_body.as_ref())
+                .ok()
+                .map(|value| parse_usage_from_json(&value))
+                .unwrap_or_default();
+            let response_body = if status.0 < 400 {
+                convert_chat_completions_body_to_compact(upstream_body.as_ref())
+                    .unwrap_or_else(|| upstream_body.to_vec())
+            } else {
+                upstream_body.to_vec()
+            };
+            let upstream_error_hint = (status.0 >= 400)
+                .then(|| {
+                    with_upstream_debug_suffix(
+                        extract_error_hint_from_body(status.0, upstream_body.as_ref()),
+                        None,
+                        upstream_request_id.as_deref(),
+                        upstream_cf_ray.as_deref(),
+                        upstream_auth_error.as_deref(),
+                        upstream_identity_error_code.as_deref(),
+                    )
+                })
+                .flatten();
+            let len = Some(response_body.len());
+            let response = Response::new(
+                status,
+                headers,
+                std::io::Cursor::new(response_body),
+                len,
+                None,
+            );
+            let delivery_error = request.respond(response).err().map(|err| err.to_string());
+            Ok(with_bridge_debug_meta(
+                UpstreamResponseBridgeResult {
+                    usage,
+                    stream_terminal_seen: true,
+                    stream_terminal_error: None,
+                    delivery_error,
+                    upstream_error_hint,
+                    delivered_status_code: None,
+                    upstream_request_id: None,
+                    upstream_cf_ray: None,
+                    upstream_auth_error: None,
+                    upstream_identity_error_code: None,
+                    upstream_content_type: None,
+                    last_sse_event_type: None,
+                },
+                &upstream_request_id,
+                &upstream_cf_ray,
+                &upstream_auth_error,
+                &upstream_identity_error_code,
+                &upstream_content_type,
+                None,
+            ))
+        }
         ResponseAdapter::AnthropicMessagesFromResponses
         | ResponseAdapter::ChatCompletionsFromResponses
         | ResponseAdapter::ImagesB64JsonFromResponses
@@ -3320,6 +3646,7 @@ fn resolve_stream_keepalive_frame(
         }
         ResponseAdapter::AnthropicMessagesFromResponses
         | ResponseAdapter::ChatCompletionsFromResponses
+        | ResponseAdapter::CompactFromChatCompletions
         | ResponseAdapter::ImagesB64JsonFromResponses
         | ResponseAdapter::ImagesUrlFromResponses
         | ResponseAdapter::GeminiJson
@@ -3333,6 +3660,7 @@ fn resolve_stream_keepalive_frame(
 mod tests {
     use super::{
         classify_compact_non_success_kind, compact_non_success_body_should_be_normalized,
+        compact_success_body_is_valid, convert_chat_completions_body_to_compact,
         convert_responses_body_to_chat_completions,
         convert_responses_body_to_gemini_generate_content, convert_responses_body_to_images,
         force_openai_responses_stream_content_type, gemini_cli_wrap_response_envelope, Header,
@@ -3397,6 +3725,98 @@ mod tests {
             ),
             "cloudflare_edge"
         );
+    }
+
+    #[test]
+    fn compact_success_body_matches_official_compact_response_shape() {
+        assert!(compact_success_body_is_valid(
+            json!({
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{ "type": "input_text", "text": "keep context" }]
+                    },
+                    {
+                        "type": "compaction",
+                        "encrypted_content": "summary_payload"
+                    }
+                ]
+            })
+            .to_string()
+            .as_bytes()
+        ));
+        assert!(compact_success_body_is_valid(
+            json!({
+                "output": [
+                    {
+                        "type": "context_compaction",
+                        "encrypted_content": "summary_payload"
+                    }
+                ]
+            })
+            .to_string()
+            .as_bytes()
+        ));
+        assert!(compact_success_body_is_valid(
+            json!({ "output": [] }).to_string().as_bytes()
+        ));
+        assert!(compact_success_body_is_valid(
+            json!({
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{ "type": "output_text", "text": "done" }]
+                    }
+                ]
+            })
+            .to_string()
+            .as_bytes()
+        ));
+        assert!(!compact_success_body_is_valid(
+            json!({ "id": "resp_missing_output" })
+                .to_string()
+                .as_bytes()
+        ));
+        assert!(!compact_success_body_is_valid(
+            json!({
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant"
+                    }
+                ]
+            })
+            .to_string()
+            .as_bytes()
+        ));
+    }
+
+    #[test]
+    fn chat_completions_body_converts_to_compact_response_shape() {
+        let body = json!({
+            "id": "chatcmpl_custom_compact",
+            "object": "chat.completion",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "压缩摘要"
+                },
+                "finish_reason": "stop"
+            }]
+        });
+        let converted = convert_chat_completions_body_to_compact(body.to_string().as_bytes())
+            .expect("convert chat completions response");
+
+        assert!(compact_success_body_is_valid(converted.as_slice()));
+        let value: serde_json::Value =
+            serde_json::from_slice(converted.as_slice()).expect("compact json");
+        assert_eq!(value["output"][0]["type"], "message");
+        assert_eq!(value["output"][0]["role"], "assistant");
+        assert_eq!(value["output"][0]["content"][0]["type"], "output_text");
+        assert_eq!(value["output"][0]["content"][0]["text"], "压缩摘要");
     }
 
     #[test]

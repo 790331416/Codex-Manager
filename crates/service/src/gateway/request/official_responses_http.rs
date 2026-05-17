@@ -65,15 +65,6 @@ pub(crate) fn is_responses_path(path: &str) -> bool {
 }
 
 fn ensure_non_empty_instructions(path: &str, obj: &mut Map<String, Value>) -> bool {
-    if is_compact_path(path) {
-        match obj.get("instructions") {
-            Some(Value::String(_)) => return false,
-            Some(Value::Null) | None => {}
-            Some(_) => return false,
-        }
-        obj.insert("instructions".to_string(), Value::String(String::new()));
-        return true;
-    }
     if !is_standard_responses_path(path) {
         return false;
     }
@@ -306,6 +297,25 @@ fn ensure_prompt_cache_key(
     true
 }
 
+fn normalize_compact_instructions(path: &str, obj: &mut Map<String, Value>) -> bool {
+    if !is_compact_path(path) {
+        return false;
+    }
+    let Some(instructions) = obj.get("instructions") else {
+        return false;
+    };
+    let should_remove = match instructions {
+        Value::String(text) => text.is_empty(),
+        Value::Null => true,
+        _ => true,
+    };
+    if !should_remove {
+        return false;
+    }
+    obj.remove("instructions");
+    true
+}
+
 fn ensure_tool_choice_auto(path: &str, obj: &mut Map<String, Value>) -> bool {
     if !is_standard_responses_path(path) {
         return false;
@@ -428,7 +438,7 @@ fn ensure_reasoning_include(path: &str, obj: &mut Map<String, Value>) -> bool {
 }
 
 fn normalize_service_tier(path: &str, obj: &mut Map<String, Value>) -> bool {
-    if !is_standard_responses_path(path) {
+    if !(is_standard_responses_path(path) || is_compact_path(path)) {
         return false;
     }
     let Some(service_tier) = obj.get_mut("service_tier") else {
@@ -446,9 +456,6 @@ fn normalize_service_tier(path: &str, obj: &mut Map<String, Value>) -> bool {
 }
 
 fn normalize_codex_backend_service_tier(path: &str, obj: &mut Map<String, Value>) -> bool {
-    if is_compact_path(path) {
-        return obj.remove("service_tier").is_some();
-    }
     normalize_service_tier(path, obj)
 }
 
@@ -567,6 +574,7 @@ pub(crate) fn retain_official_fields(path: &str, obj: &mut Map<String, Value>) -
                 "parallel_tool_calls",
                 "prompt_cache_key",
                 "reasoning",
+                "service_tier",
                 "text",
                 "tools",
             ],
@@ -612,6 +620,7 @@ pub(crate) fn retain_codex_fields(path: &str, obj: &mut Map<String, Value>) -> V
                 "parallel_tool_calls",
                 "prompt_cache_key",
                 "reasoning",
+                "service_tier",
                 "text",
             ],
         );
@@ -655,6 +664,9 @@ pub(crate) fn apply_codex_http_request_rules(
         result.changed = true;
     }
     if use_codex_compat_rewrite && ensure_non_empty_instructions(path, obj) {
+        result.changed = true;
+    }
+    if normalize_compact_instructions(path, obj) {
         result.changed = true;
     }
     if ensure_client_metadata_installation_id(path, obj, installation_id) {

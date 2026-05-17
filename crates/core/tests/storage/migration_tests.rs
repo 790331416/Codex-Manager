@@ -250,6 +250,33 @@ fn init_tracks_schema_migrations_and_is_idempotent() {
         )
         .expect("count 052 migration");
     assert_eq!(applied_052, 1);
+    let applied_053: i64 = storage
+        .conn
+        .query_row(
+            "SELECT COUNT(1) FROM schema_migrations WHERE version = '053_api_key_quota_limits'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count 053 migration");
+    assert_eq!(applied_053, 1);
+    let applied_054: i64 = storage
+        .conn
+        .query_row(
+            "SELECT COUNT(1) FROM schema_migrations WHERE version = '054_aggregate_api_balance_query'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count 054 migration");
+    assert_eq!(applied_054, 1);
+    let applied_057: i64 = storage
+        .conn
+        .query_row(
+            "SELECT COUNT(1) FROM schema_migrations WHERE version = '062_observability_storage_compaction'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count 057 migration");
+    assert_eq!(applied_057, 1);
 
     assert!(!storage
         .has_column("accounts", "note")
@@ -329,6 +356,24 @@ fn init_tracks_schema_migrations_and_is_idempotent() {
     assert!(storage
         .has_column("api_key_profiles", "service_tier")
         .expect("check api_key_profiles.service_tier"));
+    assert!(storage
+        .has_table("api_key_quota_limits")
+        .expect("check api_key_quota_limits table"));
+    assert!(storage
+        .has_column("api_key_quota_limits", "quota_limit_tokens")
+        .expect("check api_key_quota_limits.quota_limit_tokens"));
+    assert!(storage
+        .has_column("aggregate_apis", "balance_query_enabled")
+        .expect("check aggregate_apis.balance_query_enabled"));
+    assert!(storage
+        .has_column("aggregate_apis", "balance_query_config_json")
+        .expect("check aggregate_apis.balance_query_config_json"));
+    assert!(storage
+        .has_column("aggregate_apis", "last_balance_json")
+        .expect("check aggregate_apis.last_balance_json"));
+    assert!(storage
+        .has_table("aggregate_api_balance_secrets")
+        .expect("check aggregate_api_balance_secrets table"));
     assert!(!storage
         .has_column("request_logs", "input_tokens")
         .expect("check request_logs.input_tokens"));
@@ -904,7 +949,7 @@ fn request_logs_compact_migration_drops_legacy_usage_columns_and_preserves_rows(
                 7, 'trc-legacy', 'gk_legacy', 'acc-legacy', '/v1/responses', '/v1/chat/completions',
                 '/v1/responses', 'POST', 'gpt-5.3-codex', 'high', 'OpenAIChatCompletionsJson',
                 'https://chatgpt.com/backend-api/codex/v1/responses', 200,
-                12, 5, 0.25, 3, 2, NULL, 1700000000
+                12, 5, 0.25, 3, 2, NULL, 4102444800
             );",
         )
         .expect("create legacy request_logs");
@@ -976,6 +1021,286 @@ fn request_logs_compact_migration_drops_legacy_usage_columns_and_preserves_rows(
     assert_eq!(token_row.2, Some(0.25));
     assert_eq!(token_row.3, Some(3));
     assert_eq!(token_row.4, Some(2));
+}
+
+#[test]
+fn model_catalog_string_items_migration_tolerates_missing_legacy_tables() {
+    let storage = Storage::open_in_memory().expect("open in memory");
+    storage.init().expect("init schema");
+
+    storage
+        .conn
+        .execute_batch(
+            "DELETE FROM schema_migrations WHERE version = '049_model_catalog_string_items';
+             DROP TABLE IF EXISTS model_catalog_additional_speed_tiers;
+             DROP TABLE IF EXISTS model_catalog_experimental_supported_tools;
+             DROP TABLE IF EXISTS model_catalog_input_modalities;
+             DROP TABLE IF EXISTS model_catalog_available_in_plans;",
+        )
+        .expect("simulate legacy string item cleanup");
+
+    storage
+        .init()
+        .expect("re-run init with missing legacy model catalog tables");
+
+    let applied_049: i64 = storage
+        .conn
+        .query_row(
+            "SELECT COUNT(1) FROM schema_migrations WHERE version = '049_model_catalog_string_items'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count 049 migration");
+    assert_eq!(applied_049, 1);
+    let string_items_table: i64 = storage
+        .conn
+        .query_row(
+            "SELECT COUNT(1) FROM sqlite_master WHERE type = 'table' AND name = 'model_catalog_string_items'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("check string item table");
+    assert_eq!(string_items_table, 1);
+}
+
+#[test]
+fn observability_storage_compaction_migration_rolls_up_and_prunes_legacy_rows() {
+    let path = temp_db_path("observability-compaction");
+    {
+        let storage = Storage::open(&path).expect("open file storage");
+        storage.init().expect("init schema");
+
+        for version in [
+            "001_init",
+            "002_login_sessions",
+            "003_api_keys",
+            "004_api_key_model",
+            "005_request_logs",
+            "006_usage_snapshots_latest_index",
+            "007_usage_secondary_columns",
+            "008_token_api_key_access_token",
+            "009_api_key_reasoning_effort",
+            "010_request_log_reasoning_effort",
+            "011_account_meta_columns",
+            "012_request_logs_search_indexes",
+            "013_drop_accounts_note_tags",
+            "014_drop_accounts_workspace_name",
+            "015_api_key_profiles",
+            "016_api_keys_key_hash_index",
+            "017_usage_snapshots_captured_id_index",
+            "018_accounts_sort_updated_at_index",
+            "019_api_key_secrets",
+            "020_request_logs_account_tokens_cost",
+            "021_request_logs_cached_reasoning_tokens",
+            "022_request_token_stats",
+            "023_request_token_stats_total_tokens",
+            "025_tokens_refresh_schedule",
+            "026_api_key_profiles_constraints_azure",
+            "027_request_logs_trace_context",
+            "028_request_logs_drop_legacy_usage_columns",
+            "029_app_settings",
+            "030_accounts_scale_indexes",
+            "031_request_logs_duration_ms",
+            "032_request_logs_attempt_chain",
+            "033_login_sessions_workspace_id",
+            "034_conversation_bindings",
+            "035_api_key_profiles_service_tier",
+            "036_accounts_metadata_and_drop_group_name",
+            "037_aggregate_api_routing",
+            "038_request_logs_aggregate_api_context",
+            "039_request_logs_aggregate_api_attempt_chain",
+            "040_plugins",
+            "041_gateway_error_logs",
+            "042_request_logs_request_type_service_tier",
+            "043_request_logs_effective_service_tier",
+            "044_api_keys_account_plan_filter",
+            "045_accounts_preferred",
+            "046_request_logs_gateway_mode",
+            "047_model_catalog_models",
+            "048_drop_model_options_cache",
+            "049_model_catalog_string_items",
+            "050_api_key_profiles_drop_azure_protocol",
+            "051_request_logs_first_response_ms",
+            "052_account_subscriptions",
+            "053_aggregate_api_model_override",
+            "053_api_key_quota_limits",
+            "054_aggregate_api_balance_query",
+            "055_model_price_rules",
+            "056_quota_pools",
+        ] {
+            storage
+                .conn
+                .execute(
+                    "INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (?1, 1)",
+                    [version],
+                )
+                .expect("seed migration marker");
+        }
+        storage
+            .conn
+            .execute(
+                "DELETE FROM schema_migrations WHERE version = '062_observability_storage_compaction'",
+                [],
+            )
+            .expect("remove 057 marker");
+
+        storage
+            .conn
+            .execute(
+                "INSERT INTO accounts (id, label, issuer, chatgpt_account_id, workspace_id, sort, status, created_at, updated_at, preferred)
+                 VALUES ('acc-migrate', 'Legacy Account', 'openai', NULL, NULL, 0, 'active', 1, 1, 0)",
+                [],
+            )
+            .expect("insert account");
+
+        let old_ts = 1_000_000_i64;
+        let recent_ts = 9_999_999_999_i64;
+        for index in 0..3_i64 {
+            storage
+                .conn
+                .execute(
+                    "INSERT INTO request_logs (
+                        id, trace_id, key_id, account_id, initial_account_id, attempted_account_ids_json,
+                        initial_aggregate_api_id, attempted_aggregate_api_ids_json, request_path, original_path,
+                        adapted_path, method, request_type, gateway_mode, transparent_mode, enhanced_mode,
+                        model, reasoning_effort, service_tier, effective_service_tier, response_adapter,
+                        upstream_url, aggregate_api_supplier_name, aggregate_api_url, status_code, duration_ms,
+                        first_response_ms, error, created_at
+                     ) VALUES (?1, ?2, 'key-migrate', 'acc-migrate', 'acc-migrate', '[\"acc-migrate\"]',
+                        NULL, NULL, '/v1/responses', '/v1/responses', '/v1/responses', 'POST', 'http',
+                        NULL, NULL, NULL, 'gpt-5', 'medium', NULL, NULL, 'Passthrough',
+                        'https://chatgpt.com/backend-api/codex/responses', NULL, NULL, 200, 100,
+                        50, NULL, ?3)",
+                    (index + 1, format!("trace-{index}"), old_ts + index),
+                )
+                .expect("insert old request log");
+            storage
+                .conn
+                .execute(
+                    "INSERT INTO request_token_stats (
+                        request_log_id, key_id, account_id, model, input_tokens, cached_input_tokens,
+                        output_tokens, total_tokens, reasoning_output_tokens, estimated_cost_usd, created_at
+                     ) VALUES (?1, 'key-migrate', 'acc-migrate', 'gpt-5', 100, 10, 20, 110, 5, 0.5, ?2)",
+                    (index + 1, old_ts + index),
+                )
+                .expect("insert old token stat");
+        }
+
+        storage
+            .conn
+            .execute(
+                "INSERT INTO request_logs (
+                    id, trace_id, key_id, account_id, initial_account_id, attempted_account_ids_json,
+                    initial_aggregate_api_id, attempted_aggregate_api_ids_json, request_path, original_path,
+                    adapted_path, method, request_type, gateway_mode, transparent_mode, enhanced_mode,
+                    model, reasoning_effort, service_tier, effective_service_tier, response_adapter,
+                    upstream_url, aggregate_api_supplier_name, aggregate_api_url, status_code, duration_ms,
+                    first_response_ms, error, created_at
+                 ) VALUES (
+                    10, 'trace-recent', 'key-migrate', 'acc-migrate', 'acc-migrate', '[\"acc-migrate\"]',
+                    NULL, NULL, '/v1/responses', '/v1/responses', '/v1/responses', 'POST', 'http',
+                    NULL, NULL, NULL, 'gpt-5', 'medium', NULL, NULL, 'Passthrough',
+                    'https://chatgpt.com/backend-api/codex/responses', NULL, NULL, 200, 100,
+                    50, NULL, ?1
+                 )",
+                [recent_ts],
+            )
+            .expect("insert recent request log");
+        storage
+            .conn
+            .execute(
+                "INSERT INTO request_token_stats (
+                    request_log_id, key_id, account_id, model, input_tokens, cached_input_tokens,
+                    output_tokens, total_tokens, reasoning_output_tokens, estimated_cost_usd, created_at
+                 ) VALUES (10, 'key-migrate', 'acc-migrate', 'gpt-5', 70, 5, 10, 75, 2, 0.25, ?1)",
+                [recent_ts],
+            )
+            .expect("insert recent token stat");
+
+        for index in 0..3_i64 {
+            storage
+                .conn
+                .execute(
+                    "INSERT INTO usage_snapshots (
+                        account_id, used_percent, window_minutes, resets_at, secondary_used_percent,
+                        secondary_window_minutes, secondary_resets_at, credits_json, captured_at
+                     ) VALUES ('acc-migrate', 20.0, 180, NULL, NULL, NULL, NULL, NULL, ?1)",
+                    [old_ts + index],
+                )
+                .expect("insert usage snapshot");
+        }
+    }
+
+    let storage = Storage::open(&path).expect("reopen file storage");
+    storage.init().expect("run compaction migration");
+
+    let applied_057: i64 = storage
+        .conn
+        .query_row(
+            "SELECT COUNT(1) FROM schema_migrations WHERE version = '062_observability_storage_compaction'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count 057 migration");
+    assert_eq!(applied_057, 1);
+
+    let remaining_old_logs: i64 = storage
+        .conn
+        .query_row(
+            "SELECT COUNT(1) FROM request_logs WHERE created_at < ?1",
+            [2_000_000_i64],
+            |row| row.get(0),
+        )
+        .expect("count old logs");
+    assert_eq!(remaining_old_logs, 0);
+
+    let remaining_recent_logs: i64 = storage
+        .conn
+        .query_row(
+            "SELECT COUNT(1) FROM request_logs WHERE id = 10",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count recent logs");
+    assert_eq!(remaining_recent_logs, 1);
+
+    let rolled_total_tokens: i64 = storage
+        .conn
+        .query_row(
+            "SELECT total_tokens FROM request_token_stat_rollups
+             WHERE key_id = 'key-migrate' AND account_id = 'acc-migrate' AND model = 'gpt-5'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("load rollup row");
+    assert_eq!(rolled_total_tokens, 330);
+
+    let remaining_recent_token_stats: i64 = storage
+        .conn
+        .query_row(
+            "SELECT COUNT(1) FROM request_token_stats WHERE request_log_id = 10",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count recent token stats");
+    assert_eq!(remaining_recent_token_stats, 1);
+
+    let usage_snapshot_count: i64 = storage
+        .conn
+        .query_row(
+            "SELECT COUNT(1) FROM usage_snapshots WHERE account_id = 'acc-migrate'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count usage snapshots");
+    assert_eq!(usage_snapshot_count, 1);
+
+    drop(storage);
+    let _ = fs::remove_file(&path);
+    let wal_path = PathBuf::from(format!("{}-wal", path.display()));
+    let shm_path = PathBuf::from(format!("{}-shm", path.display()));
+    let _ = fs::remove_file(wal_path);
+    let _ = fs::remove_file(shm_path);
 }
 
 #[test]
@@ -1067,13 +1392,110 @@ fn init_upgrades_legacy_model_catalog_table_to_structured_schema() {
         .expect("check string items table");
     assert_eq!(string_items_table_exists, 1);
 
-    let legacy_plans_table_exists = storage
+    for legacy_table in [
+        "model_catalog_additional_speed_tiers",
+        "model_catalog_experimental_supported_tools",
+        "model_catalog_input_modalities",
+        "model_catalog_available_in_plans",
+    ] {
+        let legacy_table_exists = storage
+            .conn
+            .query_row(
+                "SELECT COUNT(1) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [legacy_table],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("check legacy model catalog string table");
+        assert_eq!(
+            legacy_table_exists, 0,
+            "legacy table should not be recreated: {legacy_table}"
+        );
+    }
+}
+
+#[test]
+fn init_migrates_quota_assignments_to_model_source_mappings() {
+    let storage = Storage::open_in_memory().expect("open in memory");
+    storage
+        .conn
+        .execute_batch(
+            "CREATE TABLE quota_source_model_assignments (
+                source_kind TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                model_slug TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (source_kind, source_id, model_slug)
+            );
+            INSERT INTO quota_source_model_assignments (
+                source_kind,
+                source_id,
+                model_slug,
+                created_at,
+                updated_at
+            ) VALUES (
+                'aggregate_api',
+                'api-legacy-1',
+                'gpt-legacy',
+                100,
+                200
+            );",
+        )
+        .expect("seed legacy quota assignments");
+
+    storage.init().expect("run init");
+
+    let source_row: (String, String, String, String, String) = storage
         .conn
         .query_row(
-            "SELECT COUNT(1) FROM sqlite_master WHERE type = 'table' AND name = 'model_catalog_available_in_plans'",
+            "SELECT source_kind, source_id, upstream_model, status, discovery_kind
+             FROM model_source_models
+             WHERE source_kind = 'aggregate_api'
+               AND source_id = 'api-legacy-1'
+               AND upstream_model = 'gpt-legacy'",
             [],
-            |row| row.get::<_, i64>(0),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
         )
-        .expect("check legacy plans table");
-    assert_eq!(legacy_plans_table_exists, 0);
+        .expect("load migrated source model");
+    assert_eq!(source_row.0, "aggregate_api");
+    assert_eq!(source_row.1, "api-legacy-1");
+    assert_eq!(source_row.2, "gpt-legacy");
+    assert_eq!(source_row.3, "available");
+    assert_eq!(source_row.4, "legacy");
+
+    let mapping_row: (String, String, String, i64, i64, i64) = storage
+        .conn
+        .query_row(
+            "SELECT platform_model_slug, source_kind, upstream_model, enabled, priority, weight
+             FROM model_source_mappings
+             WHERE platform_model_slug = 'gpt-legacy'
+               AND source_kind = 'aggregate_api'
+               AND source_id = 'api-legacy-1'",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
+        )
+        .expect("load migrated mapping");
+    assert_eq!(mapping_row.0, "gpt-legacy");
+    assert_eq!(mapping_row.1, "aggregate_api");
+    assert_eq!(mapping_row.2, "gpt-legacy");
+    assert_eq!(mapping_row.3, 1);
+    assert_eq!(mapping_row.4, 0);
+    assert_eq!(mapping_row.5, 1);
 }

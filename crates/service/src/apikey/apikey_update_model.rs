@@ -30,6 +30,8 @@ pub(crate) fn update_api_key_model(
     rotation_strategy: Option<String>,
     aggregate_api_id: Option<String>,
     account_plan_filter: Option<String>,
+    has_quota_limit_tokens: bool,
+    quota_limit_tokens: Option<i64>,
 ) -> Result<(), String> {
     if key_id.is_empty() {
         return Err("key id required".to_string());
@@ -86,6 +88,11 @@ pub(crate) fn update_api_key_model(
             normalized_account_plan_filter.as_deref(),
         )
         .map_err(|e| e.to_string())?;
+    if has_quota_limit_tokens {
+        storage
+            .upsert_api_key_quota_limit(key_id, quota_limit_tokens)
+            .map_err(|e| e.to_string())?;
+    }
 
     let has_upstream_base_url = upstream_base_url.is_some();
     let has_static_headers_json = static_headers_json.is_some();

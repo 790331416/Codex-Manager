@@ -54,7 +54,13 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
       setAppSettings(settings);
       toast.success(translate(normalizedLocale, "界面语言已切换"));
     } catch (error: unknown) {
-      toast.error(`${translate(locale, "语言切换失败")}: ${getAppErrorMessage(error)}`);
+      const message = getAppErrorMessage(error);
+      if (message.includes("permission_denied")) {
+        setAppSettings({ locale: normalizedLocale });
+        toast.success(translate(normalizedLocale, "界面语言已切换"));
+        return;
+      }
+      toast.error(`${translate(locale, "语言切换失败")}: ${message}`);
     } finally {
       setIsSwitchingLocale(false);
     }

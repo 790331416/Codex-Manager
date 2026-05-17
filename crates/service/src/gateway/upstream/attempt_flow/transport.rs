@@ -108,6 +108,24 @@ fn extract_prompt_cache_key(body: &[u8]) -> Option<String> {
         .map(str::to_string)
 }
 
+fn strip_compact_service_tier_for_transport(body: &Bytes, preserve_service_tier: bool) -> Bytes {
+    if preserve_service_tier || body.is_empty() {
+        return body.clone();
+    }
+    let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return body.clone();
+    };
+    let Some(object) = value.as_object_mut() else {
+        return body.clone();
+    };
+    if object.remove("service_tier").is_none() {
+        return body.clone();
+    }
+    serde_json::to_vec(&value)
+        .map(Bytes::from)
+        .unwrap_or_else(|_| body.clone())
+}
+
 /// 函数 `is_compact_request_path`
 ///
 /// 作者: gaohongshun
@@ -562,8 +580,14 @@ fn send_upstream_request_with_compression_override(
     compression_override: Option<RequestCompression>,
 ) -> Result<GatewayUpstreamResponse, reqwest::Error> {
     let attempt_started_at = Instant::now();
-    let prompt_cache_key = extract_prompt_cache_key(body.as_ref());
     let is_compact_request = is_compact_request_path(request_ctx.request_path);
+    let chatgpt_account_header = resolve_chatgpt_account_header(account, target_url);
+    let body_for_transport = if is_compact_request {
+        strip_compact_service_tier_for_transport(body, chatgpt_account_header.is_some())
+    } else {
+        body.clone()
+    };
+    let prompt_cache_key = extract_prompt_cache_key(body_for_transport.as_ref());
     let request_affinity = super::super::super::session_affinity::derive_outgoing_session_affinity(
         incoming_headers.session_id(),
         incoming_headers.client_request_id(),
@@ -607,7 +631,7 @@ fn send_upstream_request_with_compression_override(
         };
         let header_input = super::super::header_profile::CodexCompactUpstreamHeaderInput {
             auth_token,
-            chatgpt_account_id: resolve_chatgpt_account_header(account, target_url),
+            chatgpt_account_id: chatgpt_account_header,
             installation_id: installation_id.as_deref(),
             incoming_user_agent: incoming_headers.user_agent(),
             incoming_originator: incoming_headers.originator(),
@@ -616,6 +640,11 @@ fn send_upstream_request_with_compression_override(
                 incoming_headers.session_id()
             } else {
                 request_affinity.incoming_session_id
+            },
+            thread_id: if gemini_codex_compat {
+                None
+            } else {
+                request_affinity.fallback_session_id
             },
             incoming_window_id: if gemini_codex_compat {
                 None
@@ -639,13 +668,13 @@ fn send_upstream_request_with_compression_override(
                 request_affinity.fallback_session_id
             },
             strip_session_affinity,
-            has_body: !body.is_empty(),
+            has_body: !body_for_transport.is_empty(),
         };
         super::super::header_profile::build_codex_compact_upstream_headers(header_input)
     } else {
         let header_input = super::super::header_profile::CodexUpstreamHeaderInput {
             auth_token,
-            chatgpt_account_id: resolve_chatgpt_account_header(account, target_url),
+            chatgpt_account_id: chatgpt_account_header,
             incoming_user_agent: incoming_headers.user_agent(),
             incoming_originator: incoming_headers.originator(),
             preserve_client_identity: should_preserve_client_identity(request_ctx.protocol_type),
@@ -691,7 +720,7 @@ fn send_upstream_request_with_compression_override(
             },
             include_turn_state: !gemini_codex_compat,
             strip_session_affinity,
-            has_body: !body.is_empty(),
+            has_body: !body_for_transport.is_empty(),
         };
         super::super::header_profile::build_codex_upstream_headers(header_input)
     };
@@ -717,7 +746,7 @@ fn send_upstream_request_with_compression_override(
     });
     let body_for_request = encode_request_body(
         request_ctx.request_path,
-        body,
+        &body_for_transport,
         request_compression,
         &mut upstream_headers,
     );
@@ -777,7 +806,7 @@ fn send_upstream_request_with_compression_override(
                         target_url,
                         request_deadline,
                         upstream_headers_uncompressed.as_slice(),
-                        body,
+                        &body_for_transport,
                         is_stream,
                     ) {
                         Ok(resp) => {
@@ -917,7 +946,8 @@ mod tests {
     use super::{
         apply_gemini_codex_compat_header_profile, encode_request_body, resolve_request_compression,
         resolve_request_compression_with_flag, should_retry_transport_without_compression,
-        should_wrap_upstream_as_stream_response, RequestCompression, CPA_GEMINI_CODEX_USER_AGENT,
+        should_wrap_upstream_as_stream_response, strip_compact_service_tier_for_transport,
+        RequestCompression, CPA_GEMINI_CODEX_USER_AGENT,
     };
     use bytes::Bytes;
 
@@ -1073,6 +1103,43 @@ mod tests {
         assert_eq!(
             value.get("model").and_then(serde_json::Value::as_str),
             Some("gpt-5.4")
+        );
+    }
+
+    #[test]
+    fn compact_transport_strips_service_tier_without_chatgpt_account_header() {
+        let body = Bytes::from_static(
+            br#"{"model":"gpt-5.4","input":[],"service_tier":"priority","prompt_cache_key":"thread-1"}"#,
+        );
+
+        let actual = strip_compact_service_tier_for_transport(&body, false);
+        let value: serde_json::Value =
+            serde_json::from_slice(&actual).expect("parse stripped compact body");
+
+        assert!(value.get("service_tier").is_none());
+        assert_eq!(
+            value
+                .get("prompt_cache_key")
+                .and_then(serde_json::Value::as_str),
+            Some("thread-1")
+        );
+    }
+
+    #[test]
+    fn compact_transport_preserves_service_tier_with_chatgpt_account_header() {
+        let body = Bytes::from_static(
+            br#"{"model":"gpt-5.4","input":[],"service_tier":"priority","prompt_cache_key":"thread-1"}"#,
+        );
+
+        let actual = strip_compact_service_tier_for_transport(&body, true);
+        let value: serde_json::Value =
+            serde_json::from_slice(&actual).expect("parse preserved compact body");
+
+        assert_eq!(
+            value
+                .get("service_tier")
+                .and_then(serde_json::Value::as_str),
+            Some("priority")
         );
     }
 

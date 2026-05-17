@@ -2,6 +2,17 @@ use rusqlite::{Result, Row};
 
 use super::{Storage, UsageSnapshotRecord};
 
+const DEFAULT_USAGE_SNAPSHOTS_RETAIN_PER_ACCOUNT: usize = 1;
+const USAGE_SNAPSHOTS_RETAIN_PER_ACCOUNT_ENV: &str =
+    "CODEXMANAGER_USAGE_SNAPSHOTS_RETAIN_PER_ACCOUNT";
+
+pub(super) fn usage_snapshots_retain_per_account() -> usize {
+    std::env::var(USAGE_SNAPSHOTS_RETAIN_PER_ACCOUNT_ENV)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .unwrap_or(DEFAULT_USAGE_SNAPSHOTS_RETAIN_PER_ACCOUNT)
+}
+
 impl Storage {
     /// 函数 `insert_usage_snapshot`
     ///
@@ -66,6 +77,28 @@ impl Storage {
                )",
             (account_id, retain as i64),
         )
+    }
+
+    pub fn prune_usage_snapshots_all_accounts(&self, retain: usize) -> Result<usize> {
+        if retain == 0 {
+            return Ok(0);
+        }
+        let mut stmt = self
+            .conn
+            .prepare("SELECT DISTINCT account_id FROM usage_snapshots")?;
+        let mut rows = stmt.query([])?;
+        let mut account_ids = Vec::new();
+        while let Some(row) = rows.next()? {
+            account_ids.push(row.get::<_, String>(0)?);
+        }
+        drop(rows);
+        drop(stmt);
+        let mut removed = 0_usize;
+        for account_id in account_ids {
+            removed = removed
+                .saturating_add(self.prune_usage_snapshots_for_account(&account_id, retain)?);
+        }
+        Ok(removed)
     }
 
     /// 函数 `usage_snapshot_count_for_account`

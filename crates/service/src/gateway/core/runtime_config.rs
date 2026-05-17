@@ -29,6 +29,7 @@ static CODEX_IMAGE_GENERATION_AUTO_INJECT_TOOL: AtomicBool =
     AtomicBool::new(DEFAULT_CODEX_IMAGE_GENERATION_AUTO_INJECT_TOOL);
 static UPSTREAM_PROXY_URL: OnceLock<RwLock<Option<String>>> = OnceLock::new();
 static FREE_ACCOUNT_MAX_MODEL: OnceLock<RwLock<String>> = OnceLock::new();
+static COMPACT_MODEL: OnceLock<RwLock<String>> = OnceLock::new();
 static MODEL_FORWARD_RULES: OnceLock<RwLock<Vec<ModelForwardRule>>> = OnceLock::new();
 static CODEX_IMAGE_MAIN_MODEL: OnceLock<RwLock<String>> = OnceLock::new();
 static CODEX_IMAGE_TOOL_MODEL: OnceLock<RwLock<String>> = OnceLock::new();
@@ -51,10 +52,11 @@ const DEFAULT_REQUEST_GATE_WAIT_TIMEOUT_MS: u64 = 0;
 const DEFAULT_TRACE_BODY_PREVIEW_MAX_BYTES: usize = 0;
 const DEFAULT_FRONT_PROXY_MAX_BODY_BYTES: usize = 0;
 const DEFAULT_FREE_ACCOUNT_MAX_MODEL: &str = "auto";
+const DEFAULT_COMPACT_MODEL: &str = "auto";
 const DEFAULT_MODEL_FORWARD_RULES: &str = "";
 const DEFAULT_CODEX_IMAGE_MAIN_MODEL: &str = "gpt-5.4-mini";
 const DEFAULT_CODEX_IMAGE_TOOL_MODEL: &str = "gpt-image-2";
-const DEFAULT_CODEX_USER_AGENT_VERSION: &str = "0.101.0";
+const DEFAULT_CODEX_USER_AGENT_VERSION: &str = "0.130.0";
 const MAX_UPSTREAM_PROXY_POOL_SIZE: usize = 5;
 
 const ENV_REQUEST_GATE_WAIT_TIMEOUT_MS: &str = "CODEXMANAGER_REQUEST_GATE_WAIT_TIMEOUT_MS";
@@ -76,6 +78,7 @@ const ENV_TOKEN_EXCHANGE_ISSUER: &str = "CODEXMANAGER_ISSUER";
 const ENV_PROXY_LIST: &str = "CODEXMANAGER_PROXY_LIST";
 const ENV_UPSTREAM_PROXY_URL: &str = "CODEXMANAGER_UPSTREAM_PROXY_URL";
 const ENV_FREE_ACCOUNT_MAX_MODEL: &str = "CODEXMANAGER_FREE_ACCOUNT_MAX_MODEL";
+const ENV_COMPACT_MODEL: &str = "CODEXMANAGER_COMPACT_MODEL";
 const ENV_MODEL_FORWARD_RULES: &str = "CODEXMANAGER_MODEL_FORWARD_RULES";
 const ENV_ORIGINATOR: &str = "CODEXMANAGER_ORIGINATOR";
 const ENV_RESIDENCY_REQUIREMENT: &str = "CODEXMANAGER_RESIDENCY_REQUIREMENT";
@@ -566,6 +569,38 @@ pub(super) fn upstream_proxy_url() -> Option<String> {
 pub(crate) fn current_free_account_max_model() -> String {
     ensure_runtime_config_loaded();
     crate::lock_utils::read_recover(free_account_max_model_cell(), "free_account_max_model").clone()
+}
+
+/// 函数 `current_compact_model`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-02
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 返回当前上下文压缩模型配置
+pub(crate) fn current_compact_model() -> String {
+    ensure_runtime_config_loaded();
+    crate::lock_utils::read_recover(compact_model_cell(), "compact_model").clone()
+}
+
+/// 函数 `current_compact_model_override`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-02
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 返回压缩请求需要强制使用的模型；`auto` 表示不改写
+pub(crate) fn current_compact_model_override() -> Option<String> {
+    let current = current_compact_model();
+    (!current.eq_ignore_ascii_case("auto")).then_some(current)
 }
 
 /// 函数 `current_model_forward_rules`
@@ -1100,6 +1135,14 @@ pub(super) fn reload_from_env() {
     *cached_free_account_max_model = free_account_max_model;
     drop(cached_free_account_max_model);
 
+    let compact_model = env_non_empty(ENV_COMPACT_MODEL)
+        .and_then(|value| normalize_model_slug_with_error(value.as_str(), "compactModel").ok())
+        .unwrap_or_else(|| DEFAULT_COMPACT_MODEL.to_string());
+    let mut cached_compact_model =
+        crate::lock_utils::write_recover(compact_model_cell(), "compact_model");
+    *cached_compact_model = compact_model;
+    drop(cached_compact_model);
+
     let model_forward_rules = env_non_empty(ENV_MODEL_FORWARD_RULES)
         .map(|value| parse_model_forward_rules(value.as_str()))
         .transpose()
@@ -1300,6 +1343,21 @@ fn upstream_proxy_url_cell() -> &'static RwLock<Option<String>> {
 /// 返回函数执行结果
 fn free_account_max_model_cell() -> &'static RwLock<String> {
     FREE_ACCOUNT_MAX_MODEL.get_or_init(|| RwLock::new(DEFAULT_FREE_ACCOUNT_MAX_MODEL.to_string()))
+}
+
+/// 函数 `compact_model_cell`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-04-02
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 返回函数执行结果
+fn compact_model_cell() -> &'static RwLock<String> {
+    COMPACT_MODEL.get_or_init(|| RwLock::new(DEFAULT_COMPACT_MODEL.to_string()))
 }
 
 /// 函数 `model_forward_rules_cell`
@@ -1715,9 +1773,13 @@ fn normalize_model_forward_lookup_model(raw: &str) -> Option<String> {
 /// # 返回
 /// 返回函数执行结果
 fn normalize_model_slug(raw: &str) -> Result<String, String> {
+    normalize_model_slug_with_error(raw, "freeAccountMaxModel")
+}
+
+fn normalize_model_slug_with_error(raw: &str, field_name: &str) -> Result<String, String> {
     let normalized = raw.trim().to_ascii_lowercase();
     if normalized.is_empty() {
-        return Err("freeAccountMaxModel is required".to_string());
+        return Err(format!("{field_name} is required"));
     }
     if normalized == "auto" {
         return Ok(normalized);
@@ -1729,7 +1791,7 @@ fn normalize_model_slug(raw: &str) -> Result<String, String> {
         .chars()
         .any(|ch| !(ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '/' | ':')))
     {
-        return Err("freeAccountMaxModel contains unsupported characters".to_string());
+        return Err(format!("{field_name} contains unsupported characters"));
     }
     Ok(normalized)
 }

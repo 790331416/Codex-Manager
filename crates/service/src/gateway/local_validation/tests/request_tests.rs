@@ -209,6 +209,31 @@ fn openai_key_keeps_codex_long_tail_slug_override() {
     assert_eq!(service_tier, None);
 }
 
+#[test]
+fn gateway_blocked_path_matches_default_props_probe() {
+    assert!(is_gateway_blocked_request_path("/v1/props"));
+    assert!(is_gateway_blocked_request_path("/v1/props?client=hermes"));
+    assert!(!is_gateway_blocked_request_path("/v1/responses"));
+}
+
+#[test]
+fn gateway_blocked_path_patterns_support_custom_exact_and_prefix_rules() {
+    let patterns = parse_gateway_blocked_path_patterns("/internal/health; /v1/debug/*\n/v1/audit");
+
+    assert!(patterns
+        .iter()
+        .any(|pattern| gateway_blocked_path_matches("/internal/health?probe=1", pattern)));
+    assert!(patterns
+        .iter()
+        .any(|pattern| gateway_blocked_path_matches("/v1/debug/trace", pattern)));
+    assert!(patterns
+        .iter()
+        .any(|pattern| gateway_blocked_path_matches("/v1/audit", pattern)));
+    assert!(!patterns
+        .iter()
+        .any(|pattern| gateway_blocked_path_matches("/v1/responses", pattern)));
+}
+
 fn sample_request_metadata(prompt_cache_key: Option<&str>) -> ParsedRequestMetadata {
     ParsedRequestMetadata {
         prompt_cache_key: prompt_cache_key.map(str::to_string),

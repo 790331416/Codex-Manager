@@ -65,12 +65,12 @@
   </tr>
   <tr>
     <td align="center" valign="middle" width="180">
-      <a href="https://gzxsy.vip/">
+      <a href="https://gzxsy.vip/register?aff=eapz">
         <img src="assets/images/sponsors/xingsiyan.jpg" alt="星思研中转站" width="120" />
       </a>
     </td>
     <td valign="top">
-      <strong>星思研中转站</strong> 为 Claude Code、Codex 等模型调用场景提供稳定中转与配套服务，适合需要高可用接口、便捷接入和持续交付支持的开发者与团队。可前往<a href="https://gzxsy.vip/">官网</a>了解最新方案。
+      <strong>星思研中转站</strong> 为 Claude Code、Codex 等模型调用场景提供稳定中转与配套服务，适合需要高可用接口、便捷接入和持续交付支持的开发者与团队。可前往<a href="https://gzxsy.vip/register?aff=eapz">官网</a>了解最新方案。
     </td>
   </tr>
 </table>
@@ -121,7 +121,7 @@
 - 批量导入 / 导出：支持多文件导入、桌面端文件夹递归导入 JSON、按账号导出单文件
 - 用量展示：支持标准 5 小时 + 7 日窗口、仅 7 日单窗口账号，以及 Code Review / Spark 等官方附加额度窗口；刷新后会统一展示各额度的剩余百分比与重置时间
 - 授权登录：浏览器授权 + 手动回调解析
-- 平台 Key：生成、禁用、删除、模型绑定、推理等级、服务等级（跟随请求 / Fast / Flex）
+- 平台 Key：随机生成或自定义固定 Key、禁用、删除、模型绑定、推理等级、服务等级（跟随请求 / Fast / Flex）
 - 模型管理：维护结构化模型目录、远端并入、自定义模型、`visibility` / `supportedInApi` 管理，以及桌面端 Codex 缓存同步 / Web 端缓存导出
 - 聚合 API：管理第三方最小转发上游，支持创建、编辑、测试连通性、供应商名称、顺序优先级，以及按 Codex / Claude 分类展示
 - 插件中心：路由为 `/plugins/`，支持内置精选、企业私有、自定义源三种市场模式，并提供插件清单、任务、日志与 Rhai 对接接口

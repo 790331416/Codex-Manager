@@ -14,6 +14,9 @@ export interface RequestLog {
   requestType: string;
   path: string;
   model: string;
+  upstreamModel: string;
+  actualSourceKind: string;
+  actualSourceId: string;
   reasoningEffort: string;
   serviceTier: string;
   effectiveServiceTier: string;

@@ -75,5 +75,60 @@ pub(super) fn load_active_api_key(
         ));
     }
 
+    if let Some(limit) = storage
+        .find_api_key_quota_limit(&api_key.id)
+        .map_err(|err| {
+            super::LocalValidationError::new(
+                500,
+                crate::gateway::bilingual_error(
+                    "读取存储失败",
+                    format!("storage read failed: {err}"),
+                ),
+            )
+        })?
+    {
+        let used = storage
+            .api_key_total_token_usage(&api_key.id)
+            .map_err(|err| {
+                super::LocalValidationError::new(
+                    500,
+                    crate::gateway::bilingual_error(
+                        "读取用量失败",
+                        format!("read api key usage failed: {err}"),
+                    ),
+                )
+            })?;
+        if limit > 0 && used >= limit {
+            if debug {
+                log::warn!(
+                    "event=gateway_auth_quota_exhausted path={} status=429 key_id={} used={} limit={}",
+                    request_url,
+                    api_key.id,
+                    used,
+                    limit
+                );
+            }
+            return Err(super::LocalValidationError::new(
+                429,
+                crate::gateway::bilingual_error(
+                    "API Key 额度已用尽",
+                    format!("api key quota exhausted: used {used}, limit {limit}"),
+                ),
+            ));
+        }
+    }
+
+    crate::wallet_precheck_for_api_key(storage, &api_key.id).map_err(|err| {
+        if err.contains("余额不足") {
+            // 中文注释：CLI 会对 429 做重试并最终显示 exceeded retry limit，
+            // 本地分发额度不足需要保留可读错误文案，所以使用非重试状态码。
+            return super::LocalValidationError::new(402, "额度不足，请联系管理员");
+        }
+        super::LocalValidationError::new(
+            403,
+            crate::gateway::bilingual_error(err, "wallet precheck failed"),
+        )
+    })?;
+
     Ok(api_key)
 }

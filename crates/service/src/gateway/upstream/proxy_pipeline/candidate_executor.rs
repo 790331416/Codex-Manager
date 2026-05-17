@@ -6,7 +6,7 @@ use tiny_http::Request;
 use super::super::attempt_flow::transport::UpstreamRequestContext;
 use super::super::executor::CandidateUpstreamDecision;
 use super::super::support::candidates::{
-    allow_openai_fallback_for_account, free_account_model_override,
+    account_model_override, allow_openai_fallback_for_account, free_account_model_override,
 };
 use super::super::support::deadline;
 use super::candidate_attempt::{
@@ -218,7 +218,8 @@ pub(in super::super) fn execute_candidate_sequence(
                 )
             })
             .unwrap_or_else(|| incoming_headers.clone());
-        let attempt_model_override = free_account_model_override(storage, &account, &token);
+        let attempt_model_override = account_model_override(storage, model_for_log, &account)
+            .or_else(|| free_account_model_override(storage, &account, &token));
         let attempt_allow_openai_fallback =
             allow_openai_fallback && allow_openai_fallback_for_account(storage, &account, &token);
         let attempt_model_for_log = attempt_model_override.as_deref().or(model_for_log);

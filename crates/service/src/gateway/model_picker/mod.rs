@@ -43,13 +43,20 @@ fn should_retry_models_with_openai_fallback(err: &str) -> bool {
 /// # 返回
 /// 返回函数执行结果
 pub(crate) fn fetch_models_for_picker() -> Result<ModelsResponse, String> {
+    if crate::gateway::current_codex_user_agent_version()
+        == crate::gateway::default_codex_user_agent_version()
+    {
+        if let Err(err) = crate::app_settings::sync_gateway_user_agent_version_from_codex_latest() {
+            log::warn!("codex latest client_version sync before models failed: {err}");
+        }
+    }
     let storage = super::open_storage()
         .ok_or_else(|| crate::gateway::bilingual_error("存储不可用", "storage unavailable"))?;
     let mut candidates = super::collect_gateway_candidates(&storage)?;
     if candidates.is_empty() {
         return Err(crate::gateway::bilingual_error(
-            "无可用账号",
-            "no available account",
+            "无可用账号 Token，请重新登录或导入 AT/RT",
+            "no account token available",
         ));
     }
 

@@ -24,6 +24,7 @@ export interface Account {
   sort: number;
   status: string;
   statusReason: string;
+  hasToken: boolean;
   planType: string | null;
   planTypeRaw: string | null;
   hasSubscription: boolean | null;
@@ -32,6 +33,9 @@ export interface Account {
   subscriptionRenewsAt: number | null;
   note: string | null;
   tags: string[];
+  modelSlugs: string[];
+  quotaCapacityPrimaryWindowTokens: number | null;
+  quotaCapacitySecondaryWindowTokens: number | null;
   isAvailable: boolean;
   isLowQuota: boolean;
   lastRefreshAt: number | null;

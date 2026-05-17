@@ -1,9 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { Sidebar } from "@/components/layout/sidebar";
-import { Header } from "@/components/layout/header";
-import { PageKeepAliveViewport } from "@/components/layout/page-keep-alive-viewport";
-import { RouteTransitionOverlay } from "@/components/layout/route-transition-overlay";
+import { AppFrame } from "@/components/layout/app-frame";
 import { Providers } from "@/components/providers";
 import { AppBootstrap } from "@/components/layout/app-bootstrap";
 import {
@@ -15,6 +12,16 @@ export const metadata: Metadata = {
   title: "CodexManager",
   description: "Account pool and usage management for Codex",
 };
+
+const trayPreviewModeInitScript = `
+(() => {
+  try {
+    if (window.location.pathname.replace(/\\/$/, "") === "/tray-preview") {
+      document.documentElement.classList.add("tray-preview-mode");
+    }
+  } catch (_error) {}
+})();
+`;
 
 export default function RootLayout({
   children,
@@ -28,19 +35,11 @@ export default function RootLayout({
       data-appearance={DEFAULT_APPEARANCE_PRESET}
     >
       <body className="antialiased">
+        <script dangerouslySetInnerHTML={{ __html: trayPreviewModeInitScript }} />
         <script dangerouslySetInnerHTML={{ __html: appearanceInitScript }} />
         <Providers>
           <AppBootstrap>
-            <div className="flex h-screen overflow-hidden">
-              <Sidebar />
-              <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-                <Header />
-                <main className="relative min-w-0 flex-1 overflow-y-auto p-6 no-scrollbar">
-                  <RouteTransitionOverlay />
-                  <PageKeepAliveViewport initialChildren={children} />
-                </main>
-              </div>
-            </div>
+            <AppFrame>{children}</AppFrame>
           </AppBootstrap>
         </Providers>
       </body>

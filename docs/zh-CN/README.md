@@ -31,12 +31,12 @@
   </tr>
   <tr>
     <td align="center" valign="middle" width="180">
-      <a href="https://gzxsy.vip/">
+      <a href="https://gzxsy.vip/register?aff=eapz">
         <img src="../../assets/images/sponsors/xingsiyan.jpg" alt="星思研中转站" width="120" />
       </a>
     </td>
     <td valign="top">
-      <strong>星思研中转站</strong> 为 Claude Code、Codex、Gemini 等模型调用场景提供稳定中转与配套服务，适合需要高可用接口、便捷接入和持续交付支持的开发者与团队。可前往<a href="https://gzxsy.vip/">官网</a>了解最新方案。
+      <strong>星思研中转站</strong> 为 Claude Code、Codex、Gemini 等模型调用场景提供稳定中转与配套服务，适合需要高可用接口、便捷接入和持续交付支持的开发者与团队。可前往<a href="https://gzxsy.vip/register?aff=eapz">官网</a>了解最新方案。
     </td>
   </tr>
 </table>
@@ -96,6 +96,7 @@
 ### 治理与决策
 | 文档 | 作用 |
 | --- | --- |
+| [账号模式与额度分发锁定策略.md](report/账号模式与额度分发锁定策略.md) | 说明账号系统、额度分发、平台 Key 归属和成员钱包扣费的锁定规则 |
 
 ## 提交规则
 

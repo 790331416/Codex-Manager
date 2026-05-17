@@ -127,3 +127,46 @@ test("postJsonRpc 对非 2xx 响应会带出服务端错误详情与链路标识
     /HTTP 503.*上游请求超时.*upstream_timeout.*trace-rpc-503/
   );
 });
+
+test("postJsonRpc 遇到 Web 鉴权失效会跳转登录页", async () => {
+  const originalWindow = globalThis.window;
+  const redirects = [];
+  globalThis.window = {
+    location: {
+      pathname: "/settings",
+      search: "?tab=general",
+      replace(url) {
+        redirects.push(url);
+      },
+    },
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        rpcHttp.postJsonRpc(
+          async () => ({
+            ok: false,
+            status: 401,
+            headers: { get: () => null },
+            async text() {
+              return JSON.stringify({ error: "web_auth_required" });
+            },
+          }),
+          "/api/rpc",
+          "app/settings/get"
+        ),
+      /HTTP 401/
+    );
+  } finally {
+    if (originalWindow === undefined) {
+      delete globalThis.window;
+    } else {
+      globalThis.window = originalWindow;
+    }
+  }
+
+  assert.deepEqual(redirects, [
+    "/__login?next=%2Fsettings%3Ftab%3Dgeneral",
+  ]);
+});

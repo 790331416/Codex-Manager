@@ -2,6 +2,9 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 
+use super::author_links::{
+    normalize_author_link_items, serialize_author_link_items, AuthorLinkItem,
+};
 use super::{
     save_persisted_app_setting, set_close_to_tray_on_close_setting, set_codex_cli_guide_dismissed,
     set_env_overrides, set_gateway_account_max_inflight, set_gateway_background_tasks,
@@ -12,7 +15,8 @@ use super::{
     set_gateway_user_agent_version, set_lightweight_mode_on_close_to_tray_setting,
     set_saved_service_addr, set_service_bind_mode, set_ui_appearance_preset, set_ui_locale,
     set_ui_low_transparency_enabled, set_ui_theme, set_update_auto_check_enabled,
-    BackgroundTasksInput, APP_SETTING_PLUGIN_MARKET_MODE_KEY,
+    BackgroundTasksInput, APP_SETTING_AUTHOR_SERVER_RECOMMENDATIONS_KEY,
+    APP_SETTING_AUTHOR_SPONSORS_KEY, APP_SETTING_PLUGIN_MARKET_MODE_KEY,
     APP_SETTING_PLUGIN_MARKET_SOURCE_URL_KEY,
 };
 
@@ -38,6 +42,8 @@ pub(super) struct AppSettingsPatch {
     gateway_residency_requirement: Option<String>,
     plugin_market_mode: Option<String>,
     plugin_market_source_url: Option<String>,
+    author_sponsors: Option<Vec<AuthorLinkItem>>,
+    author_server_recommendations: Option<Vec<AuthorLinkItem>>,
     upstream_proxy_url: Option<String>,
     upstream_stream_timeout_ms: Option<u64>,
     upstream_total_timeout_ms: Option<u64>,
@@ -45,6 +51,8 @@ pub(super) struct AppSettingsPatch {
     background_tasks: Option<BackgroundTasksInput>,
     env_overrides: Option<HashMap<String, String>>,
     web_access_password: Option<String>,
+    web_auth_mode: Option<String>,
+    distribution_enabled: Option<bool>,
 }
 
 /// 函数 `parse_app_settings_patch`
@@ -149,6 +157,17 @@ pub(super) fn apply_app_settings_patch(patch: AppSettingsPatch) -> Result<(), St
             },
         )?;
     }
+    if let Some(author_sponsors) = patch.author_sponsors {
+        let normalized = normalize_author_link_items(author_sponsors);
+        let raw = serialize_author_link_items(&normalized)?;
+        let _ = save_persisted_app_setting(APP_SETTING_AUTHOR_SPONSORS_KEY, Some(&raw))?;
+    }
+    if let Some(author_server_recommendations) = patch.author_server_recommendations {
+        let normalized = normalize_author_link_items(author_server_recommendations);
+        let raw = serialize_author_link_items(&normalized)?;
+        let _ =
+            save_persisted_app_setting(APP_SETTING_AUTHOR_SERVER_RECOMMENDATIONS_KEY, Some(&raw))?;
+    }
     if let Some(proxy_url) = patch.upstream_proxy_url {
         let _ = set_gateway_upstream_proxy_url(Some(&proxy_url))?;
     }
@@ -169,6 +188,12 @@ pub(super) fn apply_app_settings_patch(patch: AppSettingsPatch) -> Result<(), St
     }
     if let Some(password) = patch.web_access_password {
         let _ = crate::set_web_access_password(Some(&password))?;
+    }
+    if let Some(mode) = patch.web_auth_mode {
+        let _ = crate::set_web_auth_mode(&mode)?;
+    }
+    if let Some(enabled) = patch.distribution_enabled {
+        let _ = crate::set_distribution_enabled(enabled)?;
     }
 
     Ok(())

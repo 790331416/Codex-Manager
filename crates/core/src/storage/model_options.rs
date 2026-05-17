@@ -6,7 +6,7 @@ use serde_json::Value;
 use crate::rpc::types::{ModelInfo, ModelReasoningLevel};
 
 use super::{
-    ModelCatalogModelRecord, ModelCatalogReasoningLevelRecord, ModelCatalogScopeRecord,
+    now_ts, ModelCatalogModelRecord, ModelCatalogReasoningLevelRecord, ModelCatalogScopeRecord,
     ModelCatalogStringItemRecord, Storage,
 };
 
@@ -161,6 +161,30 @@ impl Storage {
             )?;
         }
         tx.commit()?;
+        self.sync_default_model_group_models_from_catalog()?;
+        Ok(())
+    }
+
+    fn sync_default_model_group_models_from_catalog(&self) -> rusqlite::Result<()> {
+        if !self.has_table("model_groups")? || !self.has_table("model_group_models")? {
+            return Ok(());
+        }
+
+        let now = now_ts();
+        self.conn.execute(
+            "INSERT OR IGNORE INTO model_group_models (
+                group_id, platform_model_slug, enabled, rate_multiplier_millis,
+                billing_model_slug, note, created_at, updated_at
+             )
+             SELECT g.id, m.slug, 1, NULL, NULL, 'catalog_sync', ?1, ?1
+             FROM model_groups g
+             JOIN model_catalog_models m
+               ON m.scope = 'default'
+              AND COALESCE(m.supported_in_api, 1) = 1
+              AND TRIM(m.slug) <> ''
+             WHERE g.is_default = 1",
+            params![now],
+        )?;
         Ok(())
     }
 

@@ -345,7 +345,10 @@ fn gateway_error_logging_writes_only_trace_log_file() {
     let storage = Storage::open(&db_path).expect("open db");
     storage.init().expect("init db");
     let now = now_ts();
-    seed_model_catalog_models(&storage, &["claude-3-5-sonnet-20241022", "gpt-5.3-codex"]);
+    seed_model_catalog_models(
+        &storage,
+        &["claude-3-5-sonnet-20241022", "gpt-5.3-codex", "gpt-5.4"],
+    );
 
     storage
         .insert_account(&Account {

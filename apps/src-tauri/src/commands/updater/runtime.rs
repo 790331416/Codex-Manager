@@ -230,7 +230,9 @@ mod tests {
         assert!(!should_include_prerelease_updates_with_override(
             &stable, None
         ));
-        assert!(!should_include_prerelease_updates_with_override(&beta, None));
+        assert!(!should_include_prerelease_updates_with_override(
+            &beta, None
+        ));
         assert!(should_include_prerelease_updates_with_override(
             &stable,
             Some(true)

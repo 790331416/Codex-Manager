@@ -2,12 +2,16 @@ use std::collections::{BTreeMap, HashSet};
 
 use codexmanager_core::rpc::types::{
     ManagedModelCatalogEntry, ManagedModelCatalogResult, ManagedModelCatalogUpsertParams,
-    ModelInfo, ModelReasoningLevel, ModelTruncationPolicy, ModelsResponse,
+    ManagedModelRoutingResult, ManagedModelSourceMappingEntry,
+    ManagedModelSourceMappingUpsertParams, ManagedModelSourceModelEntry,
+    ManagedModelSourceModelUpsertParams, ManagedModelSourceSyncParams, ModelInfo,
+    ModelReasoningLevel, ModelTruncationPolicy, ModelsResponse,
 };
 use codexmanager_core::storage::{
     now_ts, ModelCatalogModelRecord, ModelCatalogReasoningLevelRecord, ModelCatalogScopeRecord,
-    ModelCatalogStringItemRecord, Storage,
+    ModelCatalogStringItemRecord, ModelSourceMapping, ModelSourceModel, Storage,
 };
+use rand::RngCore;
 use serde_json::Value;
 
 use crate::gateway;
@@ -17,6 +21,8 @@ const CODEX_IMAGE_TOOL_MODEL: &str = "gpt-image-2";
 const MODEL_CACHE_SCOPE_DEFAULT: &str = "default";
 const MODEL_SOURCE_KIND_REMOTE: &str = "remote";
 const MODEL_SOURCE_KIND_CUSTOM: &str = "custom";
+const ROUTING_SOURCE_KIND_OPENAI_ACCOUNT: &str = "openai_account";
+const ROUTING_SOURCE_KIND_AGGREGATE_API: &str = "aggregate_api";
 
 /// 函数 `read_model_options`
 ///
@@ -75,6 +81,21 @@ pub(crate) fn read_managed_model_catalog(
 
     match gateway::fetch_models_for_picker() {
         Ok(models) => {
+            let models = normalize_models_response(models);
+            if !models_response_has_catalog_text_model(&models) {
+                if managed_catalog_has_catalog_text_model(&cached_catalog) {
+                    log::warn!(
+                        "event=model_catalog_refresh_ignored_empty_remote cached_models={}",
+                        cached_catalog.items.len()
+                    );
+                    return Ok(ensure_codex_image_tool_model_in_catalog(&cached_catalog));
+                }
+                if refresh_remote {
+                    return Err(
+                        "远端模型目录没有返回可用 Codex 文本模型，已拒绝覆盖本地目录".to_string(),
+                    );
+                }
+            }
             let merged_catalog = ensure_codex_image_tool_model_in_catalog(
                 &merge_managed_model_catalog(cached_catalog.clone(), models),
             );
@@ -84,7 +105,7 @@ pub(crate) fn read_managed_model_catalog(
             Ok(merged_catalog)
         }
         Err(err) => {
-            if !cached.is_empty() {
+            if managed_catalog_has_catalog_text_model(&cached_catalog) {
                 return Ok(ensure_codex_image_tool_model_in_catalog(&cached_catalog));
             }
             if refresh_remote {
@@ -96,6 +117,25 @@ pub(crate) fn read_managed_model_catalog(
             }
         }
     }
+}
+
+fn is_codex_image_tool_slug(slug: &str) -> bool {
+    slug.trim().eq_ignore_ascii_case(CODEX_IMAGE_TOOL_MODEL)
+}
+
+fn model_is_catalog_text_model(model: &ModelInfo) -> bool {
+    !is_codex_image_tool_slug(model.slug.as_str())
+}
+
+fn models_response_has_catalog_text_model(models: &ModelsResponse) -> bool {
+    models.models.iter().any(model_is_catalog_text_model)
+}
+
+fn managed_catalog_has_catalog_text_model(catalog: &ManagedModelCatalogResult) -> bool {
+    catalog
+        .items
+        .iter()
+        .any(|item| model_is_catalog_text_model(&item.model))
 }
 
 pub(crate) fn read_managed_model_catalog_from_storage(
@@ -250,6 +290,7 @@ pub(crate) fn save_managed_model_catalog_model(
         sort_index: next_sort_index,
         updated_at: now_ts(),
     };
+    ensure_platform_model_enableable(&storage, &next_entry.model)?;
 
     replace_model_catalog_entry(&storage, previous_slug.as_deref(), &next_entry)?;
     Ok(next_entry)
@@ -263,6 +304,538 @@ pub(crate) fn delete_managed_model_catalog_model(slug: &str) -> Result<(), Strin
     let storage =
         storage_helpers::open_storage().ok_or_else(|| "storage unavailable".to_string())?;
     delete_model_catalog_entry(&storage, normalized_slug)
+}
+
+pub(crate) fn read_managed_model_routing() -> Result<ManagedModelRoutingResult, String> {
+    let storage =
+        storage_helpers::open_storage().ok_or_else(|| "storage unavailable".to_string())?;
+    bootstrap_account_pool_model_routes(&storage, true)?;
+    routing_result_from_storage(&storage)
+}
+
+pub(crate) fn sync_managed_model_source_models(
+    params: ManagedModelSourceSyncParams,
+) -> Result<ManagedModelRoutingResult, String> {
+    let storage =
+        storage_helpers::open_storage().ok_or_else(|| "storage unavailable".to_string())?;
+    let source_kind = normalize_routing_source_kind(params.source_kind.as_str())?;
+    match source_kind.as_str() {
+        ROUTING_SOURCE_KIND_OPENAI_ACCOUNT => {
+            sync_openai_account_source_models(&storage, params.source_id.as_deref())?
+        }
+        ROUTING_SOURCE_KIND_AGGREGATE_API => {
+            sync_aggregate_api_source_models(&storage, params.source_id.as_deref())?
+        }
+        _ => return Err("unsupported model source kind".to_string()),
+    }
+    routing_result_from_storage(&storage)
+}
+
+pub(crate) fn upsert_managed_model_source_model(
+    params: ManagedModelSourceModelUpsertParams,
+) -> Result<ManagedModelSourceModelEntry, String> {
+    let storage =
+        storage_helpers::open_storage().ok_or_else(|| "storage unavailable".to_string())?;
+    let source_kind = normalize_routing_source_kind(params.source_kind.as_str())?;
+    let source_id = normalize_required("sourceId", params.source_id.as_str())?;
+    let upstream_model = normalize_required("upstreamModel", params.upstream_model.as_str())?;
+    ensure_source_exists(&storage, source_kind.as_str(), source_id.as_str())?;
+    let now = now_ts();
+    let record = ModelSourceModel {
+        source_kind,
+        source_id,
+        upstream_model,
+        display_name: params.display_name.and_then(normalize_optional),
+        status: "available".to_string(),
+        discovery_kind: "manual".to_string(),
+        last_synced_at: None,
+        extra_json: "{}".to_string(),
+        created_at: now,
+        updated_at: now,
+    };
+    storage
+        .upsert_model_source_model(&record)
+        .map_err(|err| format!("save source model failed: {err}"))?;
+    if record.source_kind == ROUTING_SOURCE_KIND_OPENAI_ACCOUNT {
+        auto_associate_source_models(
+            &storage,
+            record.source_kind.as_str(),
+            record.source_id.as_str(),
+            true,
+        )?;
+    } else if record.source_kind == ROUTING_SOURCE_KIND_AGGREGATE_API {
+        auto_associate_source_models(
+            &storage,
+            record.source_kind.as_str(),
+            record.source_id.as_str(),
+            false,
+        )?;
+    }
+    Ok(source_model_entry(record))
+}
+
+pub(crate) fn save_managed_model_source_mapping(
+    params: ManagedModelSourceMappingUpsertParams,
+) -> Result<ManagedModelSourceMappingEntry, String> {
+    let storage =
+        storage_helpers::open_storage().ok_or_else(|| "storage unavailable".to_string())?;
+    let platform_model_slug = normalize_required("platformModelSlug", &params.platform_model_slug)?;
+    ensure_platform_model_exists(&storage, platform_model_slug.as_str())?;
+    let source_kind = normalize_routing_source_kind(params.source_kind.as_str())?;
+    let source_id = normalize_required("sourceId", &params.source_id)?;
+    let upstream_model = normalize_required("upstreamModel", &params.upstream_model)?;
+    ensure_source_exists(&storage, source_kind.as_str(), source_id.as_str())?;
+    ensure_source_model_exists(
+        &storage,
+        source_kind.as_str(),
+        source_id.as_str(),
+        upstream_model.as_str(),
+    )?;
+    let now = now_ts();
+    let mapping = ModelSourceMapping {
+        id: params
+            .id
+            .and_then(normalize_optional)
+            .unwrap_or_else(generate_mapping_id),
+        platform_model_slug,
+        source_kind,
+        source_id,
+        upstream_model,
+        enabled: params.enabled.unwrap_or(true),
+        priority: params.priority.unwrap_or(0),
+        weight: params.weight.unwrap_or(1).max(1),
+        billing_model_slug: params.billing_model_slug.and_then(normalize_optional),
+        created_at: now,
+        updated_at: now,
+    };
+    storage
+        .upsert_model_source_mapping(&mapping)
+        .map_err(|err| format!("save model mapping failed: {err}"))?;
+    Ok(source_mapping_entry(mapping))
+}
+
+pub(crate) fn delete_managed_model_source_mapping(id: &str) -> Result<(), String> {
+    let storage =
+        storage_helpers::open_storage().ok_or_else(|| "storage unavailable".to_string())?;
+    let id = normalize_required("id", id)?;
+    storage
+        .delete_model_source_mapping(id.as_str())
+        .map_err(|err| format!("delete model mapping failed: {err}"))
+}
+
+fn routing_result_from_storage(storage: &Storage) -> Result<ManagedModelRoutingResult, String> {
+    let source_models = storage
+        .list_model_source_models(None, None)
+        .map_err(|err| format!("list source models failed: {err}"))?
+        .into_iter()
+        .map(source_model_entry)
+        .collect();
+    let mappings = storage
+        .list_model_source_mappings(None)
+        .map_err(|err| format!("list model mappings failed: {err}"))?
+        .into_iter()
+        .map(source_mapping_entry)
+        .collect();
+    Ok(ManagedModelRoutingResult {
+        source_models,
+        mappings,
+    })
+}
+
+fn sync_openai_account_source_models(
+    storage: &Storage,
+    source_id: Option<&str>,
+) -> Result<(), String> {
+    sync_openai_account_source_models_with_options(storage, source_id, true)
+}
+
+pub(crate) fn bootstrap_account_pool_model_routes(
+    storage: &Storage,
+    allow_remote_catalog_fetch: bool,
+) -> Result<(), String> {
+    sync_openai_account_source_models_with_options(storage, None, allow_remote_catalog_fetch)
+}
+
+pub(crate) fn auto_associate_aggregate_api_source_models(
+    storage: &Storage,
+    source_id: &str,
+) -> Result<(), String> {
+    auto_associate_source_models(storage, ROUTING_SOURCE_KIND_AGGREGATE_API, source_id, false)
+}
+
+fn sync_openai_account_source_models_with_options(
+    storage: &Storage,
+    source_id: Option<&str>,
+    allow_remote_catalog_fetch: bool,
+) -> Result<(), String> {
+    let requested_source_id = source_id.and_then(normalize_optional);
+    let accounts = storage
+        .list_accounts()
+        .map_err(|err| format!("list accounts failed: {err}"))?
+        .into_iter()
+        .filter(|account| account.status == "active")
+        .filter(|account| match requested_source_id.as_deref() {
+            Some(source_id) => account.id == source_id,
+            None => true,
+        })
+        .collect::<Vec<_>>();
+    if accounts.is_empty() {
+        return Ok(());
+    }
+
+    let platform_models = read_account_pool_platform_catalog(storage, allow_remote_catalog_fetch)?
+        .items
+        .into_iter()
+        .filter(|item| item.model.supported_in_api)
+        .map(|item| item.model.slug)
+        .collect::<Vec<_>>();
+    for account in accounts {
+        if !platform_models.is_empty() {
+            storage
+                .upsert_discovered_model_source_models(
+                    ROUTING_SOURCE_KIND_OPENAI_ACCOUNT,
+                    account.id.as_str(),
+                    platform_models.as_slice(),
+                    "synced",
+                )
+                .map_err(|err| format!("sync account source models failed: {err}"))?;
+        }
+        auto_associate_source_models(
+            storage,
+            ROUTING_SOURCE_KIND_OPENAI_ACCOUNT,
+            account.id.as_str(),
+            true,
+        )?;
+    }
+    Ok(())
+}
+
+fn sync_aggregate_api_source_models(
+    storage: &Storage,
+    source_id: Option<&str>,
+) -> Result<(), String> {
+    let requested_source_id = source_id.and_then(normalize_optional);
+    let apis = storage
+        .list_aggregate_apis()
+        .map_err(|err| format!("list aggregate apis failed: {err}"))?;
+    let mut synced_any = false;
+    let mut last_error: Option<String> = None;
+    for api in apis
+        .into_iter()
+        .filter(|api| api.status == "active")
+        .filter(|api| match requested_source_id.as_deref() {
+            Some(source_id) => api.id == source_id,
+            None => true,
+        })
+    {
+        match crate::discover_aggregate_api_models(api.id.as_str()) {
+            Ok(models) => {
+                storage
+                    .upsert_discovered_model_source_models(
+                        ROUTING_SOURCE_KIND_AGGREGATE_API,
+                        api.id.as_str(),
+                        models.as_slice(),
+                        "synced",
+                    )
+                    .map_err(|err| format!("sync aggregate api source models failed: {err}"))?;
+                auto_associate_source_models(
+                    storage,
+                    ROUTING_SOURCE_KIND_AGGREGATE_API,
+                    api.id.as_str(),
+                    false,
+                )?;
+                synced_any = true;
+            }
+            Err(err) => {
+                last_error = Some(format!("{}: {err}", api.id));
+            }
+        }
+    }
+    if !synced_any {
+        if let Some(err) = last_error {
+            return Err(err);
+        }
+    }
+    Ok(())
+}
+
+fn read_account_pool_platform_catalog(
+    storage: &Storage,
+    allow_remote_catalog_fetch: bool,
+) -> Result<ManagedModelCatalogResult, String> {
+    let cached_catalog = read_managed_model_catalog_from_storage(storage)?;
+    if !cached_catalog.items.is_empty() {
+        let catalog = ensure_codex_image_tool_model_in_catalog(&cached_catalog);
+        if catalog.items.len() != cached_catalog.items.len() {
+            let _ = save_managed_model_catalog_with_storage(storage, &catalog);
+        }
+        return Ok(catalog);
+    }
+
+    if allow_remote_catalog_fetch {
+        if let Ok(models) = gateway::fetch_models_for_picker() {
+            let catalog = ensure_codex_image_tool_model_in_catalog(&merge_managed_model_catalog(
+                cached_catalog.clone(),
+                models,
+            ));
+            if !catalog.items.is_empty() {
+                save_managed_model_catalog_with_storage(storage, &catalog)?;
+                return Ok(catalog);
+            }
+        }
+    }
+
+    Ok(cached_catalog)
+}
+
+fn auto_associate_source_models(
+    storage: &Storage,
+    source_kind: &str,
+    source_id: &str,
+    auto_create_platform_models: bool,
+) -> Result<(), String> {
+    let existing_source_mappings = storage
+        .list_model_source_mappings(None)
+        .map_err(|err| format!("list model mappings failed: {err}"))?
+        .into_iter()
+        .any(|mapping| mapping.source_kind == source_kind && mapping.source_id == source_id);
+    if existing_source_mappings {
+        return Ok(());
+    }
+
+    let source_models = storage
+        .list_model_source_models(Some(source_kind), Some(source_id))
+        .map_err(|err| format!("list source models failed: {err}"))?
+        .into_iter()
+        .filter(|model| model.status == "available")
+        .filter(|model| !model.upstream_model.trim().is_empty())
+        .collect::<Vec<_>>();
+    if source_models.is_empty() {
+        return Ok(());
+    }
+
+    let mut catalog = read_managed_model_catalog_from_storage(storage)?;
+    if auto_create_platform_models {
+        let mut known_slugs = catalog
+            .items
+            .iter()
+            .map(|item| item.model.slug.clone())
+            .collect::<HashSet<_>>();
+        let mut next_sort_index = catalog
+            .items
+            .iter()
+            .map(|item| item.sort_index)
+            .max()
+            .unwrap_or(-1)
+            + 1;
+        let now = now_ts();
+        let mut changed = false;
+        for source_model in &source_models {
+            let upstream_model = source_model.upstream_model.trim();
+            if upstream_model.is_empty() || known_slugs.contains(upstream_model) {
+                continue;
+            }
+            let Some(model) = auto_platform_model_from_source_model(source_model) else {
+                continue;
+            };
+            known_slugs.insert(model.slug.clone());
+            catalog.items.push(ManagedModelCatalogEntry {
+                model,
+                source_kind: MODEL_SOURCE_KIND_REMOTE.to_string(),
+                user_edited: false,
+                sort_index: next_sort_index,
+                updated_at: now,
+            });
+            next_sort_index += 1;
+            changed = true;
+        }
+        if changed {
+            save_managed_model_catalog_with_storage(storage, &catalog)?;
+            catalog = read_managed_model_catalog_from_storage(storage)?;
+        }
+    }
+
+    let platform_slugs = catalog
+        .items
+        .iter()
+        .map(|item| item.model.slug.clone())
+        .collect::<HashSet<_>>();
+    if platform_slugs.is_empty() {
+        return Ok(());
+    }
+
+    let now = now_ts();
+    for source_model in source_models {
+        if !platform_slugs.contains(source_model.upstream_model.as_str()) {
+            continue;
+        }
+        let mapping = ModelSourceMapping {
+            id: generate_mapping_id(),
+            platform_model_slug: source_model.upstream_model.clone(),
+            source_kind: source_kind.to_string(),
+            source_id: source_id.to_string(),
+            upstream_model: source_model.upstream_model,
+            enabled: true,
+            priority: 0,
+            weight: 1,
+            billing_model_slug: None,
+            created_at: now,
+            updated_at: now,
+        };
+        storage
+            .upsert_model_source_mapping(&mapping)
+            .map_err(|err| format!("save model mapping failed: {err}"))?;
+    }
+    Ok(())
+}
+
+fn auto_platform_model_from_source_model(source_model: &ModelSourceModel) -> Option<ModelInfo> {
+    normalize_model_info(ModelInfo {
+        slug: source_model.upstream_model.trim().to_string(),
+        display_name: source_model
+            .display_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| source_model.upstream_model.trim())
+            .to_string(),
+        supported_in_api: true,
+        visibility: Some("list".to_string()),
+        input_modalities: default_input_modalities(),
+        ..Default::default()
+    })
+}
+
+fn ensure_platform_model_enableable(storage: &Storage, model: &ModelInfo) -> Result<(), String> {
+    if !model.supported_in_api {
+        return Ok(());
+    }
+    let mappings = storage
+        .list_enabled_model_source_mappings_for_platform(model.slug.as_str())
+        .map_err(|err| format!("list model mappings failed: {err}"))?;
+    if mappings.is_empty() {
+        return Err(format!(
+            "模型 `{}` 启用 API 前至少需要一个启用的来源映射",
+            model.slug
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_platform_model_exists(storage: &Storage, slug: &str) -> Result<(), String> {
+    let exists = storage
+        .list_model_catalog_models(MODEL_CACHE_SCOPE_DEFAULT)
+        .map_err(|err| format!("list model catalog failed: {err}"))?
+        .into_iter()
+        .any(|model| model.slug == slug);
+    if exists {
+        Ok(())
+    } else {
+        Err(format!("平台模型 `{slug}` 不存在"))
+    }
+}
+
+fn ensure_source_exists(
+    storage: &Storage,
+    source_kind: &str,
+    source_id: &str,
+) -> Result<(), String> {
+    match source_kind {
+        ROUTING_SOURCE_KIND_OPENAI_ACCOUNT => storage
+            .find_account_by_id(source_id)
+            .map_err(|err| format!("read account failed: {err}"))?
+            .map(|_| ())
+            .ok_or_else(|| "账号来源不存在".to_string()),
+        ROUTING_SOURCE_KIND_AGGREGATE_API => storage
+            .find_aggregate_api_by_id(source_id)
+            .map_err(|err| format!("read aggregate api failed: {err}"))?
+            .map(|_| ())
+            .ok_or_else(|| "上游 API 来源不存在".to_string()),
+        _ => Err("unsupported model source kind".to_string()),
+    }
+}
+
+fn ensure_source_model_exists(
+    storage: &Storage,
+    source_kind: &str,
+    source_id: &str,
+    upstream_model: &str,
+) -> Result<(), String> {
+    let exists = storage
+        .list_model_source_models(Some(source_kind), Some(source_id))
+        .map_err(|err| format!("list source models failed: {err}"))?
+        .into_iter()
+        .any(|model| model.upstream_model == upstream_model && model.status == "available");
+    if exists {
+        Ok(())
+    } else {
+        Err("来源模型不存在或不可用".to_string())
+    }
+}
+
+fn source_model_entry(model: ModelSourceModel) -> ManagedModelSourceModelEntry {
+    ManagedModelSourceModelEntry {
+        source_kind: model.source_kind,
+        source_id: model.source_id,
+        upstream_model: model.upstream_model,
+        display_name: model.display_name,
+        status: model.status,
+        discovery_kind: model.discovery_kind,
+        last_synced_at: model.last_synced_at,
+        created_at: model.created_at,
+        updated_at: model.updated_at,
+    }
+}
+
+fn source_mapping_entry(mapping: ModelSourceMapping) -> ManagedModelSourceMappingEntry {
+    ManagedModelSourceMappingEntry {
+        id: mapping.id,
+        platform_model_slug: mapping.platform_model_slug,
+        source_kind: mapping.source_kind,
+        source_id: mapping.source_id,
+        upstream_model: mapping.upstream_model,
+        enabled: mapping.enabled,
+        priority: mapping.priority,
+        weight: mapping.weight,
+        billing_model_slug: mapping.billing_model_slug,
+        created_at: mapping.created_at,
+        updated_at: mapping.updated_at,
+    }
+}
+
+fn normalize_routing_source_kind(value: &str) -> Result<String, String> {
+    match value.trim() {
+        ROUTING_SOURCE_KIND_OPENAI_ACCOUNT => Ok(ROUTING_SOURCE_KIND_OPENAI_ACCOUNT.to_string()),
+        ROUTING_SOURCE_KIND_AGGREGATE_API => Ok(ROUTING_SOURCE_KIND_AGGREGATE_API.to_string()),
+        _ => Err("unsupported model source kind".to_string()),
+    }
+}
+
+fn normalize_required(label: &str, value: &str) -> Result<String, String> {
+    value
+        .trim()
+        .is_empty()
+        .then(|| format!("{label} required"))
+        .map_or_else(|| Ok(value.trim().to_string()), Err)
+}
+
+fn normalize_optional(value: impl AsRef<str>) -> Option<String> {
+    let trimmed = value.as_ref().trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn generate_mapping_id() -> String {
+    let mut bytes = [0_u8; 8];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    let mut suffix = String::with_capacity(16);
+    for byte in bytes {
+        suffix.push_str(&format!("{byte:02x}"));
+    }
+    format!("msm_{suffix}")
 }
 
 fn managed_catalog_to_models_response(catalog: &ManagedModelCatalogResult) -> ModelsResponse {
@@ -1223,19 +1796,63 @@ fn needs_structured_backfill(rows: &[ModelCatalogModelRecord], missing_scope_row
 mod tests {
     use std::collections::BTreeMap;
 
-    use codexmanager_core::storage::Storage;
+    use codexmanager_core::storage::{now_ts, Account, ModelSourceMapping, Storage};
     use serde_json::{json, Value};
 
     use super::{
+        auto_associate_source_models, bootstrap_account_pool_model_routes,
         ensure_codex_image_tool_model_in_catalog, ensure_codex_image_tool_model_listed,
         managed_catalog_to_models_response, merge_managed_model_catalog, merge_models_response,
         normalize_models_response, read_managed_model_catalog_from_storage,
         read_model_options_from_storage, save_managed_model_catalog_with_storage,
         save_model_options_with_storage, MODEL_SOURCE_KIND_CUSTOM, MODEL_SOURCE_KIND_REMOTE,
+        ROUTING_SOURCE_KIND_AGGREGATE_API, ROUTING_SOURCE_KIND_OPENAI_ACCOUNT,
     };
     use codexmanager_core::rpc::types::{
         ManagedModelCatalogEntry, ManagedModelCatalogResult, ModelInfo, ModelsResponse,
     };
+
+    fn insert_test_account(storage: &Storage, id: &str) {
+        let now = now_ts();
+        storage
+            .insert_account(&Account {
+                id: id.to_string(),
+                label: id.to_string(),
+                issuer: "issuer".to_string(),
+                chatgpt_account_id: Some(id.to_string()),
+                workspace_id: None,
+                group_name: None,
+                sort: 0,
+                status: "active".to_string(),
+                created_at: now,
+                updated_at: now,
+            })
+            .expect("insert account");
+    }
+
+    fn seed_platform_catalog(storage: &Storage, slugs: &[&str]) {
+        let payload = ManagedModelCatalogResult {
+            items: slugs
+                .iter()
+                .enumerate()
+                .map(|(index, slug)| ManagedModelCatalogEntry {
+                    model: ModelInfo {
+                        slug: (*slug).to_string(),
+                        display_name: (*slug).to_string(),
+                        supported_in_api: true,
+                        visibility: Some("list".to_string()),
+                        ..Default::default()
+                    },
+                    source_kind: MODEL_SOURCE_KIND_REMOTE.to_string(),
+                    user_edited: false,
+                    sort_index: index as i64,
+                    updated_at: 0,
+                })
+                .collect(),
+            extra: BTreeMap::new(),
+        };
+        save_managed_model_catalog_with_storage(storage, &payload).expect("seed platform catalog");
+    }
 
     #[test]
     fn normalize_models_response_keeps_full_model_metadata() {
@@ -1580,5 +2197,149 @@ mod tests {
         );
         assert_eq!(merged.items[0].source_kind, MODEL_SOURCE_KIND_REMOTE);
         assert!(merged.items[0].user_edited);
+    }
+
+    #[test]
+    fn account_pool_bootstrap_links_catalog_models_on_first_load() {
+        let storage = Storage::open_in_memory().expect("open storage");
+        storage.init().expect("init storage");
+        insert_test_account(&storage, "acc-auto");
+        seed_platform_catalog(&storage, &["gpt-auto"]);
+
+        bootstrap_account_pool_model_routes(&storage, false).expect("bootstrap account routes");
+
+        let source_models = storage
+            .list_model_source_models(Some(ROUTING_SOURCE_KIND_OPENAI_ACCOUNT), Some("acc-auto"))
+            .expect("list source models");
+        assert!(source_models
+            .iter()
+            .any(|model| model.upstream_model == "gpt-auto"));
+
+        let mappings = storage
+            .list_enabled_model_source_mappings_for_platform("gpt-auto")
+            .expect("list mappings");
+        assert_eq!(mappings.len(), 1);
+        assert_eq!(mappings[0].source_kind, ROUTING_SOURCE_KIND_OPENAI_ACCOUNT);
+        assert_eq!(mappings[0].source_id, "acc-auto");
+        assert_eq!(mappings[0].upstream_model, "gpt-auto");
+    }
+
+    #[test]
+    fn account_pool_auto_association_creates_missing_platform_model() {
+        let storage = Storage::open_in_memory().expect("open storage");
+        storage.init().expect("init storage");
+        storage
+            .upsert_discovered_model_source_models(
+                ROUTING_SOURCE_KIND_OPENAI_ACCOUNT,
+                "acc-source",
+                &["vendor-new".to_string()],
+                "synced",
+            )
+            .expect("seed source model");
+
+        auto_associate_source_models(
+            &storage,
+            ROUTING_SOURCE_KIND_OPENAI_ACCOUNT,
+            "acc-source",
+            true,
+        )
+        .expect("auto associate");
+
+        let catalog =
+            read_managed_model_catalog_from_storage(&storage).expect("read platform catalog");
+        assert!(catalog
+            .items
+            .iter()
+            .any(|item| item.model.slug == "vendor-new" && item.model.supported_in_api));
+
+        let mappings = storage
+            .list_enabled_model_source_mappings_for_platform("vendor-new")
+            .expect("list mappings");
+        assert_eq!(mappings.len(), 1);
+        assert_eq!(mappings[0].source_kind, ROUTING_SOURCE_KIND_OPENAI_ACCOUNT);
+        assert_eq!(mappings[0].source_id, "acc-source");
+    }
+
+    #[test]
+    fn aggregate_auto_association_only_links_existing_platform_models() {
+        let storage = Storage::open_in_memory().expect("open storage");
+        storage.init().expect("init storage");
+        seed_platform_catalog(&storage, &["gpt-known"]);
+        storage
+            .upsert_discovered_model_source_models(
+                ROUTING_SOURCE_KIND_AGGREGATE_API,
+                "agg-1",
+                &["gpt-known".to_string(), "vendor-only".to_string()],
+                "synced",
+            )
+            .expect("seed aggregate source models");
+
+        auto_associate_source_models(&storage, ROUTING_SOURCE_KIND_AGGREGATE_API, "agg-1", false)
+            .expect("auto associate");
+
+        let mappings = storage
+            .list_enabled_model_source_mappings_for_platform("gpt-known")
+            .expect("list known mappings");
+        assert_eq!(mappings.len(), 1);
+        assert_eq!(mappings[0].source_kind, ROUTING_SOURCE_KIND_AGGREGATE_API);
+        assert_eq!(mappings[0].source_id, "agg-1");
+        assert_eq!(mappings[0].upstream_model, "gpt-known");
+
+        let catalog =
+            read_managed_model_catalog_from_storage(&storage).expect("read platform catalog");
+        assert!(!catalog
+            .items
+            .iter()
+            .any(|item| item.model.slug == "vendor-only"));
+        assert!(storage
+            .list_enabled_model_source_mappings_for_platform("vendor-only")
+            .expect("list vendor mappings")
+            .is_empty());
+    }
+
+    #[test]
+    fn auto_association_preserves_existing_source_mapping_state() {
+        let storage = Storage::open_in_memory().expect("open storage");
+        storage.init().expect("init storage");
+        seed_platform_catalog(&storage, &["gpt-disabled"]);
+        storage
+            .upsert_discovered_model_source_models(
+                ROUTING_SOURCE_KIND_OPENAI_ACCOUNT,
+                "acc-disabled",
+                &["gpt-disabled".to_string()],
+                "synced",
+            )
+            .expect("seed source model");
+        let now = now_ts();
+        storage
+            .upsert_model_source_mapping(&ModelSourceMapping {
+                id: "mapping-disabled".to_string(),
+                platform_model_slug: "gpt-disabled".to_string(),
+                source_kind: ROUTING_SOURCE_KIND_OPENAI_ACCOUNT.to_string(),
+                source_id: "acc-disabled".to_string(),
+                upstream_model: "gpt-disabled".to_string(),
+                enabled: false,
+                priority: 0,
+                weight: 1,
+                billing_model_slug: None,
+                created_at: now,
+                updated_at: now,
+            })
+            .expect("seed disabled mapping");
+
+        auto_associate_source_models(
+            &storage,
+            ROUTING_SOURCE_KIND_OPENAI_ACCOUNT,
+            "acc-disabled",
+            true,
+        )
+        .expect("auto associate");
+
+        let mappings = storage
+            .list_model_source_mappings(Some("gpt-disabled"))
+            .expect("list mappings");
+        assert_eq!(mappings.len(), 1);
+        assert!(!mappings[0].enabled);
+        assert_eq!(mappings[0].id, "mapping-disabled");
     }
 }

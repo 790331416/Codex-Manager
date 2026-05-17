@@ -75,6 +75,17 @@ fn resolve_upstream_is_stream(client_is_stream: bool, path: &str) -> bool {
     client_is_stream || (path.starts_with("/v1/responses") && !is_compact_path)
 }
 
+fn request_deadline_for_path(
+    started_at: Instant,
+    client_is_stream: bool,
+    path: &str,
+) -> Option<Instant> {
+    let upstream_is_stream = resolve_upstream_is_stream(client_is_stream, path);
+    // 中文注释：deadline 要按真实上游传输形态计算，避免 /v1/responses 在下游非流式时
+    // 仍被较短 total timeout 抢先截断 SSE 上游读取。
+    super::support::deadline::request_deadline(started_at, upstream_is_stream)
+}
+
 fn should_try_provider_executor_aggregate_route(
     execution_plan: super::executor::GatewayUpstreamExecutionPlan,
 ) -> bool {
@@ -121,17 +132,132 @@ fn route_kind_label(value: GatewayUpstreamRouteKind) -> &'static str {
     }
 }
 
+fn model_route_error(
+    storage: &crate::storage_helpers::StorageHandle,
+    key_id: &str,
+    model: Option<&str>,
+) -> Result<(), (u16, String)> {
+    let Some(model) = model.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(());
+    };
+    let _ = crate::apikey_models::bootstrap_account_pool_model_routes(storage, false);
+    let model_exists = storage
+        .list_model_catalog_models("default")
+        .map_err(|err| (500, format!("model_catalog_read_failed: {err}")))?
+        .into_iter()
+        .any(|item| item.slug == model);
+    if !model_exists {
+        return Err((404, format!("model_not_found: {model}")));
+    }
+    if let Err(err) = crate::resolve_api_key_model_group_access(storage, key_id, model) {
+        if err.contains("model_not_allowed") {
+            return Err((403, err));
+        }
+        return Err((500, err));
+    }
+    let mappings = storage
+        .list_enabled_model_source_mappings_for_platform(model)
+        .map_err(|err| (500, format!("model_mapping_read_failed: {err}")))?;
+    if mappings.is_empty() {
+        return Err((503, format!("model_unavailable: {model}")));
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn respond_model_route_error(
+    request: Request,
+    storage: &crate::storage_helpers::StorageHandle,
+    trace_id: &str,
+    key_id: &str,
+    original_path: &str,
+    path: &str,
+    request_method: &str,
+    response_adapter: super::super::ResponseAdapter,
+    effective_service_tier_for_log: Option<&str>,
+    model_for_log: Option<&str>,
+    reasoning_for_log: Option<&str>,
+    started_at: Instant,
+    status_code: u16,
+    message: String,
+) -> Result<(), String> {
+    super::super::record_gateway_request_outcome(path, status_code, Some("model_route"));
+    super::super::trace_log::log_request_final(
+        trace_id,
+        status_code,
+        Some(key_id),
+        None,
+        Some(message.as_str()),
+        started_at.elapsed().as_millis(),
+    );
+    super::super::write_request_log(
+        storage,
+        super::super::request_log::RequestLogTraceContext {
+            trace_id: Some(trace_id),
+            original_path: Some(original_path),
+            adapted_path: Some(path),
+            response_adapter: Some(response_adapter),
+            effective_service_tier: effective_service_tier_for_log,
+            ..Default::default()
+        },
+        Some(key_id),
+        None,
+        path,
+        request_method,
+        model_for_log,
+        reasoning_for_log,
+        None,
+        Some(status_code),
+        super::super::request_log::RequestLogUsage::default(),
+        Some(message.as_str()),
+        Some(started_at.elapsed().as_millis()),
+    );
+    let response = super::super::error_response::terminal_text_response(
+        status_code,
+        super::super::error_message_for_client(
+            super::super::prefers_raw_errors_for_tiny_http_request(&request),
+            message,
+        ),
+        Some(trace_id),
+    );
+    let _ = request.respond(response);
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn resolve_aggregate_candidates_for_route(
     storage: &crate::storage_helpers::StorageHandle,
     protocol_type: &str,
     aggregate_api_id: Option<&str>,
+    model_for_log: Option<&str>,
 ) -> Result<Vec<codexmanager_core::storage::AggregateApi>, String> {
-    super::protocol::aggregate_api::resolve_aggregate_api_rotation_candidates(
+    let mut candidates = super::protocol::aggregate_api::resolve_aggregate_api_rotation_candidates(
         storage,
         protocol_type,
         aggregate_api_id,
-    )
+    )?;
+    let Some(model) = model_for_log
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(candidates);
+    };
+    candidates = candidates
+        .into_iter()
+        .filter_map(|mut api| {
+            let mapping = storage
+                .find_enabled_model_source_mapping(model, "aggregate_api", api.id.as_str())
+                .ok()
+                .flatten()?;
+            api.model_override = Some(mapping.upstream_model);
+            Some(api)
+        })
+        .collect();
+    if candidates.is_empty() {
+        Err(format!("model_unavailable: {model}"))
+    } else {
+        Ok(candidates)
+    }
 }
 
 fn hybrid_route_error_message(account_error: Option<&str>, aggregate_error: &str) -> String {
@@ -354,7 +480,7 @@ pub(in super::super) fn proxy_validated_request(
     // 中文注释：对齐 Codex 上游协议：/v1/responses 固定走 SSE。
     // 下游是否流式仍由客户端 `stream` 参数决定（在 response bridge 层聚合/透传）。
     let upstream_is_stream = resolve_upstream_is_stream(client_is_stream, path.as_str());
-    let request_deadline = super::support::deadline::request_deadline(started_at, client_is_stream);
+    let request_deadline = request_deadline_for_path(started_at, client_is_stream, path.as_str());
 
     super::super::trace_log::log_request_start(
         trace_id.as_str(),
@@ -393,11 +519,33 @@ pub(in super::super) fn proxy_validated_request(
         route_kind_label(execution_plan.route_kind),
     );
 
+    if let Err((status_code, message)) =
+        model_route_error(&storage, key_id.as_str(), model_for_log.as_deref())
+    {
+        return respond_model_route_error(
+            request,
+            &storage,
+            trace_id.as_str(),
+            key_id.as_str(),
+            original_path.as_str(),
+            path.as_str(),
+            request_method.as_str(),
+            response_adapter,
+            effective_service_tier_for_log.as_deref(),
+            model_for_log.as_deref(),
+            reasoning_for_log.as_deref(),
+            started_at,
+            status_code,
+            message,
+        );
+    }
+
     if should_try_provider_executor_aggregate_route(execution_plan) {
         match resolve_aggregate_candidates_for_route(
             &storage,
             protocol_type.as_str(),
             aggregate_api_id.as_deref(),
+            model_for_log.as_deref(),
         ) {
             Ok(aggregate_api_candidates) => {
                 return proxy_with_aggregate_candidates(
@@ -463,6 +611,7 @@ pub(in super::super) fn proxy_validated_request(
                 &storage,
                 protocol_type.as_str(),
                 aggregate_api_id.as_deref(),
+                model_for_log.as_deref(),
             ) {
                 Ok(aggregate_api_candidates) => {
                     return proxy_with_aggregate_candidates(
@@ -612,6 +761,7 @@ pub(in super::super) fn proxy_validated_request(
             &storage,
             protocol_type.as_str(),
             aggregate_api_id.as_deref(),
+            model_for_log.as_deref(),
         ) {
             Ok(aggregate_api_candidates) => {
                 return proxy_with_aggregate_candidates(
@@ -676,13 +826,15 @@ pub(in super::super) fn proxy_validated_request(
 mod tests {
     use super::{
         exhausted_gateway_error_for_log, hybrid_route_error_message, provider_upstream_hint,
-        resolve_upstream_is_stream, respond_when_account_candidates_empty,
+        request_deadline_for_path, resolve_upstream_is_stream,
+        respond_when_account_candidates_empty,
         should_fallback_to_aggregate_after_account_exhaustion,
         should_try_provider_executor_aggregate_route,
     };
     use crate::gateway::upstream::executor::{
         GatewayUpstreamExecutionPlan, GatewayUpstreamExecutorKind, GatewayUpstreamRouteKind,
     };
+    use std::time::{Duration, Instant};
 
     /// 函数 `exhausted_gateway_error_includes_attempts_skips_and_last_error`
     ///
@@ -739,6 +891,29 @@ mod tests {
         assert!(!resolve_upstream_is_stream(false, "/v1/responses/compact"));
         assert!(!resolve_upstream_is_stream(false, "/v1/chat/completions"));
         assert!(resolve_upstream_is_stream(true, "/v1/chat/completions"));
+    }
+
+    #[test]
+    fn request_deadline_for_responses_uses_upstream_stream_semantics() {
+        let _guard = crate::test_env_guard();
+        let previous_total = crate::gateway::current_upstream_total_timeout_ms();
+        let previous_stream = crate::gateway::current_upstream_stream_timeout_ms();
+
+        crate::gateway::set_upstream_total_timeout_ms(120_000);
+        crate::gateway::set_upstream_stream_timeout_ms(300_000);
+
+        let started_at = Instant::now();
+        let deadline = request_deadline_for_path(started_at, false, "/v1/responses")
+            .expect("responses deadline");
+        let timeout = deadline
+            .checked_duration_since(started_at)
+            .expect("deadline should be after start");
+
+        crate::gateway::set_upstream_total_timeout_ms(previous_total);
+        crate::gateway::set_upstream_stream_timeout_ms(previous_stream);
+
+        assert!(timeout > Duration::from_secs(250));
+        assert!(timeout <= Duration::from_secs(300));
     }
 
     #[test]

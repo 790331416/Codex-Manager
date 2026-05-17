@@ -70,6 +70,7 @@ pub(crate) struct CodexCompactUpstreamHeaderInput<'a> {
     pub(crate) incoming_originator: Option<&'a str>,
     pub(crate) preserve_client_identity: bool,
     pub(crate) incoming_session_id: Option<&'a str>,
+    pub(crate) thread_id: Option<&'a str>,
     pub(crate) incoming_window_id: Option<&'a str>,
     pub(crate) incoming_subagent: Option<&'a str>,
     pub(crate) incoming_parent_thread_id: Option<&'a str>,
@@ -293,6 +294,9 @@ pub(crate) fn build_codex_compact_upstream_headers(
     );
     if let Some(session_id) = resolved_session_id.clone() {
         headers.push(("session_id".to_string(), session_id));
+    }
+    if let Some(thread_id) = normalize_non_empty(input.thread_id) {
+        headers.push(("thread_id".to_string(), thread_id.to_string()));
     }
     if let Some(window_id) = resolve_window_id(
         input.incoming_window_id,
@@ -704,6 +708,7 @@ mod tests {
             incoming_originator: None,
             preserve_client_identity: false,
             incoming_session_id: None,
+            thread_id: Some("thread-anchor-c"),
             incoming_window_id: Some("conversation-anchor:11"),
             incoming_subagent: Some("subagent-b"),
             incoming_parent_thread_id: Some("thread-parent-c"),
@@ -727,6 +732,7 @@ mod tests {
             header_value(&headers, "session_id"),
             Some("conversation-anchor")
         );
+        assert_eq!(header_value(&headers, "thread_id"), Some("thread-anchor-c"));
         assert_eq!(
             header_value(&headers, "x-codex-window-id"),
             Some("conversation-anchor:0")
@@ -852,5 +858,29 @@ mod tests {
             Some("gemini-cli/0.1.14 (Windows 11; x86_64)")
         );
         assert_eq!(header_value(&headers, "originator"), Some("gemini_cli"));
+    }
+
+    #[test]
+    fn build_codex_compact_upstream_headers_omits_thread_id_when_missing() {
+        let _guard = crate::test_env_guard();
+        let headers = build_codex_compact_upstream_headers(CodexCompactUpstreamHeaderInput {
+            auth_token: "token-thread-missing",
+            chatgpt_account_id: None,
+            installation_id: None,
+            incoming_user_agent: None,
+            incoming_originator: None,
+            preserve_client_identity: false,
+            incoming_session_id: Some("session-anchor"),
+            thread_id: None,
+            incoming_window_id: None,
+            incoming_subagent: None,
+            incoming_parent_thread_id: None,
+            passthrough_codex_headers: &[],
+            fallback_session_id: Some("session-anchor"),
+            strip_session_affinity: false,
+            has_body: false,
+        });
+
+        assert_eq!(header_value(&headers, "thread_id"), None);
     }
 }

@@ -383,6 +383,13 @@ fn apply_model_forward_rule_if_needed(obj: &mut serde_json::Map<String, Value>) 
     true
 }
 
+fn compact_model_override_for_path(path: &str) -> Option<String> {
+    if responses::is_compact_path(path) {
+        return super::current_compact_model_override();
+    }
+    None
+}
+
 /// 函数 `apply_request_overrides`
 ///
 /// 作者: gaohongshun
@@ -649,7 +656,11 @@ fn apply_request_overrides_with_prompt_cache_key_mode(
 ) -> Vec<u8> {
     let use_codex_responses_compat = should_apply_codex_responses_compat(path, upstream_base_url);
     let use_codex_compat_rewrite = allow_codex_compat_rewrite && use_codex_responses_compat;
-    let normalized_model = model_slug.map(str::trim).filter(|v| !v.is_empty());
+    let normalized_model = model_slug
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string);
+    let compact_model_override = compact_model_override_for_path(path);
     let normalized_reasoning = reasoning_effort
         .and_then(crate::reasoning_effort::normalize_reasoning_effort)
         .map(str::to_string);
@@ -664,7 +675,10 @@ fn apply_request_overrides_with_prompt_cache_key_mode(
             let mut changed = false;
             let mut dropped_keys = Vec::new();
 
-            if let Some(model) = normalized_model {
+            let effective_model = compact_model_override
+                .as_deref()
+                .or(normalized_model.as_deref());
+            if let Some(model) = effective_model {
                 let forwarded_model = super::resolve_builtin_forwarded_model(model)
                     .unwrap_or_else(|| model.to_string());
                 obj.insert("model".to_string(), Value::String(forwarded_model));

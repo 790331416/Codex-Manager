@@ -95,3 +95,33 @@ fn prefixed_request_type_and_service_tier_queries_are_supported() {
         } if value == "priority"
     ));
 }
+
+#[test]
+fn prefixed_route_detail_queries_are_supported() {
+    let upstream_model_query = parse_request_log_query(Some("upstream_model:gpt-real"));
+    assert!(matches!(
+        upstream_model_query,
+        RequestLogQuery::FieldLike {
+            column: "upstream_model",
+            pattern
+        } if pattern == "%gpt-real%"
+    ));
+
+    let source_kind_query = parse_request_log_query(Some("source_kind:=aggregate_api"));
+    assert!(matches!(
+        source_kind_query,
+        RequestLogQuery::FieldExact {
+            column: "actual_source_kind",
+            value
+        } if value == "aggregate_api"
+    ));
+
+    let source_id_query = parse_request_log_query(Some("source_id:ag_123"));
+    assert!(matches!(
+        source_id_query,
+        RequestLogQuery::FieldLike {
+            column: "actual_source_id",
+            pattern
+        } if pattern == "%ag_123%"
+    ));
+}

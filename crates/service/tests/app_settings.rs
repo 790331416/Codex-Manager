@@ -1,4 +1,6 @@
-use codexmanager_core::storage::{now_ts, Storage};
+use codexmanager_core::storage::{
+    now_ts, ApiKey, ApiKeyOwner, AppWalletLedgerEntry, Storage, UserModelGroup,
+};
 use serde_json::json;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -205,6 +207,330 @@ fn read_env_overrides_map(db_path: &PathBuf) -> serde_json::Map<String, serde_js
         .expect("read env overrides")
         .expect("env overrides exists");
     serde_json::from_str(&raw).expect("parse env overrides json")
+}
+
+fn create_member_user(username: &str) -> codexmanager_service::AppUserPublicResult {
+    codexmanager_service::create_app_user(codexmanager_service::AppUserCreateInput {
+        username: username.to_string(),
+        password: "password123".to_string(),
+        display_name: Some(username.to_string()),
+        role: Some("member".to_string()),
+        initial_balance_credit_micros: None,
+    })
+    .expect("create member user")
+}
+
+fn create_admin_user(username: &str) -> codexmanager_service::AppUserPublicResult {
+    codexmanager_service::create_app_user(codexmanager_service::AppUserCreateInput {
+        username: username.to_string(),
+        password: "password123".to_string(),
+        display_name: Some(username.to_string()),
+        role: Some("admin".to_string()),
+        initial_balance_credit_micros: None,
+    })
+    .expect("create admin user")
+}
+
+fn assert_account_mode_locked_with_reason(reason: &str) {
+    let status = codexmanager_service::app_auth_status_value().expect("auth status");
+    assert_eq!(
+        status["billingModeLock"]["accountModeLocked"], true,
+        "account mode should be locked for {reason}: {status}"
+    );
+    assert_eq!(
+        status["billingModeLock"]["distributionLocked"], true,
+        "distribution should be locked for {reason}: {status}"
+    );
+    let reasons = status["billingModeLock"]["reasons"]
+        .as_array()
+        .expect("lock reasons");
+    assert!(
+        reasons.iter().any(|item| item.as_str() == Some(reason)),
+        "missing lock reason {reason}: {reasons:?}"
+    );
+    let err = codexmanager_service::app_settings_set(Some(&json!({
+        "webAuthMode": "none"
+    })))
+    .expect_err("locked account mode should reject downgrade");
+    assert!(
+        err.contains("account_billing_mode_locked"),
+        "unexpected error: {err}"
+    );
+}
+
+fn seed_api_key_owner(storage: &Storage) {
+    let now = now_ts();
+    storage
+        .insert_api_key(&ApiKey {
+            id: "key-lock-owner".to_string(),
+            name: Some("Lock owner key".to_string()),
+            model_slug: Some("gpt-5".to_string()),
+            reasoning_effort: None,
+            service_tier: None,
+            rotation_strategy: "account_rotation".to_string(),
+            aggregate_api_id: None,
+            account_plan_filter: None,
+            aggregate_api_url: None,
+            client_type: "codex".to_string(),
+            protocol_type: "openai_compat".to_string(),
+            auth_scheme: "authorization_bearer".to_string(),
+            upstream_base_url: None,
+            static_headers_json: None,
+            key_hash: "hash-lock-owner".to_string(),
+            status: "active".to_string(),
+            created_at: now,
+            last_used_at: None,
+        })
+        .expect("insert api key");
+    storage
+        .upsert_api_key_owner(&ApiKeyOwner {
+            key_id: "key-lock-owner".to_string(),
+            owner_kind: "project".to_string(),
+            owner_user_id: None,
+            project_id: None,
+            updated_at: now,
+        })
+        .expect("insert api key owner");
+}
+
+fn seed_wallet_ledger(storage: &Storage, entry_kind: &str, amount_credit_micros: i64) {
+    let wallet = storage
+        .ensure_wallet_for_owner("wal-lock", "project", "project-lock")
+        .expect("ensure wallet");
+    storage
+        .adjust_wallet_balance(&AppWalletLedgerEntry {
+            id: format!("wl-{entry_kind}"),
+            wallet_id: wallet.id,
+            entry_kind: entry_kind.to_string(),
+            amount_credit_micros,
+            balance_after_credit_micros: 0,
+            request_log_id: None,
+            api_key_id: None,
+            pricing_rule_id: None,
+            raw_usage_json: None,
+            note: Some("lock signal".to_string()),
+            created_by_user_id: None,
+            created_at: now_ts(),
+        })
+        .expect("insert wallet ledger entry");
+}
+
+#[test]
+fn app_settings_roundtrip_account_manager_mode_and_bootstrap() {
+    with_temp_db(|_| {
+        let snapshot = codexmanager_service::app_settings_set(Some(&json!({
+            "webAuthMode": "accounts",
+            "distributionEnabled": true
+        })))
+        .expect("save settings");
+        assert_eq!(snapshot["webAuthMode"], "accounts");
+        assert_eq!(snapshot["distributionEnabled"], true);
+        assert_eq!(snapshot["appUsersConfigured"], false);
+
+        let login = codexmanager_service::bootstrap_app_admin(
+            "admin-user",
+            "password123",
+            Some("Admin User"),
+        )
+        .expect("bootstrap admin");
+        assert!(login.token.starts_with("cms_"));
+        assert_eq!(login.user.username, "admin-user");
+        assert_eq!(login.user.role, "admin");
+        assert!(login.user.wallet.is_none());
+
+        let resolved = codexmanager_service::resolve_app_user_session(&login.token)
+            .expect("resolve session")
+            .expect("active session");
+        assert_eq!(resolved.user.id, login.user.id);
+
+        let status = codexmanager_service::app_auth_status_value().expect("auth status");
+        assert_eq!(status["mode"], "accounts");
+        assert_eq!(status["distributionEnabled"], true);
+        assert_eq!(status["appUsersConfigured"], true);
+        assert_eq!(status["appUserCount"], 1);
+    });
+}
+
+#[test]
+fn app_settings_rejects_password_mode_without_password() {
+    with_temp_db(|_| {
+        let result = codexmanager_service::app_settings_set(Some(&json!({
+            "webAuthMode": "password"
+        })));
+        assert!(result.is_err());
+
+        let snapshot = codexmanager_service::app_settings_set(Some(&json!({
+            "webAccessPassword": "password123",
+            "webAuthMode": "password"
+        })))
+        .expect("save password mode");
+        assert_eq!(snapshot["webAuthMode"], "password");
+        assert_eq!(snapshot["webAccessPasswordConfigured"], true);
+    });
+}
+
+#[test]
+fn app_settings_allows_trial_account_mode_downgrade_before_lock() {
+    with_temp_db(|_| {
+        let snapshot = codexmanager_service::app_settings_set(Some(&json!({
+            "webAuthMode": "accounts"
+        })))
+        .expect("enable account mode");
+        assert_eq!(snapshot["webAuthMode"], "accounts");
+        assert_eq!(snapshot["billingModeLock"]["accountModeLocked"], false);
+
+        let snapshot = codexmanager_service::app_settings_set(Some(&json!({
+            "webAuthMode": "none"
+        })))
+        .expect("downgrade to none before formal use");
+        assert_eq!(snapshot["webAuthMode"], "none");
+
+        let snapshot = codexmanager_service::app_settings_set(Some(&json!({
+            "webAccessPassword": "password123",
+            "webAuthMode": "accounts"
+        })))
+        .expect("enable account mode again");
+        assert_eq!(snapshot["webAuthMode"], "accounts");
+
+        let snapshot = codexmanager_service::app_settings_set(Some(&json!({
+            "webAuthMode": "password"
+        })))
+        .expect("downgrade to password before formal use");
+        assert_eq!(snapshot["webAuthMode"], "password");
+    });
+}
+
+#[test]
+fn app_settings_formal_use_signals_lock_account_mode() {
+    with_temp_db(|_| {
+        codexmanager_service::app_settings_set(Some(&json!({
+            "webAuthMode": "accounts"
+        })))
+        .expect("enable account mode");
+        create_member_user("member-lock");
+        assert_account_mode_locked_with_reason("member_users");
+    });
+
+    with_temp_db(|db_path| {
+        codexmanager_service::app_settings_set(Some(&json!({
+            "webAuthMode": "accounts"
+        })))
+        .expect("enable account mode");
+        let storage = Storage::open(db_path).expect("open storage");
+        storage.init().expect("init storage");
+        seed_api_key_owner(&storage);
+        assert_account_mode_locked_with_reason("api_key_owners");
+    });
+
+    with_temp_db(|db_path| {
+        codexmanager_service::app_settings_set(Some(&json!({
+            "webAuthMode": "accounts"
+        })))
+        .expect("enable account mode");
+        let storage = Storage::open(db_path).expect("open storage");
+        storage.init().expect("init storage");
+        seed_wallet_ledger(&storage, "manual_adjustment", 1);
+        assert_account_mode_locked_with_reason("wallet_balance");
+    });
+
+    with_temp_db(|db_path| {
+        codexmanager_service::app_settings_set(Some(&json!({
+            "webAuthMode": "accounts"
+        })))
+        .expect("enable account mode");
+        let storage = Storage::open(db_path).expect("open storage");
+        storage.init().expect("init storage");
+        seed_wallet_ledger(&storage, "manual_adjustment", 0);
+        assert_account_mode_locked_with_reason("wallet_ledger");
+    });
+
+    with_temp_db(|db_path| {
+        codexmanager_service::app_settings_set(Some(&json!({
+            "webAuthMode": "accounts"
+        })))
+        .expect("enable account mode");
+        let admin = create_admin_user("admin-model-group-lock");
+        let storage = Storage::open(db_path).expect("open storage");
+        storage.init().expect("init storage");
+        storage
+            .replace_user_model_groups_for_group(
+                "mg_default",
+                &[UserModelGroup {
+                    user_id: admin.id,
+                    group_id: "mg_default".to_string(),
+                    status: "active".to_string(),
+                    expires_at: None,
+                    created_at: now_ts(),
+                    updated_at: now_ts(),
+                }],
+            )
+            .expect("assign model group");
+        assert_account_mode_locked_with_reason("model_group_assignments");
+    });
+
+    with_temp_db(|db_path| {
+        codexmanager_service::app_settings_set(Some(&json!({
+            "webAuthMode": "accounts"
+        })))
+        .expect("enable account mode");
+        let storage = Storage::open(db_path).expect("open storage");
+        storage.init().expect("init storage");
+        seed_wallet_ledger(&storage, "request_charge", 0);
+        assert_account_mode_locked_with_reason("request_charges");
+    });
+}
+
+#[test]
+fn app_settings_distribution_requires_accounts_mode() {
+    with_temp_db(|_| {
+        let err = codexmanager_service::app_settings_set(Some(&json!({
+            "distributionEnabled": true
+        })))
+        .expect_err("distribution should require account mode");
+        assert!(
+            err.contains("distribution_requires_accounts_mode"),
+            "unexpected error: {err}"
+        );
+
+        let err = codexmanager_service::set_distribution_enabled(true)
+            .expect_err("shortcut should require account mode");
+        assert!(
+            err.contains("distribution_requires_accounts_mode"),
+            "unexpected error: {err}"
+        );
+    });
+}
+
+#[test]
+fn app_settings_locks_distribution_after_formal_use() {
+    with_temp_db(|_| {
+        let snapshot = codexmanager_service::app_settings_set(Some(&json!({
+            "webAuthMode": "accounts",
+            "distributionEnabled": true
+        })))
+        .expect("enable account distribution");
+        assert_eq!(snapshot["distributionEnabled"], true);
+
+        create_member_user("member-distribution-lock");
+        let status = codexmanager_service::app_auth_status_value().expect("auth status");
+        assert_eq!(status["billingModeLock"]["distributionLocked"], true);
+
+        let err = codexmanager_service::app_settings_set(Some(&json!({
+            "distributionEnabled": false
+        })))
+        .expect_err("locked distribution should reject app settings downgrade");
+        assert!(
+            err.contains("distribution_mode_locked"),
+            "unexpected error: {err}"
+        );
+
+        let err = codexmanager_service::set_distribution_enabled(false)
+            .expect_err("locked distribution should reject shortcut downgrade");
+        assert!(
+            err.contains("distribution_mode_locked"),
+            "unexpected error: {err}"
+        );
+    });
 }
 
 /// 函数 `sync_runtime_settings_from_storage_preserves_process_env_when_override_not_persisted`
@@ -1753,5 +2079,66 @@ fn app_settings_set_rejects_reserved_and_bootstrap_env_override_keys() {
             }
         })));
         assert!(bootstrap.is_err());
+    });
+}
+
+#[test]
+fn app_settings_set_can_roundtrip_author_content() {
+    with_temp_db(|_| {
+        let snapshot = codexmanager_service::app_settings_set(Some(&json!({
+            "authorSponsors": [
+                {
+                    "key": "remote-sponsor",
+                    "name": "Remote Sponsor",
+                    "description": "remote sponsor description",
+                    "href": "https://example.com/sponsor",
+                    "actionLabel": "立即查看",
+                    "imageSrc": "https://example.com/logo.png",
+                    "imageAlt": "Remote Sponsor Logo"
+                }
+            ],
+            "authorServerRecommendations": []
+        })))
+        .expect("set author content");
+
+        assert_eq!(
+            snapshot
+                .get("authorSponsors")
+                .and_then(|value| value.as_array())
+                .map(|items| items.len()),
+            Some(1)
+        );
+        assert_eq!(
+            snapshot
+                .get("authorSponsors")
+                .and_then(|value| value.get(0))
+                .and_then(|value| value.get("name"))
+                .and_then(|value| value.as_str()),
+            Some("Remote Sponsor")
+        );
+        assert_eq!(
+            snapshot
+                .get("authorServerRecommendations")
+                .and_then(|value| value.as_array())
+                .map(|items| items.len()),
+            Some(0)
+        );
+
+        let public = codexmanager_service::author_content_get().expect("get author content");
+        assert_eq!(
+            public
+                .get("authorSponsors")
+                .and_then(|value| value.get(0))
+                .and_then(|value| value.get("href"))
+                .and_then(|value| value.as_str()),
+            Some("https://example.com/sponsor")
+        );
+        assert_eq!(
+            public
+                .get("authorServerRecommendations")
+                .and_then(|value| value.as_array())
+                .map(|items| items.len()),
+            Some(0)
+        );
     });
 }

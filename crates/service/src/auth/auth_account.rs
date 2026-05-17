@@ -211,6 +211,7 @@ pub(crate) fn login_with_chatgpt_auth_tokens(
 
     set_current_auth_account_id(Some(&account_id))?;
     set_current_auth_mode(Some(AUTH_MODE_CHATGPT_AUTH_TOKENS))?;
+    let _ = crate::usage_refresh::enqueue_usage_refresh_after_account_add(&account_id);
 
     Ok(LoginStartResult::ChatgptAuthTokens {})
 }

@@ -10,6 +10,11 @@ pub(in super::super) enum UpstreamOutcomeDecision {
     RespondUpstream,
 }
 
+fn is_compact_target(url: &str) -> bool {
+    let normalized = url.trim().to_ascii_lowercase();
+    normalized.contains("/responses/compact")
+}
+
 /// 函数 `decide_upstream_outcome`
 ///
 /// 作者: gaohongshun
@@ -66,6 +71,21 @@ where
         super::super::super::mark_account_cooldown_for_status(account_id, status.as_u16());
         let _ = crate::usage_refresh::enqueue_usage_refresh_for_account(account_id);
         log_gateway_result(Some(url), status.as_u16(), Some("upstream rate-limited"));
+        return from_follow_up_action(follow_up_action(true, has_more_candidates));
+    }
+
+    if is_official_target
+        && is_compact_target(url)
+        && matches!(status.as_u16(), 500..=599)
+        && super::super::super::should_failover_from_low_quota_snapshot(storage, account_id)
+    {
+        super::super::super::mark_account_cooldown_for_status(account_id, status.as_u16());
+        let _ = crate::usage_refresh::enqueue_usage_refresh_for_account(account_id);
+        log_gateway_result(
+            Some(url),
+            status.as_u16(),
+            Some("upstream compact low-quota server error"),
+        );
         return from_follow_up_action(follow_up_action(true, has_more_candidates));
     }
 

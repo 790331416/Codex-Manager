@@ -1,29 +1,92 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
+  AlertTriangle,
+  ArrowRight,
+  BarChart3,
   BrainCircuit,
   CheckCircle2,
+  Clock3,
   Database,
   DollarSign,
+  KeyRound,
+  LineChart,
   LoaderCircle,
   PieChart,
+  Plus,
+  ShieldCheck,
+  Wallet,
   Users,
   XCircle,
   Zap,
   type LucideIcon,
 } from "lucide-react";
+import { ApiKeyModal } from "@/components/modals/api-key-modal";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useCodexAccountSwitcher } from "@/hooks/useCodexAccountSwitcher";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { useDashboardStats } from "@/hooks/useDashboardStats";
+import { useCodexAccountSwitcher } from "@/hooks/useCodexAccountSwitcher";
+import { useDashboardAdminUsageSummary } from "@/hooks/useDashboardAdminUsageSummary";
+import { resolveSessionRole, useAppSession } from "@/hooks/useAppSession";
+import { useMemberDashboardSummary } from "@/hooks/useMemberDashboardSummary";
 import { usePageTransitionReady } from "@/hooks/usePageTransitionReady";
+import { useRuntimeCapabilities } from "@/hooks/useRuntimeCapabilities";
+import {
+  formatCompactTokenAmount,
+  formatPercent,
+} from "@/lib/dashboard/format";
+import { quotaClient } from "@/lib/api/quota-client";
 import { useI18n } from "@/lib/i18n/provider";
 import { cn } from "@/lib/utils";
-import { formatCompactNumber } from "@/lib/utils/usage";
+import { buildStaticRouteUrl } from "@/lib/utils/static-routes";
+import { formatLocalDateTimeFromSeconds } from "@/lib/utils/time";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  XAxis,
+  YAxis,
+} from "recharts";
+import type {
+  DashboardAdminUsageSummary,
+  DashboardDailyUsagePoint,
+  DashboardSourceUsageSummary,
+  DashboardTokenUsage,
+  DashboardUserUsageSummary,
+  MemberDashboardAlert,
+  MemberDashboardKeyUsage,
+  MemberDashboardSummary,
+  ModelInfo,
+  RequestLog,
+} from "@/types";
 
 interface StatProgressCardProps {
   title: string;
@@ -32,6 +95,15 @@ interface StatProgressCardProps {
   icon: LucideIcon;
   color: string;
   sub: string;
+}
+
+interface MetricCardProps {
+  title: string;
+  value: string;
+  icon: LucideIcon;
+  color: string;
+  sub: string;
+  badge?: string;
 }
 
 interface PercentBarProps {
@@ -50,61 +122,73 @@ interface AccountHighlightCardProps {
   action?: ReactNode;
 }
 
-/**
- * 函数 `formatPercent`
- *
- * 作者: gaohongshun
- *
- * 时间: 2026-04-02
- *
- * # 参数
- * - value: 参数 value
- *
- * # 返回
- * 返回函数执行结果
- */
-function formatPercent(value: number | null | undefined): string {
-  return value == null ? "--" : `${Math.max(0, Math.round(value))}%`;
-}
-
-/**
- * 函数 `formatCompactTokenAmount`
- *
- * 作者: gaohongshun
- *
- * 时间: 2026-04-02
- *
- * # 参数
- * - value: 参数 value
- *
- * # 返回
- * 返回函数执行结果
- */
-function formatCompactTokenAmount(value: number | null | undefined): string {
+function formatUsd(value: number | null | undefined): string {
   const normalized =
     typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
-  if (normalized < 1000) {
-    return normalized.toLocaleString("zh-CN", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
-  }
-  return formatCompactNumber(normalized, "0.00", 2, true);
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(normalized);
 }
 
-/**
- * 函数 `PercentBar`
- *
- * 作者: gaohongshun
- *
- * 时间: 2026-04-02
- *
- * # 参数
- * - params: 参数 params
- *
- * # 返回
- * 返回函数执行结果
- */
+function formatWalletCredit(micros: number | null | undefined): string {
+  const normalized =
+    typeof micros === "number" && Number.isFinite(micros) ? micros / 1_000_000 : 0;
+  return formatUsd(normalized);
+}
+
+function formatDateTime(value: number | null | undefined): string {
+  return formatLocalDateTimeFromSeconds(value, "从未使用");
+}
+
+function formatShortDate(value: number | null | undefined): string {
+  if (!value) return "--";
+  const date = new Date(value * 1000);
+  if (Number.isNaN(date.getTime())) return "--";
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function formatDuration(value: number | null | undefined): string {
+  if (value == null) return "-";
+  if (value >= 10_000) return `${Math.round(value / 1000)}s`;
+  if (value >= 1000) return `${(value / 1000).toFixed(1).replace(/\.0$/, "")}s`;
+  return `${Math.round(value)}ms`;
+}
+
+function statusBadgeVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
+  const normalized = status.trim().toLowerCase();
+  if (normalized === "enabled" || normalized === "active") return "default";
+  if (normalized === "disabled" || normalized === "inactive") return "secondary";
+  return "outline";
+}
+
+function alertTone(alert: MemberDashboardAlert): string {
+  if (alert.severity === "critical") {
+    return "border-destructive/40 bg-destructive/10 text-destructive";
+  }
+  if (alert.severity === "warning") {
+    return "border-yellow-500/40 bg-yellow-500/10 text-yellow-700 dark:text-yellow-300";
+  }
+  return "border-blue-500/40 bg-blue-500/10 text-blue-700 dark:text-blue-300";
+}
+
+function modelPriceSummary(model: ModelInfo): string {
+  const raw = model.priceSummary;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return "按平台价格规则";
+  }
+  const source = raw as Record<string, unknown>;
+  const input = typeof source.inputUsdPer1M === "number" ? source.inputUsdPer1M : null;
+  const output = typeof source.outputUsdPer1M === "number" ? source.outputUsdPer1M : null;
+  if (input == null || output == null) return "按平台价格规则";
+  return `In ${formatUsd(input)}/1M · Out ${formatUsd(output)}/1M`;
+}
+
 function PercentBar({ label, value, tone = "default" }: PercentBarProps) {
   const normalized = value == null ? 0 : Math.max(0, Math.min(100, Math.round(value)));
   const colorClass =
@@ -130,53 +214,14 @@ function PercentBar({ label, value, tone = "default" }: PercentBarProps) {
   );
 }
 
-/**
- * 函数 `quotaTrackClass`
- *
- * 作者: gaohongshun
- *
- * 时间: 2026-04-02
- *
- * # 参数
- * - tone: 参数 tone
- *
- * # 返回
- * 返回函数执行结果
- */
 function quotaTrackClass(tone: "green" | "blue") {
   return tone === "blue" ? "bg-blue-500/20" : "bg-green-500/20";
 }
 
-/**
- * 函数 `quotaIndicatorClass`
- *
- * 作者: gaohongshun
- *
- * 时间: 2026-04-02
- *
- * # 参数
- * - tone: 参数 tone
- *
- * # 返回
- * 返回函数执行结果
- */
 function quotaIndicatorClass(tone: "green" | "blue") {
   return tone === "blue" ? "bg-blue-500" : "bg-green-500";
 }
 
-/**
- * 函数 `AccountHighlightCard`
- *
- * 作者: gaohongshun
- *
- * 时间: 2026-04-02
- *
- * # 参数
- * - params: 参数 params
- *
- * # 返回
- * 返回函数执行结果
- */
 function AccountHighlightCard({
   title,
   name,
@@ -192,11 +237,11 @@ function AccountHighlightCard({
       : "bg-green-500/20 text-green-500";
 
   return (
-    <div className="rounded-2xl border border-border/40 bg-accent/20 p-4 shadow-sm">
+    <div className="rounded-xl border border-border/40 bg-accent/20 p-4 shadow-sm">
       <div className="flex items-center gap-4">
         <div
           className={cn(
-            "flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl",
+            "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl",
             iconToneClass,
           )}
         >
@@ -207,30 +252,17 @@ function AccountHighlightCard({
           <p className="truncate text-sm font-semibold leading-5">{name}</p>
           <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
         </div>
+        {action ? <div className="shrink-0">{action}</div> : null}
       </div>
       {progressLabel ? (
         <div className="mt-3 border-t border-border/40 pt-3">
           <PercentBar label={progressLabel} value={progressValue} tone={tone} />
         </div>
       ) : null}
-      {action ? <div className="mt-3 flex justify-end">{action}</div> : null}
     </div>
   );
 }
 
-/**
- * 函数 `StatProgressCard`
- *
- * 作者: gaohongshun
- *
- * 时间: 2026-04-02
- *
- * # 参数
- * - params: 参数 params
- *
- * # 返回
- * 返回函数执行结果
- */
 function StatProgressCard({
   title,
   value,
@@ -243,7 +275,7 @@ function StatProgressCard({
   const percentage = total > 0 ? Math.min(Math.round((value / total) * 100), 100) : 0;
 
   return (
-    <Card className="glass-card overflow-hidden border-none shadow-md backdrop-blur-md transition-all hover:scale-[1.02]">
+    <Card className="glass-card overflow-hidden shadow-sm transition-colors">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className="text-sm font-medium">{title}</CardTitle>
         <Icon className={cn("h-4 w-4", color)} />
@@ -265,7 +297,332 @@ function StatProgressCard({
   );
 }
 
-export default function DashboardPage() {
+function MetricCard({ title, value, icon: Icon, color, sub, badge }: MetricCardProps) {
+  return (
+    <Card className="glass-card overflow-hidden shadow-sm transition-colors">
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+        <Icon className={cn("h-4 w-4", color)} />
+      </CardHeader>
+      <CardContent>
+        <div className="text-2xl font-bold">{value}</div>
+        <p className="mt-1 text-[10px] text-muted-foreground">{sub}</p>
+        {badge ? (
+          <div className="mt-4 flex w-fit items-center gap-2 rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] text-blue-600 dark:text-blue-400">
+            <Activity className="h-3 w-3" />
+            {badge}
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function DashboardInitialSkeleton() {
+  return (
+    <div className="space-y-6 animate-in fade-in duration-700">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <Skeleton key={index} className="h-36 w-full rounded-xl" />
+        ))}
+      </div>
+      <Skeleton className="h-52 w-full rounded-xl" />
+      <div className="grid gap-6 md:grid-cols-2">
+        <Skeleton className="h-72 w-full rounded-xl" />
+        <Skeleton className="h-72 w-full rounded-xl" />
+      </div>
+    </div>
+  );
+}
+
+function userUsageName(item: DashboardUserUsageSummary): string {
+  return item.displayName || item.username || item.userId;
+}
+
+function sourceUsageName(item: DashboardSourceUsageSummary): string {
+  return item.name || item.sourceId;
+}
+
+function DailyTokenLineChart({
+  points,
+  className,
+}: {
+  points: DashboardDailyUsagePoint[];
+  className?: string;
+}) {
+  const chartConfig = {
+    totalTokens: {
+      label: "Token",
+      color: "var(--primary)",
+    },
+  } satisfies ChartConfig;
+  const chartData = points.map((item) => ({
+    date: formatShortDate(item.dayStartTs),
+    totalTokens: item.usage.totalTokens,
+    estimatedCostUsd: item.usage.estimatedCostUsd,
+    requestCount: item.usage.requestCount,
+  }));
+
+  return (
+    <ChartContainer
+      config={chartConfig}
+      className={cn("h-64 w-full rounded-xl bg-background/30 p-3", className)}
+      initialDimension={{ width: 720, height: 256 }}
+    >
+      <AreaChart
+        accessibilityLayer
+        data={chartData}
+        margin={{ top: 18, right: 14, left: 10, bottom: 4 }}
+      >
+        <defs>
+          <linearGradient id="fillTotalTokens" x1="0" y1="0" x2="0" y2="1">
+            <stop
+              offset="5%"
+              stopColor="var(--color-totalTokens)"
+              stopOpacity={0.32}
+            />
+            <stop
+              offset="95%"
+              stopColor="var(--color-totalTokens)"
+              stopOpacity={0.03}
+            />
+          </linearGradient>
+        </defs>
+        <CartesianGrid vertical={false} strokeDasharray="4 8" />
+        <XAxis
+          dataKey="date"
+          tickLine={false}
+          axisLine={false}
+          tickMargin={10}
+          minTickGap={18}
+        />
+        <YAxis
+          tickLine={false}
+          axisLine={false}
+          tickMargin={10}
+          width={44}
+          tickFormatter={(value) => formatCompactTokenAmount(Number(value))}
+        />
+        <ChartTooltip
+          cursor={false}
+          content={
+            <ChartTooltipContent
+              indicator="line"
+              labelFormatter={(value) => value}
+              formatter={(value, name, item) => {
+                const row = item.payload as {
+                  estimatedCostUsd?: number;
+                  requestCount?: number;
+                };
+                return (
+                  <div className="grid min-w-36 gap-1">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground">{String(name)}</span>
+                      <span className="font-mono font-medium text-foreground">
+                        {formatCompactTokenAmount(Number(value))}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 text-muted-foreground">
+                      <span>Cost</span>
+                      <span>{formatUsd(row.estimatedCostUsd)}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 text-muted-foreground">
+                      <span>Requests</span>
+                      <span>{row.requestCount ?? 0}</span>
+                    </div>
+                  </div>
+                );
+              }}
+            />
+          }
+        />
+        <Area
+          dataKey="totalTokens"
+          type="monotone"
+          fill="url(#fillTotalTokens)"
+          stroke="var(--color-totalTokens)"
+          strokeWidth={3}
+          dot={{ r: 4, strokeWidth: 2, fill: "var(--background)" }}
+          activeDot={{ r: 6, strokeWidth: 2 }}
+        />
+      </AreaChart>
+    </ChartContainer>
+  );
+}
+
+function UsageRankList<T extends { todayUsage: DashboardTokenUsage; rangeUsage: DashboardTokenUsage }>({
+  title,
+  items,
+  labelForItem,
+  emptyText,
+}: {
+  title: string;
+  items: T[];
+  labelForItem: (item: T) => string;
+  emptyText: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="mb-2 text-xs font-semibold text-muted-foreground">{title}</div>
+      {items.length === 0 ? (
+        <Empty className="min-h-20 border bg-muted/20 p-3">
+          <EmptyHeader>
+            <EmptyTitle>{emptyText}</EmptyTitle>
+          </EmptyHeader>
+        </Empty>
+      ) : (
+        <div className="space-y-2">
+          {items.slice(0, 5).map((item, index) => (
+            <div
+              key={`${labelForItem(item)}-${index}`}
+              className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg bg-background/30 px-3 py-2 text-xs"
+            >
+              <div className="min-w-0">
+                <div className="truncate font-medium">{labelForItem(item)}</div>
+                <div className="truncate text-muted-foreground">
+                  {item.todayUsage.requestCount} req · {formatUsd(item.todayUsage.estimatedCostUsd)}
+                </div>
+              </div>
+              <div className="shrink-0 text-right font-semibold">
+                {formatCompactTokenAmount(item.todayUsage.totalTokens)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdminUsageAnalyticsCard({
+  summary,
+  isLoading,
+  isError,
+}: {
+  summary: DashboardAdminUsageSummary | undefined;
+  isLoading: boolean;
+  isError: boolean;
+}) {
+  const { t } = useI18n();
+  if (isLoading) {
+    return <Skeleton className="h-[420px] w-full rounded-xl" />;
+  }
+  if (isError) {
+    return (
+      <Card className="glass-card shadow-sm">
+        <CardContent>
+          <Alert variant="destructive">
+            <AlertTriangle />
+            <AlertTitle>{t("管理员用量分析读取失败")}</AlertTitle>
+            <AlertDescription>{t("请稍后重试或检查核心服务状态。")}</AlertDescription>
+          </Alert>
+        </CardContent>
+      </Card>
+    );
+  }
+  if (!summary) {
+    return (
+      <Card className="glass-card shadow-sm">
+        <CardContent>
+          <Empty className="min-h-40 border bg-muted/20">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <LineChart />
+              </EmptyMedia>
+              <EmptyTitle>{t("管理员用量分析暂不可用")}</EmptyTitle>
+              <EmptyDescription>{t("核心服务连接后会自动刷新。")}</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const memberItems = summary.users.filter(
+    (item) =>
+      item.role !== "admin" ||
+      item.todayUsage.totalTokens > 0 ||
+      item.rangeUsage.totalTokens > 0,
+  );
+  const activeOpenAiAccounts = summary.openaiAccounts.filter(
+    (item) => item.todayUsage.totalTokens > 0 || item.rangeUsage.totalTokens > 0,
+  );
+  const activeAggregateApis = summary.aggregateApis.filter(
+    (item) => item.todayUsage.totalTokens > 0 || item.rangeUsage.totalTokens > 0,
+  );
+
+  return (
+    <Card className="glass-card overflow-hidden shadow-sm">
+      <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
+        <div>
+          <CardTitle className="flex items-center gap-2 text-base font-semibold">
+            <LineChart className="h-4 w-4 text-primary" />
+            {t("管理员用量分析")}
+          </CardTitle>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t("按天、成员、OpenAI 账号和聚合 API 汇总 token 消耗")}
+          </p>
+        </div>
+        <div className="rounded-lg bg-primary/10 px-3 py-2 text-right text-xs">
+          <div className="font-semibold text-primary">
+            {formatCompactTokenAmount(summary.todayUsage.totalTokens)}
+          </div>
+          <div className="text-muted-foreground">{formatUsd(summary.todayUsage.estimatedCostUsd)}</div>
+        </div>
+      </CardHeader>
+      <CardContent className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.9fr)]">
+        <div className="space-y-3">
+          <DailyTokenLineChart points={summary.dailyUsage} />
+          <div className="grid gap-3 text-xs sm:grid-cols-3">
+            <div className="rounded-lg bg-background/30 px-3 py-2">
+              <div className="text-muted-foreground">{t("今日请求")}</div>
+              <div className="mt-1 font-semibold">
+                {summary.todayUsage.requestCount} · {t("成功")}{" "}
+                {summary.todayUsage.successCount}
+              </div>
+            </div>
+            <div className="rounded-lg bg-background/30 px-3 py-2">
+              <div className="text-muted-foreground">{t("输入 / 输出")}</div>
+              <div className="mt-1 font-semibold">
+                {formatCompactTokenAmount(summary.todayUsage.inputTokens)} /{" "}
+                {formatCompactTokenAmount(summary.todayUsage.outputTokens)}
+              </div>
+            </div>
+            <div className="rounded-lg bg-background/30 px-3 py-2">
+              <div className="text-muted-foreground">{t("缓存 / 推理")}</div>
+              <div className="mt-1 font-semibold">
+                {formatCompactTokenAmount(summary.todayUsage.cachedInputTokens)} /{" "}
+                {formatCompactTokenAmount(summary.todayUsage.reasoningOutputTokens)}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="grid gap-4">
+          <UsageRankList
+            title={t("成员今日消耗")}
+            items={memberItems}
+            labelForItem={userUsageName}
+            emptyText={t("暂无成员消耗")}
+          />
+          <UsageRankList
+            title={t("OpenAI 账号今日消耗")}
+            items={activeOpenAiAccounts}
+            labelForItem={sourceUsageName}
+            emptyText={t("暂无 OpenAI 账号消耗")}
+          />
+          <UsageRankList
+            title={t("聚合 API 今日消耗")}
+            items={activeAggregateApis}
+            labelForItem={sourceUsageName}
+            emptyText={t("暂无聚合 API 消耗")}
+          />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function AdminDashboard() {
   const { t } = useI18n();
   const { stats, currentAccount, recommendations, requestLogs, isLoading, isServiceReady } =
     useDashboardStats();
@@ -275,33 +632,42 @@ export default function DashboardPage() {
     isSwitchingCodexAccount,
     switchingCodexAccountId,
   } = useCodexAccountSwitcher();
+  const {
+    data: adminUsageSummary,
+    isLoading: isAdminUsageLoading,
+    isError: isAdminUsageError,
+  } =
+    useDashboardAdminUsageSummary(true);
+  const { data: quotaModelPools, isLoading: isQuotaModelPoolsLoading } = useQuery({
+    queryKey: ["quota", "model-pools"],
+    queryFn: () => quotaClient.modelPools(),
+    enabled: isServiceReady,
+    retry: 1,
+  });
   usePageTransitionReady("/", !isServiceReady || !isLoading);
+
   const poolPrimary = stats.poolRemain?.primary ?? 0;
   const poolSecondary = stats.poolRemain?.secondary ?? 0;
+  const allModelPoolItems = quotaModelPools?.items ?? [];
+  const modelPoolItems = allModelPoolItems.slice(0, 8);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-700">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {isLoading ? (
           Array.from({ length: 4 }).map((_, index) => (
-            <Skeleton key={index} className="h-36 w-full rounded-2xl" />
+            <Skeleton key={index} className="h-36 w-full rounded-xl" />
           ))
         ) : (
           <>
-            <Card className="glass-card overflow-hidden border-none shadow-md backdrop-blur-md transition-all hover:scale-[1.02]">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">{t("总账号数")}</CardTitle>
-                <Users className="h-4 w-4 text-blue-500" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stats.total}</div>
-                <p className="mt-1 text-[10px] text-muted-foreground">{t("池中所有配置账号")}</p>
-                <div className="mt-4 flex w-fit items-center gap-2 rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] text-blue-600 dark:text-blue-400">
-                  <Activity className="h-3 w-3" />
-                  {t("最近日志")} {requestLogs.length} {t("条")}
-                </div>
-              </CardContent>
-            </Card>
+            <MetricCard
+              title={t("总账号数")}
+              value={String(stats.total)}
+              icon={Users}
+              color="text-blue-500"
+              sub={t("池中所有配置账号")}
+              badge={`${t("最近日志")} ${requestLogs.length} ${t("条")}`}
+            />
 
             <StatProgressCard
               title={t("可用账号")}
@@ -321,7 +687,7 @@ export default function DashboardPage() {
               sub={t("额度耗尽或授权失效")}
             />
 
-            <Card className="overflow-hidden border-none bg-primary/10 shadow-md backdrop-blur-md transition-all hover:scale-[1.02]">
+            <Card className="overflow-hidden bg-primary/10 shadow-sm transition-colors">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium text-primary">{t("账号池剩余")}</CardTitle>
                 <PieChart className="h-4 w-4 text-primary" />
@@ -355,8 +721,99 @@ export default function DashboardPage() {
         )}
       </div>
 
+      <AdminUsageAnalyticsCard
+        summary={adminUsageSummary}
+        isLoading={isLoading || isAdminUsageLoading}
+        isError={isAdminUsageError}
+      />
+
+      <Card className="glass-card overflow-hidden shadow-sm">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <div>
+            <CardTitle className="text-sm font-medium">{t("模型额度池概览")}</CardTitle>
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              {t("按模型管理中的排序权重展示")}
+            </p>
+          </div>
+          <a
+            href={buildStaticRouteUrl("/models")}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border/60 bg-background/40 px-3 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+          >
+            {t("查看全部")}
+            <ArrowRight className="h-3.5 w-3.5" />
+          </a>
+        </CardHeader>
+        <CardContent>
+          {isLoading || isQuotaModelPoolsLoading ? (
+            <Skeleton className="h-24 w-full rounded-xl" />
+          ) : modelPoolItems.length === 0 ? (
+            <Empty className="min-h-28 border bg-background/35">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Database />
+                </EmptyMedia>
+                <EmptyTitle>{t("暂无可估算的模型额度池")}</EmptyTitle>
+              </EmptyHeader>
+            </Empty>
+          ) : (
+            <div className="space-y-3">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                {modelPoolItems.map((item) => (
+                  <div
+                    key={item.model}
+                    className="rounded-xl border border-border/50 bg-background/35 p-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate font-mono text-sm font-semibold">
+                          {item.model}
+                        </div>
+                        <div className="mt-1 text-[10px] text-muted-foreground">
+                          {item.sourceCount} {t("个来源")}
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-right text-sm font-bold">
+                        {item.totalRemainingTokens == null
+                          ? "--"
+                          : formatCompactTokenAmount(item.totalRemainingTokens)}
+                      </div>
+                    </div>
+                    <div className="mt-3 grid gap-1 text-[10px] text-muted-foreground">
+                      <div className="flex justify-between gap-2">
+                        <span>{t("聚合 API")}</span>
+                        <span className="font-medium text-foreground/70">
+                          {item.aggregateRemainingTokens == null
+                            ? "--"
+                            : formatCompactTokenAmount(item.aggregateRemainingTokens)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-2">
+                        <span>{t("账号池")}</span>
+                        <span className="font-medium text-foreground/70">
+                          {item.accountEstimatedRemainingTokens == null
+                            ? "--"
+                            : formatCompactTokenAmount(item.accountEstimatedRemainingTokens)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {allModelPoolItems.length > modelPoolItems.length ? (
+                <div className="text-[11px] text-muted-foreground">
+                  {t("已按排序权重展示前 {visible} 个，共 {total} 个模型；完整列表在模型管理页。", {
+                    visible: modelPoolItems.length,
+                    total: allModelPoolItems.length,
+                  })}
+                </div>
+              ) : null}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {[ 
+        {[
           {
             title: t("今日Token"),
             value: formatCompactTokenAmount(stats.todayTokens),
@@ -380,41 +837,29 @@ export default function DashboardPage() {
           },
           {
             title: t("预计费用"),
-            value: `$${Number(stats.todayCost || 0).toFixed(2)}`,
+            value: formatUsd(stats.todayCost),
             icon: DollarSign,
             color: "text-emerald-500",
             sub: t("按官价估算"),
           },
-        ].map((card) => (
+        ].map((card) =>
           isLoading ? (
-            <Skeleton key={card.title} className="h-32 w-full rounded-2xl" />
+            <Skeleton key={card.title} className="h-32 w-full rounded-xl" />
           ) : (
-            <Card
-              key={card.title}
-              className="glass-card overflow-hidden border-none shadow-md backdrop-blur-md transition-all hover:scale-[1.02]"
-            >
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">{card.title}</CardTitle>
-                <card.icon className={cn("h-4 w-4", card.color)} />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{card.value}</div>
-                <p className="mt-1 text-[10px] text-muted-foreground">{card.sub}</p>
-              </CardContent>
-            </Card>
-          )
-        ))}
+            <MetricCard key={card.title} {...card} />
+          ),
+        )}
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">
-        <Card className="glass-card min-h-[300px] border-none shadow-md">
+        <Card className="glass-card min-h-[300px] shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base font-semibold">{t("当前活跃账号")}</CardTitle>
           </CardHeader>
           <CardContent className="flex min-h-[200px] flex-col justify-start">
             {isLoading ? (
               <div className="space-y-4">
-                <Skeleton className="h-28 w-full rounded-2xl" />
+                <Skeleton className="h-28 w-full rounded-xl" />
                 <div className="grid grid-cols-2 gap-4">
                   <Skeleton className="h-32 w-full rounded-xl" />
                   <Skeleton className="h-32 w-full rounded-xl" />
@@ -431,13 +876,25 @@ export default function DashboardPage() {
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div className="space-y-3 rounded-xl bg-muted/30 p-4">
                     <p className="text-xs text-muted-foreground">{t("5小时剩余")}</p>
-                    <p className="text-lg font-bold">{formatPercent(currentAccount.primaryRemainPercent)}</p>
-                    <PercentBar label={t("剩余额度")} value={currentAccount.primaryRemainPercent} tone="green" />
+                    <p className="text-lg font-bold">
+                      {formatPercent(currentAccount.primaryRemainPercent)}
+                    </p>
+                    <PercentBar
+                      label={t("剩余额度")}
+                      value={currentAccount.primaryRemainPercent}
+                      tone="green"
+                    />
                   </div>
                   <div className="space-y-3 rounded-xl bg-muted/30 p-4">
                     <p className="text-xs text-muted-foreground">{t("7天剩余")}</p>
-                    <p className="text-lg font-bold">{formatPercent(currentAccount.secondaryRemainPercent)}</p>
-                    <PercentBar label={t("剩余额度")} value={currentAccount.secondaryRemainPercent} tone="blue" />
+                    <p className="text-lg font-bold">
+                      {formatPercent(currentAccount.secondaryRemainPercent)}
+                    </p>
+                    <PercentBar
+                      label={t("剩余额度")}
+                      value={currentAccount.secondaryRemainPercent}
+                      tone="blue"
+                    />
                   </div>
                 </div>
               </div>
@@ -452,7 +909,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="glass-card min-h-[300px] border-none shadow-md">
+        <Card className="glass-card min-h-[300px] shadow-sm">
           <CardHeader>
             <CardTitle className="text-base font-semibold">{t("智能推荐")}</CardTitle>
           </CardHeader>
@@ -462,8 +919,8 @@ export default function DashboardPage() {
             </p>
             {isLoading ? (
               <div className="space-y-4">
-                <Skeleton className="h-28 w-full rounded-2xl" />
-                <Skeleton className="h-28 w-full rounded-2xl" />
+                <Skeleton className="h-28 w-full rounded-xl" />
+                <Skeleton className="h-28 w-full rounded-xl" />
               </div>
             ) : recommendations.primaryPick || recommendations.secondaryPick ? (
               <>
@@ -531,4 +988,524 @@ export default function DashboardPage() {
       </div>
     </div>
   );
+}
+
+function MemberDashboard() {
+  const { t } = useI18n();
+  const [apiKeyModalOpen, setApiKeyModalOpen] = useState(false);
+  const {
+    data: summary,
+    isLoading,
+    isServiceReady,
+    isError,
+  } = useMemberDashboardSummary(true);
+  usePageTransitionReady("/", !isServiceReady || !isLoading);
+
+  if (isLoading) {
+    return <DashboardInitialSkeleton />;
+  }
+
+  if (isError || !summary) {
+    return (
+      <Card className="glass-card shadow-sm">
+        <CardContent className="flex min-h-[220px] flex-col items-center justify-center gap-3 text-center">
+          <AlertTriangle className="h-8 w-8 text-yellow-500" />
+          <div className="text-base font-semibold">{t("个人仪表盘暂不可用")}</div>
+          <p className="max-w-md text-sm text-muted-foreground">
+            {isServiceReady ? t("请稍后重试或检查登录状态。") : t("正在等待服务连接。")}
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const topModel = summary.availableModels[0];
+  const successRate =
+    summary.usageToday.successRate == null
+      ? "--"
+      : `${Math.round(summary.usageToday.successRate * 100)}%`;
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-700">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <MetricCard
+          title={t("钱包余额")}
+          value={
+            summary.distributionEnabled
+              ? formatWalletCredit(summary.wallet?.availableCreditMicros)
+              : t("未启用扣费")
+          }
+          icon={Wallet}
+          color="text-emerald-500"
+          sub={
+            summary.distributionEnabled
+              ? t("当前账号可用余额")
+              : t("额度分发未启用")
+          }
+          badge={
+            summary.wallet?.status
+              ? `${t("状态")} ${summary.wallet.status}`
+              : summary.distributionEnabled
+                ? t("无钱包")
+                : undefined
+          }
+        />
+        <MetricCard
+          title={t("今日用量")}
+          value={formatCompactTokenAmount(summary.usageToday.totalTokens)}
+          icon={Zap}
+          color="text-yellow-500"
+          sub={`${formatUsd(summary.usageToday.estimatedCostUsd)} · ${t("成功率")} ${successRate}`}
+        />
+        <MetricCard
+          title={t("我的平台密钥")}
+          value={`${summary.apiKeySummary.enabledCount}/${summary.apiKeySummary.totalCount}`}
+          icon={KeyRound}
+          color="text-blue-500"
+          sub={`${t("启用 / 全部")} · ${t("最近")} ${formatDateTime(summary.apiKeySummary.lastUsedAt)}`}
+        />
+        <MetricCard
+          title={t("可用模型")}
+          value={String(summary.availableModels.length)}
+          icon={ShieldCheck}
+          color="text-purple-500"
+          sub={topModel ? topModel.displayName || topModel.slug : t("暂无可用模型")}
+        />
+      </div>
+
+      <MemberAlerts alerts={summary.alerts} onCreateKey={() => setApiKeyModalOpen(true)} />
+
+      <div className="grid gap-6 xl:grid-cols-12">
+        <MemberKeyUsageCard
+          summary={summary}
+          onCreateKey={() => setApiKeyModalOpen(true)}
+          className="xl:col-span-7"
+        />
+        <MemberUsageTrendCard summary={summary} className="xl:col-span-5" />
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-12">
+        <MemberAvailableModelsCard summary={summary} className="xl:col-span-6" />
+        <MemberRecentLogsCard logs={summary.recentLogs} className="xl:col-span-6" />
+      </div>
+
+      <ApiKeyModal
+        open={apiKeyModalOpen}
+        onOpenChange={setApiKeyModalOpen}
+        isAdminMode={false}
+      />
+    </div>
+  );
+}
+
+function MemberAlerts({
+  alerts,
+  onCreateKey,
+}: {
+  alerts: MemberDashboardAlert[];
+  onCreateKey: () => void;
+}) {
+  if (alerts.length === 0) return null;
+  return (
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      {alerts.map((alert) => {
+        const action =
+          alert.kind === "no_api_key" ? (
+            <Button size="xs" variant="outline" onClick={onCreateKey}>
+              <Plus className="h-3 w-3" />
+              {alert.actionLabel || "创建 Key"}
+            </Button>
+          ) : alert.actionHref ? (
+            <a
+              href={buildStaticRouteUrl(alert.actionHref)}
+              className="inline-flex h-6 items-center gap-1 rounded-md border border-border/60 bg-background/40 px-2 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              {alert.actionLabel || "查看"}
+              <ArrowRight className="h-3 w-3" />
+            </a>
+          ) : null;
+        return (
+          <div
+            key={alert.kind}
+            className={cn("rounded-xl border px-3 py-2.5 text-sm", alertTone(alert))}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="font-semibold">{alert.title}</div>
+                <div className="mt-0.5 text-xs opacity-80">{alert.message}</div>
+              </div>
+              {action}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MemberKeyUsageCard({
+  summary,
+  onCreateKey,
+  className,
+}: {
+  summary: MemberDashboardSummary;
+  onCreateKey: () => void;
+  className?: string;
+}) {
+  const { t } = useI18n();
+  return (
+    <Card className={cn("glass-card shadow-sm", className)}>
+      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+        <div>
+          <CardTitle className="text-base font-semibold">{t("我的平台 Key")}</CardTitle>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {summary.apiKeySummary.totalCount} {t("个 Key")} · {summary.apiKeySummary.enabledCount} {t("个启用")}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button size="sm" onClick={onCreateKey}>
+            <Plus className="h-3.5 w-3.5" />
+            {t("创建 Key")}
+          </Button>
+          <a
+            href={buildStaticRouteUrl("/apikeys/")}
+            className="inline-flex h-7 items-center gap-1 rounded-md border border-border/60 bg-background/40 px-2.5 text-[0.8rem] font-medium text-muted-foreground transition-colors hover:text-foreground"
+          >
+            {t("查看全部")}
+            <ArrowRight className="h-3.5 w-3.5" />
+          </a>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {summary.topKeys.length === 0 ? (
+          <div className="flex min-h-[180px] flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border/60 bg-background/35 text-center text-sm text-muted-foreground">
+            <KeyRound className="h-8 w-8 opacity-30" />
+            <span>{t("暂无平台 Key")}</span>
+          </div>
+        ) : (
+          <>
+            <div className="hidden md:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t("名称")}</TableHead>
+                    <TableHead>{t("模型")}</TableHead>
+                    <TableHead>{t("今日")}</TableHead>
+                    <TableHead>{t("费用")}</TableHead>
+                    <TableHead>{t("最近使用")}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {summary.topKeys.map((item) => (
+                    <TableRow key={item.keyId} className="border-border/40">
+                      <TableCell>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <Badge variant={statusBadgeVariant(item.status)}>
+                            {item.status}
+                          </Badge>
+                          <span className="max-w-[180px] truncate font-medium">
+                            {item.name || item.keyId}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="max-w-[180px] truncate font-mono text-xs">
+                        {item.modelSlug || "auto"}
+                      </TableCell>
+                      <TableCell>{formatCompactTokenAmount(item.todayTokens)}</TableCell>
+                      <TableCell>{formatUsd(item.todayCostUsd)}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {formatDateTime(item.lastUsedAt)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            <div className="divide-y divide-border/40 md:hidden">
+              {summary.topKeys.map((item) => (
+                <MemberKeyCompactRow key={item.keyId} item={item} />
+              ))}
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function MemberKeyCompactRow({ item }: { item: MemberDashboardKeyUsage }) {
+  return (
+    <div className="py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold">{item.name || item.keyId}</div>
+          <div className="mt-1 truncate font-mono text-xs text-muted-foreground">
+            {item.modelSlug || "auto"}
+          </div>
+        </div>
+        <Badge variant={statusBadgeVariant(item.status)}>{item.status}</Badge>
+      </div>
+      <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+        <span className="text-muted-foreground">{formatCompactTokenAmount(item.todayTokens)}</span>
+        <span className="text-muted-foreground">{formatUsd(item.todayCostUsd)}</span>
+        <span className="truncate text-muted-foreground">{formatDateTime(item.lastUsedAt)}</span>
+      </div>
+    </div>
+  );
+}
+
+function MemberUsageTrendCard({
+  summary,
+  className,
+}: {
+  summary: MemberDashboardSummary;
+  className?: string;
+}) {
+  const { t } = useI18n();
+  const maxTokens = useMemo(
+    () => Math.max(1, ...summary.usageTrend7d.map((item) => item.totalTokens)),
+    [summary.usageTrend7d],
+  );
+  return (
+    <Card className={cn("glass-card shadow-sm", className)}>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base font-semibold">
+          <LineChart className="h-4 w-4 text-primary" />
+          {t("用量趋势")}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <div className="flex h-40 items-end gap-2 rounded-xl bg-background/30 px-3 py-4">
+          {summary.usageTrend7d.map((item) => {
+            const height = Math.max(6, Math.round((item.totalTokens / maxTokens) * 112));
+            return (
+              <div
+                key={item.dayStartTs}
+                className="flex min-w-0 flex-1 flex-col items-center justify-end gap-2"
+              >
+                <div
+                  className="w-full rounded-t-md bg-primary/75 transition-all"
+                  style={{ height }}
+                  title={`${formatShortDate(item.dayStartTs)} ${formatCompactTokenAmount(item.totalTokens)}`}
+                />
+                <div className="text-[10px] text-muted-foreground">
+                  {formatShortDate(item.dayStartTs)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <TopUsageList
+            title={t("Top 模型")}
+            icon={BarChart3}
+            emptyText={t("暂无模型用量")}
+            items={summary.topModels.map((item) => ({
+              key: item.model,
+              label: item.model,
+              value: formatCompactTokenAmount(item.totalTokens),
+              sub: formatUsd(item.estimatedCostUsd),
+            }))}
+          />
+          <TopUsageList
+            title={t("Top Key")}
+            icon={KeyRound}
+            emptyText={t("暂无 Key 用量")}
+            items={summary.topKeys
+              .filter((item) => item.todayTokens > 0 || item.totalTokens > 0)
+              .slice(0, 4)
+              .map((item) => ({
+                key: item.keyId,
+                label: item.name || item.keyId,
+                value: formatCompactTokenAmount(item.todayTokens || item.totalTokens),
+                sub: item.modelSlug || "auto",
+              }))}
+          />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function TopUsageList({
+  title,
+  icon: Icon,
+  emptyText,
+  items,
+}: {
+  title: string;
+  icon: LucideIcon;
+  emptyText: string;
+  items: Array<{ key: string; label: string; value: string; sub: string }>;
+}) {
+  return (
+    <div>
+      <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+        <Icon className="h-3.5 w-3.5" />
+        {title}
+      </div>
+      {items.length === 0 ? (
+        <div className="rounded-lg bg-muted/25 px-3 py-2 text-xs text-muted-foreground">
+          {emptyText}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {items.map((item) => (
+            <div key={item.key} className="flex items-center justify-between gap-3 text-xs">
+              <div className="min-w-0">
+                <div className="truncate font-medium">{item.label}</div>
+                <div className="truncate text-muted-foreground">{item.sub}</div>
+              </div>
+              <div className="shrink-0 font-semibold">{item.value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MemberAvailableModelsCard({
+  summary,
+  className,
+}: {
+  summary: MemberDashboardSummary;
+  className?: string;
+}) {
+  const { t } = useI18n();
+  return (
+    <Card className={cn("glass-card shadow-sm", className)}>
+      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+        <div>
+          <CardTitle className="text-base font-semibold">{t("可用模型")}</CardTitle>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t("按模型管理排序展示前 8 个")}
+          </p>
+        </div>
+        <a
+          href={buildStaticRouteUrl("/models/")}
+          className="inline-flex h-7 items-center gap-1 rounded-md border border-border/60 bg-background/40 px-2.5 text-[0.8rem] font-medium text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {t("查看全部")}
+          <ArrowRight className="h-3.5 w-3.5" />
+        </a>
+      </CardHeader>
+      <CardContent>
+        {summary.availableModels.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-border/60 bg-background/35 px-4 py-5 text-sm text-muted-foreground">
+            {t("暂无可用模型")}
+          </div>
+        ) : (
+          <div className="divide-y divide-border/40">
+            {summary.availableModels.slice(0, 8).map((model) => (
+              <div key={model.slug} className="grid gap-2 py-3 sm:grid-cols-[1fr_auto]">
+                <div className="min-w-0">
+                  <div className="truncate font-mono text-sm font-semibold">
+                    {model.displayName || model.slug}
+                  </div>
+                  <div className="mt-1 truncate text-xs text-muted-foreground">
+                    {model.slug}
+                  </div>
+                </div>
+                <div className="text-left text-xs text-muted-foreground sm:text-right">
+                  <div>{modelPriceSummary(model)}</div>
+                  <div className="mt-1">
+                    {model.contextWindow
+                      ? `${formatCompactTokenAmount(model.contextWindow)} context`
+                      : "context --"}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function MemberRecentLogsCard({
+  logs,
+  className,
+}: {
+  logs: RequestLog[];
+  className?: string;
+}) {
+  const { t } = useI18n();
+  return (
+    <Card className={cn("glass-card shadow-sm", className)}>
+      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+        <div>
+          <CardTitle className="text-base font-semibold">{t("近期请求")}</CardTitle>
+          <p className="mt-1 text-xs text-muted-foreground">{t("最近 8 条个人 Key 请求")}</p>
+        </div>
+        <a
+          href={buildStaticRouteUrl("/logs/")}
+          className="inline-flex h-7 items-center gap-1 rounded-md border border-border/60 bg-background/40 px-2.5 text-[0.8rem] font-medium text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {t("查看全部")}
+          <ArrowRight className="h-3.5 w-3.5" />
+        </a>
+      </CardHeader>
+      <CardContent>
+        {logs.length === 0 ? (
+          <div className="flex min-h-[180px] flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border/60 bg-background/35 text-sm text-muted-foreground">
+            <Clock3 className="h-8 w-8 opacity-30" />
+            <span>{t("暂无请求日志")}</span>
+          </div>
+        ) : (
+          <div className="divide-y divide-border/40">
+            {logs.map((log) => (
+              <div
+                key={log.id}
+                className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_auto]"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <Badge
+                      variant={
+                        log.statusCode && log.statusCode >= 400
+                          ? "destructive"
+                          : "secondary"
+                      }
+                    >
+                      {log.statusCode || "-"}
+                    </Badge>
+                    <span className="truncate font-mono text-sm font-semibold">
+                      {log.model || "unknown"}
+                    </span>
+                  </div>
+                  <div className="mt-1 truncate text-xs text-muted-foreground">
+                    {formatDateTime(log.createdAt)}
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-3 text-xs text-muted-foreground sm:text-right">
+                  <span>{formatCompactTokenAmount(log.totalTokens)}</span>
+                  <span>{formatDuration(log.durationMs)}</span>
+                  <span>{formatUsd(log.estimatedCostUsd)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+export default function DashboardPage() {
+  const { data: session, isLoading } = useAppSession();
+  const { isDesktopRuntime } = useRuntimeCapabilities();
+  const role = resolveSessionRole(session, isLoading, isDesktopRuntime);
+
+  if (isLoading && !session) {
+    return <DashboardInitialSkeleton />;
+  }
+
+  if (role === "member") {
+    return <MemberDashboard />;
+  }
+
+  return <AdminDashboard />;
 }

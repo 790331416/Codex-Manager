@@ -14,6 +14,11 @@ import { useAppStore } from "@/lib/store/useAppStore";
 import { DEFAULT_CODEX_ORIGINATOR } from "@/lib/constants/codex";
 import { useDesktopPageActive } from "@/hooks/useDesktopPageActive";
 import { useDeferredDesktopActivation } from "@/hooks/useDeferredDesktopActivation";
+import {
+  APP_SESSION_QUERY_KEY,
+  resolveSessionRole,
+  useAppSession,
+} from "@/hooks/useAppSession";
 import { usePageTransitionReady } from "@/hooks/usePageTransitionReady";
 import { useRuntimeCapabilities } from "@/hooks/useRuntimeCapabilities";
 import {
@@ -31,6 +36,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Separator } from "@/components/ui/separator";
 import {
   Dialog,
   DialogContent,
@@ -47,6 +54,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -66,10 +74,14 @@ import {
   Save,
   Search,
   Settings as SettingsIcon,
+  ShieldCheck,
   Variable,
+  UserRound,
+  LockKeyhole,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ConfirmDialog } from "@/components/modals/confirm-dialog";
+import { WebPasswordModal } from "@/components/modals/web-password-modal";
 import { useI18n } from "@/lib/i18n/provider";
 import {
   CUSTOM_WORKER_MODE_VALUE,
@@ -103,7 +115,168 @@ import {
   type WorkerPreset,
 } from "@/app/settings/settings-page-helpers";
 
-export default function SettingsPage() {
+function MemberSettingsPage() {
+  const { t } = useI18n();
+  const { theme, setTheme } = useTheme();
+  const queryClient = useQueryClient();
+  const { data: session } = useAppSession();
+  const [displayName, setDisplayName] = useState(
+    session?.currentUser?.displayName || "",
+  );
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+
+  useEffect(() => {
+    setDisplayName(session?.currentUser?.displayName || "");
+  }, [session?.currentUser?.displayName]);
+
+  const updateProfile = useMutation({
+    mutationFn: () =>
+      appClient.updateProfile({
+        displayName: displayName.trim() || null,
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: APP_SESSION_QUERY_KEY });
+      toast.success(t("个人资料已更新"));
+    },
+    onError: (error: unknown) => {
+      toast.error(error instanceof Error ? error.message : String(error));
+    },
+  });
+
+  const changePassword = useMutation({
+    mutationFn: () =>
+      appClient.changePassword({
+        currentPassword,
+        newPassword,
+      }),
+    onSuccess: () => {
+      setCurrentPassword("");
+      setNewPassword("");
+      toast.success(t("密码已更新"));
+    },
+    onError: (error: unknown) => {
+      toast.error(error instanceof Error ? error.message : String(error));
+    },
+  });
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-xl font-bold tracking-tight">{t("个人设置")}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {t("管理你的账号资料、登录密码和界面偏好")}
+        </p>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card className="glass-card shadow-sm">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <UserRound className="h-4 w-4 text-primary" />
+              <CardTitle className="text-base">{t("账号资料")}</CardTitle>
+            </div>
+            <CardDescription>
+              {session?.currentUser?.username || t("当前登录账号")}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-2">
+              <Label>{t("显示名称")}</Label>
+              <Input
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+                placeholder={t("可选")}
+              />
+            </div>
+            <Button
+              className="gap-2"
+              onClick={() => updateProfile.mutate()}
+              disabled={updateProfile.isPending}
+            >
+              <Save className="h-4 w-4" />
+              {updateProfile.isPending ? t("保存中...") : t("保存资料")}
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card className="glass-card shadow-sm">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <LockKeyhole className="h-4 w-4 text-primary" />
+              <CardTitle className="text-base">{t("登录密码")}</CardTitle>
+            </div>
+            <CardDescription>{t("修改当前账号的登录密码")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-2">
+              <Label>{t("当前密码")}</Label>
+              <Input
+                type="password"
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.target.value)}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>{t("新密码")}</Label>
+              <Input
+                type="password"
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+              />
+            </div>
+            <Button
+              className="gap-2"
+              onClick={() => changePassword.mutate()}
+              disabled={
+                changePassword.isPending ||
+                !currentPassword.trim() ||
+                !newPassword.trim()
+              }
+            >
+              <LockKeyhole className="h-4 w-4" />
+              {changePassword.isPending ? t("保存中...") : t("修改密码")}
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="glass-card shadow-sm">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Palette className="h-4 w-4 text-primary" />
+            <CardTitle className="text-base">{t("界面偏好")}</CardTitle>
+          </div>
+          <CardDescription>{t("这些偏好只影响当前浏览器会话")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {THEMES.map((item) => (
+              <Button
+                key={item.id}
+                type="button"
+                variant="outline"
+                onClick={() => setTheme(item.id)}
+                className={cn(
+                  "flex h-auto items-center justify-start gap-3 rounded-xl border border-border/60 bg-background/45 p-3 text-left transition-colors hover:bg-accent/50",
+                  theme === item.id ? "ring-2 ring-primary/40" : "",
+                )}
+              >
+                <span
+                  className="h-5 w-5 rounded-full border border-border/50"
+                  style={{ backgroundColor: item.color }}
+                />
+                <span className="text-sm font-medium">{t(item.name)}</span>
+              </Button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function AdminSettingsPage() {
   const { t } = useI18n();
   const setStoreSettings = useAppStore((state) => state.setAppSettings);
   const storedSettings = useAppStore((state) => state.appSettings);
@@ -162,6 +335,7 @@ export default function SettingsPage() {
   >({});
   const [workerAdvancedDialogOpen, setWorkerAdvancedDialogOpen] =
     useState(false);
+  const [webPasswordModalOpen, setWebPasswordModalOpen] = useState(false);
   const { data: workerRecommendation } = useQuery({
     queryKey: ["gateway-concurrency-recommendation"],
     queryFn: async () =>
@@ -598,6 +772,13 @@ export default function SettingsPage() {
       ? t("已按当前机器资源自动推荐，适合作为这台机器的默认档位。")
       : t(activeWorkerPreset.summary)
     : t("当前配置来自高级参数，可在高级参数中继续微调。");
+  const webAuthModeLabel =
+    snapshot.webAuthMode === "accounts"
+      ? "账号系统"
+      : snapshot.webAuthMode === "password"
+        ? "访问密码"
+        : "公开访问";
+  const showAccessControlSettings = !isDesktopRuntime;
 
   const lastIntentThemeRef = useRef<string | null>(null);
   const lastIntentAppearancePresetRef = useRef<string | null>(null);
@@ -1046,7 +1227,7 @@ export default function SettingsPage() {
         }}
         className="w-full"
       >
-        <TabsList className="glass-card mb-6 flex h-11 w-full justify-start overflow-x-auto rounded-xl border-none p-1 no-scrollbar lg:w-fit">
+        <TabsList className="glass-card mb-6 flex h-11 w-full justify-start overflow-x-auto rounded-xl p-1 no-scrollbar lg:w-fit">
           <TabsTrigger value="general" className="gap-2 px-5 shrink-0">
             <SettingsIcon className="h-4 w-4" /> {t("通用")}
           </TabsTrigger>
@@ -1065,7 +1246,7 @@ export default function SettingsPage() {
         </TabsList>
 
         <TabsContent value="general" className="space-y-6">
-          <Card className="glass-card border-none shadow-md">
+          <Card className="glass-card shadow-sm">
             <CardHeader>
               <div className="flex items-center gap-2">
                 <AppWindow className="h-4 w-4 text-primary" />
@@ -1074,58 +1255,60 @@ export default function SettingsPage() {
               <CardDescription>{t("控制应用启动和窗口行为")}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="flex flex-col gap-3 rounded-2xl border border-border/50 bg-background/45 p-4 md:flex-row md:items-center md:justify-between">
-                <div className="space-y-1">
-                  <Label>{updateActionLabel}</Label>
-                  <p className="text-xs text-muted-foreground">
-                    {updateActionDescription}
-                  </p>
-                  {lastUpdateCheck ? (
+              <Card size="sm">
+                <CardContent className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div className="space-y-1">
+                    <Label>{updateActionLabel}</Label>
                     <p className="text-xs text-muted-foreground">
-                      {preparedUpdate
-                        ? `${t("已下载")} ${preparedUpdate.latestVersion || preparedUpdate.releaseTag || t("新版本")}${t("，等待替换更新")}`
-                        : lastUpdateCheck.hasUpdate
-                          ? `${t("发现新版本")} ${lastUpdateCheck.latestVersion || lastUpdateCheck.releaseTag || t("可用")}`
-                          : lastUpdateCheck.reason ||
-                            `${t("当前版本")} ${lastUpdateCheck.currentVersion || t("未知")} ${t("已是最新")}`}
+                      {updateActionDescription}
                     </p>
-                  ) : null}
-                  {shouldShowUpdateLogsEntry ? (
-                    <div className="pt-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-auto px-0 text-xs text-muted-foreground hover:text-foreground"
-                        onClick={handleOpenUpdateLogsDir}
-                      >
-                        <FolderOpen className="h-3.5 w-3.5" />
-                        {t("打开日志目录")}
-                      </Button>
-                    </div>
-                  ) : null}
-                </div>
-                <Button
-                  variant="outline"
-                  className="gap-2 self-start md:self-auto"
-                  disabled={!canSelfUpdate || updateActionBusy}
-                  onClick={handleUpdateAction}
-                >
-                  {manualUpdateCheckPending ? (
-                    <RefreshCw className="h-4 w-4 animate-spin" />
-                  ) : prepareUpdate.isPending ? (
-                    <Download className="h-4 w-4 animate-pulse" />
-                  ) : applyPreparedUpdate.isPending ? (
-                    <RefreshCw className="h-4 w-4 animate-spin" />
-                  ) : hasPreparedUpdate ? (
-                    <Check className="h-4 w-4" />
-                  ) : canDownloadUpdate ? (
-                    <Download className="h-4 w-4" />
-                  ) : (
-                    <RefreshCw className="h-4 w-4" />
-                  )}
-                  {updateActionBusyLabel}
-                </Button>
-              </div>
+                    {lastUpdateCheck ? (
+                      <p className="text-xs text-muted-foreground">
+                        {preparedUpdate
+                          ? `${t("已下载")} ${preparedUpdate.latestVersion || preparedUpdate.releaseTag || t("新版本")}${t("，等待替换更新")}`
+                          : lastUpdateCheck.hasUpdate
+                            ? `${t("发现新版本")} ${lastUpdateCheck.latestVersion || lastUpdateCheck.releaseTag || t("可用")}`
+                            : lastUpdateCheck.reason ||
+                              `${t("当前版本")} ${lastUpdateCheck.currentVersion || t("未知")} ${t("已是最新")}`}
+                      </p>
+                    ) : null}
+                    {shouldShowUpdateLogsEntry ? (
+                      <div className="pt-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-auto px-0 text-xs text-muted-foreground hover:text-foreground"
+                          onClick={handleOpenUpdateLogsDir}
+                        >
+                          <FolderOpen className="h-3.5 w-3.5" />
+                          {t("打开日志目录")}
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                  <Button
+                    variant="outline"
+                    className="gap-2 self-start md:self-auto"
+                    disabled={!canSelfUpdate || updateActionBusy}
+                    onClick={handleUpdateAction}
+                  >
+                    {manualUpdateCheckPending ? (
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                    ) : prepareUpdate.isPending ? (
+                      <Download className="h-4 w-4 animate-pulse" />
+                    ) : applyPreparedUpdate.isPending ? (
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                    ) : hasPreparedUpdate ? (
+                      <Check className="h-4 w-4" />
+                    ) : canDownloadUpdate ? (
+                      <Download className="h-4 w-4" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4" />
+                    )}
+                    {updateActionBusyLabel}
+                  </Button>
+                </CardContent>
+              </Card>
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <Label>{t("关闭时最小化到托盘")}</Label>
@@ -1158,7 +1341,7 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          <Card className="glass-card border-none shadow-md">
+          <Card className="glass-card shadow-sm">
             <CardHeader>
               <div className="flex items-center gap-2">
                 <Globe className="h-4 w-4 text-primary" />
@@ -1193,6 +1376,7 @@ export default function SettingsPage() {
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectGroup>
                     {(snapshot.serviceListenModeOptions?.length
                       ? snapshot.serviceListenModeOptions
                       : ["loopback", "all_interfaces"]
@@ -1201,17 +1385,20 @@ export default function SettingsPage() {
                         {t(SERVICE_LISTEN_MODE_LABELS[mode] || mode)}
                       </SelectItem>
                     ))}
+                    </SelectGroup>
                   </SelectContent>
                 </Select>
               </div>
 
-              <div className="rounded-2xl border border-border/50 bg-background/45 p-4 text-sm">
+              <Card size="sm">
+                <CardContent className="text-sm">
                 <div className="flex items-center justify-between gap-4">
                   <span className="text-muted-foreground">{t("当前访问地址")}</span>
                   <code className="text-xs text-primary">
                     {snapshot.serviceAddr}
                   </code>
                 </div>
+                <Separator className="my-2" />
                 <div className="mt-2 flex items-center justify-between gap-4">
                   <span className="text-muted-foreground">{t("实际监听地址")}</span>
                   <code className="text-xs text-primary">
@@ -1221,7 +1408,8 @@ export default function SettingsPage() {
                     )}
                   </code>
                 </div>
-              </div>
+                </CardContent>
+              </Card>
 
               <p className="text-[10px] text-muted-foreground">
                 {t("切换到")} <code>0.0.0.0</code>{" "}
@@ -1232,10 +1420,50 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
+          {showAccessControlSettings ? (
+            <Card className="glass-card shadow-sm">
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="h-4 w-4 text-primary" />
+                  <CardTitle className="text-base">{t("访问控制")}</CardTitle>
+                </div>
+                <CardDescription>
+                  {t("统一管理 Web 登录方式、访问密码和团队额度分发。")}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Card size="sm">
+                  <CardContent className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Label>{t("当前访问方式")}</Label>
+                        <Badge variant="secondary">{t(webAuthModeLabel)}</Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {snapshot.distributionEnabled
+                          ? t("额度分发已开启，平台 Key 会按归属钱包扣减额度。")
+                          : t("额度分发未开启，平台 Key 不会扣减成员钱包额度。")}
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      className="gap-2 self-start md:self-auto"
+                      disabled={!canAccessManagementRpc}
+                      onClick={() => setWebPasswordModalOpen(true)}
+                    >
+                      <ShieldCheck className="h-4 w-4" />
+                      {t("访问控制")}
+                    </Button>
+                  </CardContent>
+                </Card>
+              </CardContent>
+            </Card>
+          ) : null}
+
         </TabsContent>
 
         <TabsContent value="appearance" className="space-y-6">
-          <Card className="glass-card border-none shadow-md">
+          <Card className="glass-card shadow-sm">
             <CardHeader>
               <div className="flex items-center gap-2">
                 <Palette className="h-4 w-4 text-primary" />
@@ -1251,13 +1479,15 @@ export default function SettingsPage() {
                   );
                   const isActive = currentPreset === item.id;
                   return (
-                    <button
+                    <Button
                       key={item.id}
+                      type="button"
+                      variant="outline"
                       onClick={() => handleAppearancePresetChange(item.id)}
                       className={cn(
-                        "group relative rounded-2xl border p-4 text-left transition-all duration-300 hover:-translate-y-0.5",
+                        "group relative h-auto justify-start rounded-xl p-4 text-left transition-all duration-300",
                         isActive
-                          ? "border-primary bg-primary/10 shadow-lg ring-1 ring-primary"
+                          ? "border-primary bg-primary/10 shadow-sm ring-1 ring-primary"
                           : "border-border/60 bg-background/50 hover:bg-accent/30",
                       )}
                     >
@@ -1281,8 +1511,8 @@ export default function SettingsPage() {
                           className={cn(
                             "h-14 flex-1 rounded-xl border",
                             item.id === "modern"
-                              ? "border-primary/20 bg-[linear-gradient(160deg,rgba(255,255,255,0.88),rgba(37,99,235,0.1)),linear-gradient(180deg,rgba(191,219,254,0.6),rgba(255,255,255,0.85))]"
-                              : "border-slate-300/70 bg-[radial-gradient(at_0%_0%,#bfdbfe_0px,transparent_50%),radial-gradient(at_100%_0%,#cffafe_0px,transparent_50%),radial-gradient(at_50%_100%,#ffffff_0px,transparent_50%),rgba(255,255,255,0.86)]",
+                              ? "border-primary/20 bg-accent/50"
+                              : "border-border/70 bg-muted/70",
                           )}
                         />
                         <div className="flex w-16 flex-col gap-1.5">
@@ -1290,28 +1520,28 @@ export default function SettingsPage() {
                             className={cn(
                               "h-4 rounded-lg border",
                               item.id === "modern"
-                                ? "border-primary/15 bg-white/80 shadow-sm"
-                                : "border-slate-300/70 bg-white/70",
+                                ? "border-primary/15 bg-card shadow-sm"
+                                : "border-border/70 bg-card",
                             )}
                           />
                           <div
                             className={cn(
                               "h-4 rounded-lg border",
                               item.id === "modern"
-                                ? "border-primary/15 bg-white/70 shadow-sm"
-                                : "border-slate-300/70 bg-white/60",
+                                ? "border-primary/15 bg-card/80 shadow-sm"
+                                : "border-border/70 bg-card/80",
                             )}
                           />
                         </div>
                       </div>
-                    </button>
+                    </Button>
                   );
                 })}
               </div>
             </CardContent>
           </Card>
 
-          <Card className="glass-card border-none shadow-md">
+          <Card className="glass-card shadow-sm">
             <CardHeader>
               <div className="flex items-center gap-2">
                 <Palette className="h-4 w-4 text-primary" />
@@ -1324,18 +1554,20 @@ export default function SettingsPage() {
             <CardContent>
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-12">
                 {THEMES.map((item) => (
-                  <button
+                  <Button
                     key={item.id}
+                    type="button"
+                    variant="ghost"
                     onClick={() => handleThemeChange(item.id)}
                     className={cn(
-                      "group relative flex flex-col items-center gap-2.5 rounded-2xl border p-4 transition-all duration-300 hover:scale-105",
+                      "group relative h-auto flex-col items-center gap-2.5 rounded-xl border p-4 transition-all duration-300 hover:bg-accent/40",
                       theme === item.id
-                        ? "border-primary bg-primary/10 shadow-lg ring-1 ring-primary"
+                        ? "border-primary bg-primary/10 shadow-sm ring-1 ring-primary"
                         : "border-transparent bg-muted/20 hover:bg-accent/40",
                     )}
                   >
                     <div
-                      className="h-10 w-10 rounded-full border-2 border-white/20 shadow-md"
+                      className="h-10 w-10 rounded-full border-2 border-white/20 shadow-sm"
                       style={{ backgroundColor: item.color }}
                     />
                     <span
@@ -1353,7 +1585,7 @@ export default function SettingsPage() {
                         <Check className="h-2.5 w-2.5" />
                       </div>
                     ) : null}
-                  </button>
+                  </Button>
                 ))}
               </div>
             </CardContent>
@@ -1361,7 +1593,7 @@ export default function SettingsPage() {
         </TabsContent>
 
         <TabsContent value="gateway" className="space-y-4">
-          <Card className="glass-card border-none shadow-md">
+          <Card className="glass-card shadow-sm">
             <CardHeader>
               <CardTitle className="text-base">{t("网关策略")}</CardTitle>
               <CardDescription>{t("配置账号选路和请求头处理方式")}</CardDescription>
@@ -1385,10 +1617,12 @@ export default function SettingsPage() {
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectGroup>
                     <SelectItem value="ordered">{t("顺序优先 (Ordered)")}</SelectItem>
                     <SelectItem value="balanced">
                       {t("均衡轮询 (Balanced)")}
                     </SelectItem>
+                    </SelectGroup>
                   </SelectContent>
                 </Select>
                 <p className="text-[10px] text-muted-foreground">
@@ -1416,6 +1650,7 @@ export default function SettingsPage() {
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectGroup>
                     {(snapshot.freeAccountMaxModelOptions?.length
                       ? snapshot.freeAccountMaxModelOptions
                       : DEFAULT_FREE_ACCOUNT_MAX_MODEL_OPTIONS
@@ -1424,6 +1659,7 @@ export default function SettingsPage() {
                         {t(formatFreeAccountModelLabel(model))}
                       </SelectItem>
                     ))}
+                    </SelectGroup>
                   </SelectContent>
                 </Select>
                 <p className="text-[10px] text-muted-foreground">
@@ -1467,7 +1703,7 @@ export default function SettingsPage() {
               </div>
 
               <div className="grid gap-2 border-t pt-6">
-                <Label>{t("Originator")}</Label>
+                <Label>{t("上游 Originator")}</Label>
                 <Input
                   className="h-10 max-w-md font-mono"
                   value={gatewayOriginatorInput}
@@ -1499,7 +1735,7 @@ export default function SettingsPage() {
               </div>
 
               <div className="grid gap-2">
-                <Label>{t("Residency Requirement")}</Label>
+                <Label>{t("区域驻留要求")}</Label>
                 <Select
                   value={
                     (snapshot.gatewayResidencyRequirement ?? "") ||
@@ -1526,6 +1762,7 @@ export default function SettingsPage() {
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectGroup>
                     {(snapshot.gatewayResidencyRequirementOptions?.length
                       ? snapshot.gatewayResidencyRequirementOptions
                       : ["", "us"]
@@ -1537,6 +1774,7 @@ export default function SettingsPage() {
                         {t(RESIDENCY_REQUIREMENT_LABELS[value] || value)}
                       </SelectItem>
                     ))}
+                    </SelectGroup>
                   </SelectContent>
                 </Select>
                 <p className="text-[10px] text-muted-foreground">
@@ -1631,7 +1869,7 @@ export default function SettingsPage() {
         </TabsContent>
 
         <TabsContent value="tasks" className="space-y-4">
-          <Card className="glass-card border-none shadow-md">
+          <Card className="glass-card shadow-sm">
             <CardHeader>
               <CardTitle className="text-base">{t("后台任务线程")}</CardTitle>
               <CardDescription>{t("管理自动轮询和保活任务；")}</CardDescription>
@@ -1707,7 +1945,7 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          <Card className="glass-card border-none shadow-md">
+          <Card className="glass-card shadow-sm">
             <CardHeader>
               <div className="flex items-center gap-2">
                 <SettingsIcon className="h-4 w-4 text-primary" />
@@ -1720,7 +1958,8 @@ export default function SettingsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="rounded-xl border border-border/60 bg-muted/20 p-4">
+              <Card size="sm">
+                <CardContent>
                 <div className="grid gap-4 lg:grid-cols-[minmax(280px,380px)_minmax(0,1fr)] lg:items-end">
                   <div className="space-y-2">
                     <Label>{t("运行模式")}</Label>
@@ -1757,6 +1996,7 @@ export default function SettingsPage() {
                         </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
+                    <SelectGroup>
                         {WORKER_PRESETS.map((preset) => (
                           <SelectItem key={preset.key} value={preset.key}>
                             {t(preset.simpleLabel)}
@@ -1767,6 +2007,7 @@ export default function SettingsPage() {
                             {t("自定义（来自高级参数）")}
                           </SelectItem>
                         ) : null}
+                        </SelectGroup>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1784,7 +2025,8 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                <div className="mt-4 flex flex-col gap-3 border-t border-border/50 pt-4 lg:flex-row lg:items-center lg:justify-between">
+                <Separator className="my-4" />
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                   <p className="text-xs leading-6 text-muted-foreground">
                     {activeWorkerSummary}
                   </p>
@@ -1799,14 +2041,15 @@ export default function SettingsPage() {
                     {t("高级参数")}
                   </Button>
                 </div>
-              </div>
+                </CardContent>
+              </Card>
             </CardContent>
           </Card>
           <Dialog
             open={workerAdvancedDialogOpen}
             onOpenChange={setWorkerAdvancedDialogOpen}
           >
-            <DialogContent className="glass-card border-none sm:max-w-2xl">
+            <DialogContent className="glass-card sm:max-w-2xl">
               <DialogHeader>
                 <DialogTitle>{t("高级参数")}</DialogTitle>
                 <DialogDescription>
@@ -1905,7 +2148,7 @@ export default function SettingsPage() {
         </TabsContent>
 
         <TabsContent value="env" className="space-y-4">
-          <div className="flex flex-col gap-3 rounded-2xl border border-border/50 bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-3 rounded-xl border border-border/50 bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="space-y-1">
               <h3 className="text-sm font-semibold">{t("环境变量配置")}</h3>
               <p className="text-sm leading-6 text-muted-foreground">
@@ -1927,7 +2170,7 @@ export default function SettingsPage() {
           </div>
 
           <div className="grid gap-6 md:grid-cols-[300px_1fr]">
-            <Card className="glass-card flex h-[500px] flex-col border-none shadow-md">
+            <Card className="glass-card flex h-[500px] flex-col shadow-sm">
               <CardHeader className="pb-3">
                 <div className="relative">
                   <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -1942,11 +2185,13 @@ export default function SettingsPage() {
               <CardContent className="flex-1 overflow-y-auto p-2">
                 <div className="space-y-1">
                   {filteredEnvCatalog.map((item) => (
-                    <button
+                    <Button
                       key={item.key}
+                      type="button"
+                      variant="ghost"
                       onClick={() => setSelectedEnvKey(item.key)}
                       className={cn(
-                        "w-full rounded-md px-3 py-2 text-left text-sm transition-colors",
+                        "h-auto w-full justify-start rounded-md px-3 py-2 text-left text-sm transition-colors",
                         selectedEnvKey === item.key
                           ? "bg-primary text-primary-foreground"
                           : "hover:bg-accent",
@@ -1977,13 +2222,13 @@ export default function SettingsPage() {
                       <code className="block truncate text-[10px] opacity-70">
                         {item.key}
                       </code>
-                    </button>
+                    </Button>
                   ))}
                 </div>
               </CardContent>
             </Card>
 
-            <Card className="glass-card min-h-[500px] border-none shadow-md">
+            <Card className="glass-card min-h-[500px] shadow-sm">
               {selectedEnvKey ? (
                 <>
                   <CardHeader>
@@ -2014,21 +2259,23 @@ export default function SettingsPage() {
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-6">
-                    <div className="rounded-lg border bg-accent/30 p-4 text-sm leading-relaxed text-muted-foreground">
-                      <Info className="mr-2 inline-block h-4 w-4 text-primary" />
-                      {t(
-                        ENV_DESCRIPTION_MAP[selectedEnvKey] ||
-                          `${selectedEnvItem?.label} 对应环境变量，修改后会应用到相关模块。`,
-                      )}
-                    </div>
+                    <Alert>
+                      <Info />
+                      <AlertDescription>
+                        {t(
+                          ENV_DESCRIPTION_MAP[selectedEnvKey] ||
+                            `${selectedEnvItem?.label} 对应环境变量，修改后会应用到相关模块。`,
+                        )}
+                      </AlertDescription>
+                    </Alert>
                     {selectedEnvRiskLevel === "high" ? (
-                      <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm leading-relaxed text-red-700 dark:text-red-300">
-                        {t(selectedEnvSafetyNote)}
-                      </div>
+                      <Alert variant="destructive">
+                        <AlertDescription>{t(selectedEnvSafetyNote)}</AlertDescription>
+                      </Alert>
                     ) : (
-                      <div className="rounded-lg border border-border/50 bg-muted/20 p-4 text-sm leading-relaxed text-muted-foreground">
-                        {t(selectedEnvSafetyNote)}
-                      </div>
+                      <Alert>
+                        <AlertDescription>{t(selectedEnvSafetyNote)}</AlertDescription>
+                      </Alert>
                     )}
 
                     <div className="space-y-2">
@@ -2053,7 +2300,8 @@ export default function SettingsPage() {
                       </p>
                     </div>
 
-                    <div className="flex gap-3 border-t pt-4">
+                    <Separator />
+                    <div className="flex gap-3">
                       <Button onClick={handleSaveEnv} className="gap-2">
                         <Save className="h-4 w-4" /> {t("保存修改")}
                       </Button>
@@ -2101,7 +2349,7 @@ export default function SettingsPage() {
       >
         <DialogContent
           showCloseButton={false}
-          className="glass-card border-none p-6 sm:max-w-[480px]"
+          className="glass-card p-6 sm:max-w-[480px]"
         >
           <DialogHeader>
             <DialogTitle>
@@ -2121,13 +2369,15 @@ export default function SettingsPage() {
           </DialogHeader>
 
           <div className="space-y-3 text-sm">
-            <div className="rounded-2xl border border-border/50 bg-background/45 p-4">
+            <Card size="sm">
+              <CardContent>
               <div className="flex items-center justify-between gap-4">
                 <span className="text-muted-foreground">{t("当前版本")}</span>
                 <span className="font-medium">
                   {updateDialogCheck?.currentVersion || t("未知")}
                 </span>
               </div>
+              <Separator className="my-2" />
               <div className="mt-2 flex items-center justify-between gap-4">
                 <span className="text-muted-foreground">{t("目标版本")}</span>
                 <span className="font-medium">
@@ -2137,6 +2387,7 @@ export default function SettingsPage() {
                     t("未知")}
                 </span>
               </div>
+              <Separator className="my-2" />
               <div className="mt-2 flex items-center justify-between gap-4">
                 <span className="text-muted-foreground">{t("更新模式")}</span>
                 <span className="font-medium">
@@ -2146,23 +2397,31 @@ export default function SettingsPage() {
                 </span>
               </div>
               {preparedUpdate?.assetName ? (
+                <>
+                <Separator className="my-2" />
                 <div className="mt-2 flex items-center justify-between gap-4">
                   <span className="text-muted-foreground">{t("更新文件")}</span>
                   <span className="max-w-[240px] truncate font-mono text-xs">
                     {preparedUpdate.assetName}
                   </span>
                 </div>
+                </>
               ) : null}
-            </div>
+              </CardContent>
+            </Card>
 
             {preparedUpdate ? null : updateDialogCheck?.reason ? (
-              <div className="rounded-2xl border border-border/50 bg-muted/40 p-4 text-xs leading-5 text-muted-foreground">
-                {updateDialogCheck.reason}
-              </div>
+              <Alert>
+                <AlertDescription className="text-xs leading-5">
+                  {updateDialogCheck.reason}
+                </AlertDescription>
+              </Alert>
             ) : (
-              <div className="rounded-2xl border border-border/50 bg-muted/40 p-4 text-xs leading-5 text-muted-foreground">
-                {t("建议先下载更新包，下载完成后再执行安装或重启更新。")}
-              </div>
+              <Alert>
+                <AlertDescription className="text-xs leading-5">
+                  {t("建议先下载更新包，下载完成后再执行安装或重启更新。")}
+                </AlertDescription>
+              </Alert>
             )}
           </div>
 
@@ -2212,6 +2471,13 @@ export default function SettingsPage() {
         </DialogContent>
       </Dialog>
 
+      {showAccessControlSettings ? (
+        <WebPasswordModal
+          open={webPasswordModalOpen}
+          onOpenChange={setWebPasswordModalOpen}
+        />
+      ) : null}
+
       <ConfirmDialog
         open={resetAllEnvDialogOpen}
         onOpenChange={setResetAllEnvDialogOpen}
@@ -2223,4 +2489,22 @@ export default function SettingsPage() {
       />
     </div>
   );
+}
+
+export default function SettingsPage() {
+  const { data: session, isLoading } = useAppSession();
+  const { isDesktopRuntime } = useRuntimeCapabilities();
+  const role = resolveSessionRole(session, isLoading, isDesktopRuntime);
+  const { t } = useI18n();
+  if (isLoading || !session) {
+    return (
+      <div className="flex h-64 items-center justify-center text-muted-foreground">
+        {t("加载配置中...")}
+      </div>
+    );
+  }
+  if (role === "member") {
+    return <MemberSettingsPage />;
+  }
+  return <AdminSettingsPage />;
 }

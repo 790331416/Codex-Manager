@@ -51,7 +51,7 @@ export function ConfirmDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="glass-card border-none p-6 sm:max-w-[420px]"
+        className="glass-card p-6 sm:max-w-[420px]"
       >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>

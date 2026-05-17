@@ -467,8 +467,8 @@ fn gateway_usage_limit_with_exhausted_snapshot_invalidates_candidate_snapshot_ca
     super::reload_from_env();
 }
 
-/// 低配额账号（used_percent 超过阈值）应当被稳定地排到候选列表尾部，
-/// 配额充足的账号优先被挑选，避免反复打到快耗尽的号上。
+/// 低配额账号（used_percent 超过阈值）应当进入低额度备用池（候选列表尾部），
+/// 配额充足的账号优先被挑选，保留每个池子内的原有顺序。
 #[test]
 fn low_quota_accounts_are_demoted_to_tail() {
     let _guard = crate::test_env_guard();
@@ -536,11 +536,15 @@ fn low_quota_accounts_are_demoted_to_tail() {
         .iter()
         .map(|(account, _)| account.id.as_str())
         .collect();
-    assert_eq!(ids.len(), 4);
-    assert_eq!(&ids[..2], &["acc-healthy-high", "acc-healthy-low"]);
-    let tail: Vec<&str> = ids[2..].to_vec();
-    assert!(tail.contains(&"acc-exhausted"));
-    assert!(tail.contains(&"acc-secondary-low"));
+    assert_eq!(
+        ids,
+        vec![
+            "acc-healthy-high",
+            "acc-healthy-low",
+            "acc-exhausted",
+            "acc-secondary-low"
+        ]
+    );
 
     clear_candidate_cache_for_tests();
     if let Some(value) = previous_ttl {
@@ -561,7 +565,7 @@ fn low_quota_accounts_are_demoted_to_tail() {
     super::reload_from_env();
 }
 
-/// 全部账号都触阈时不应把候选清空，保底仍返回所有账号（稳定顺序）。
+/// 全部账号都触阈时仍应返回低额度候选，供正常池不可用后的兜底使用。
 #[test]
 fn all_low_quota_still_returns_candidates() {
     let _guard = crate::test_env_guard();

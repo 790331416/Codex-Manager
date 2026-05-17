@@ -264,7 +264,23 @@ function resolvePnpmCommand() {
   ];
 
   const candidates = process.platform === "win32" ? windowsCandidates : defaultCandidates;
-  return candidates.find((candidate) => !candidate.command.includes(":") || existsSync(candidate.command)) ?? candidates[0];
+  const existingPathCandidates = candidates.filter(
+    (candidate) => !candidate.command.includes(":") || existsSync(candidate.command),
+  );
+
+  for (const candidate of existingPathCandidates) {
+    const probeArgs = candidate.args[0] === "pnpm" ? ["pnpm", "--version"] : ["--version"];
+    const probe = spawnSync(candidate.command, probeArgs, {
+      encoding: "utf8",
+      shell: process.platform === "win32" && /\.cmd$/i.test(candidate.command),
+      stdio: "ignore",
+    });
+    if (!probe.error && probe.status === 0) {
+      return candidate;
+    }
+  }
+
+  return candidates[candidates.length - 1];
 }
 
 const frontendDir = candidates.find(hasFrontendPackage);

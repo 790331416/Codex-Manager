@@ -5,10 +5,12 @@ import {
   Clock,
   Database,
   KeyRound,
+  ShieldAlert,
   type LucideIcon,
   RefreshCw,
   Zap,
 } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Dialog,
   DialogClose,
@@ -19,6 +21,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import {
@@ -101,7 +110,8 @@ function UsageDetailRow({
   const palette = toneClasses[tone];
 
   return (
-    <div className="space-y-2 rounded-xl border border-primary/5 bg-background/40 px-3 py-3">
+    <Card size="sm">
+      <CardContent className="grid gap-2">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <div className={cn("rounded-lg p-1.5", palette.icon)}>
@@ -139,7 +149,8 @@ function UsageDetailRow({
           {t("重置时间:")} {formatTsFromSeconds(resetsAt, t(emptyResetText))}
         </span>
       </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -164,7 +175,7 @@ export default function UsageModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="glass-card grid-rows-[auto_minmax(0,1fr)_auto] border-none p-6"
+        className="glass-card grid-rows-[auto_minmax(0,1fr)_auto] p-6"
         style={{
           height: "min(680px, calc(100vh - 2rem))",
           maxWidth: "none",
@@ -184,47 +195,68 @@ export default function UsageModal({
         </DialogHeader>
 
         <div className="grid min-h-0 gap-4 overflow-y-auto py-4 pr-1">
-          <div className="space-y-3 rounded-2xl border border-primary/5 bg-accent/10 p-4">
-            <div className="space-y-1">
-              <p className="text-sm font-semibold">{t("套餐信息")}</p>
-              <p className="text-[11px] text-muted-foreground">
+          {!account.hasToken ? (
+            <Alert variant="destructive">
+              <ShieldAlert className="h-4 w-4" />
+              <AlertTitle>{t("缺少授权 Token")}</AlertTitle>
+              <AlertDescription>
+                {t("该账号只有用量快照，当前不能参与模型刷新或网关转发。请重新登录或刷新 AT/RT 后再使用。")}
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
+          <Card size="sm">
+            <CardHeader>
+              <CardTitle>{t("套餐信息")}</CardTitle>
+              <CardDescription>
                 {t("这里展示订阅接口同步回来的套餐状态与时间信息。")}
-              </p>
-            </div>
+              </CardDescription>
+            </CardHeader>
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1 rounded-xl border border-primary/5 bg-background/40 px-3 py-3">
-                <div className="text-[10px] text-muted-foreground">{t("订阅状态")}</div>
-                <div className="text-sm font-semibold">{subscriptionStatusLabel}</div>
+            <CardContent>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Card size="sm">
+                  <CardContent>
+                    <div className="text-[10px] text-muted-foreground">{t("订阅状态")}</div>
+                    <div className="text-sm font-semibold">{subscriptionStatusLabel}</div>
+                  </CardContent>
+                </Card>
+                <Card size="sm">
+                  <CardContent>
+                    <div className="text-[10px] text-muted-foreground">{t("订阅方案")}</div>
+                    <div className="text-sm font-semibold">{subscriptionPlanLabel}</div>
+                  </CardContent>
+                </Card>
+                <Card size="sm">
+                  <CardContent>
+                    <div className="text-[10px] text-muted-foreground">{t("到期时间")}</div>
+                    <div className="text-sm font-semibold">
+                      {formatTsFromSeconds(account.subscriptionExpiresAt, t("未知"))}
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card size="sm">
+                  <CardContent>
+                    <div className="text-[10px] text-muted-foreground">{t("续费时间")}</div>
+                    <div className="text-sm font-semibold">
+                      {formatTsFromSeconds(account.subscriptionRenewsAt, t("未知"))}
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
-              <div className="space-y-1 rounded-xl border border-primary/5 bg-background/40 px-3 py-3">
-                <div className="text-[10px] text-muted-foreground">{t("订阅方案")}</div>
-                <div className="text-sm font-semibold">{subscriptionPlanLabel}</div>
-              </div>
-              <div className="space-y-1 rounded-xl border border-primary/5 bg-background/40 px-3 py-3">
-                <div className="text-[10px] text-muted-foreground">{t("到期时间")}</div>
-                <div className="text-sm font-semibold">
-                  {formatTsFromSeconds(account.subscriptionExpiresAt, t("未知"))}
-                </div>
-              </div>
-              <div className="space-y-1 rounded-xl border border-primary/5 bg-background/40 px-3 py-3">
-                <div className="text-[10px] text-muted-foreground">{t("续费时间")}</div>
-                <div className="text-sm font-semibold">
-                  {formatTsFromSeconds(account.subscriptionRenewsAt, t("未知"))}
-                </div>
-              </div>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
 
-          <div className="space-y-3 rounded-2xl border border-primary/5 bg-accent/10 p-4">
-            <div className="space-y-1">
-              <p className="text-sm font-semibold">{t("额度窗口")}</p>
-              <p className="text-[11px] text-muted-foreground">
+          <Card size="sm">
+            <CardHeader>
+              <CardTitle>{t("额度窗口")}</CardTitle>
+              <CardDescription>
                 {t("标准 5 小时、7 天周期，以及像 Code Review / Spark 这类专属额度都会在这里按单列依次显示。")}
-              </p>
-            </div>
+              </CardDescription>
+            </CardHeader>
 
-            <div className="grid gap-3 sm:grid-cols-2">
+            <CardContent>
+              <div className="grid gap-3 sm:grid-cols-2">
               <UsageDetailRow
                 label={t("5小时额度")}
                 remainPercent={usageBuckets.primaryRemainPercent}
@@ -260,8 +292,9 @@ export default function UsageModal({
                   emptyResetText={t("未知")}
                 />
               ))}
-            </div>
-          </div>
+              </div>
+            </CardContent>
+          </Card>
 
           <div className="text-center">
             <p className="text-[10px] italic text-muted-foreground">

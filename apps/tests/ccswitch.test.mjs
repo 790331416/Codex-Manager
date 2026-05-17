@@ -42,6 +42,33 @@ test("normalizeCodexManagerGatewayEndpoint maps service address to local /v1 end
   );
 });
 
+test("normalizeCodexManagerGatewayEndpoint prefers web gateway origin for remote Docker deployment", () => {
+  assert.equal(
+    ccswitch.normalizeCodexManagerGatewayEndpoint("0.0.0.0:48760", {
+      preferPublicOrigin: true,
+      publicOrigin: "http://10.10.121.253:48761/",
+    }),
+    "http://10.10.121.253:48761/v1",
+  );
+  assert.equal(
+    ccswitch.normalizeCodexManagerGatewayEndpoint("codexmanager-service:48760", {
+      preferPublicOrigin: true,
+      publicOrigin: "https://cm.example.com/",
+    }),
+    "https://cm.example.com/v1",
+  );
+});
+
+test("normalizeCodexManagerGatewayEndpoint falls back when public origin is not usable", () => {
+  assert.equal(
+    ccswitch.normalizeCodexManagerGatewayEndpoint("0.0.0.0:48760", {
+      preferPublicOrigin: true,
+      publicOrigin: "tauri://localhost",
+    }),
+    "http://localhost:48760/v1",
+  );
+});
+
 test("buildCcSwitchProviderImportUrl encodes provider import parameters", () => {
   const url = ccswitch.buildCcSwitchProviderImportUrl({
     app: "codex",

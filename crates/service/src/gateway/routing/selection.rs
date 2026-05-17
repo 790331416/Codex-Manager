@@ -13,8 +13,8 @@ static CURRENT_DB_PATH: OnceLock<RwLock<String>> = OnceLock::new();
 const DEFAULT_CANDIDATE_CACHE_TTL_MS: u64 = 500;
 const CANDIDATE_CACHE_TTL_ENV: &str = "CODEXMANAGER_CANDIDATE_CACHE_TTL_MS";
 // OpenAI 在 used_percent 未到 100 时就会触发 usage limit（常见于 ChatGPT Plus OAuth
-// 账号的 5 小时窗口）。将快要耗尽的账号降权到候选列表尾部，避免网关反复挑到它。
-const LOW_QUOTA_THRESHOLD_ENV: &str = "CODEXMANAGER_LOW_QUOTA_THRESHOLD_PERCENT";
+// 账号的 5 小时窗口）。将快要耗尽的账号降级到低额度备用池，优先消耗正常额度账号。
+pub(crate) const LOW_QUOTA_THRESHOLD_ENV: &str = "CODEXMANAGER_LOW_QUOTA_THRESHOLD_PERCENT";
 const DEFAULT_LOW_QUOTA_THRESHOLD_PERCENT: f64 = 95.0;
 
 #[derive(Clone)]
@@ -73,7 +73,7 @@ fn collect_gateway_candidates_uncached(storage: &Storage) -> Result<Vec<(Account
         }
         out.push((candidate_account, token));
     }
-    demote_low_quota_candidates(storage, &mut out);
+    prioritize_normal_quota_candidates(storage, &mut out);
     if out.is_empty() {
         log_no_candidates(storage);
     }
@@ -81,8 +81,8 @@ fn collect_gateway_candidates_uncached(storage: &Storage) -> Result<Vec<(Account
 }
 
 /// 将快要耗尽的账号（primary 或 secondary used_percent 超过阈值）稳定地排到列表尾部。
-/// 不从候选中剔除，保证在全部账号都被降权的极端场景下仍有号可用。
-fn demote_low_quota_candidates(storage: &Storage, candidates: &mut Vec<(Account, Token)>) {
+/// 不从候选中剔除；正常池不可用时，低额度池仍可作为兜底继续使用。
+fn prioritize_normal_quota_candidates(storage: &Storage, candidates: &mut Vec<(Account, Token)>) {
     if candidates.len() < 2 {
         return;
     }
@@ -91,13 +91,17 @@ fn demote_low_quota_candidates(storage: &Storage, candidates: &mut Vec<(Account,
         return;
     }
     let threshold = low_quota_threshold_percent();
-    candidates.sort_by_key(|(account, _)| {
-        if is_low_quota_account(&account.id, &snapshots, threshold) {
-            1u8
+    let mut normal = Vec::with_capacity(candidates.len());
+    let mut low_quota = Vec::new();
+    for candidate in candidates.drain(..) {
+        if is_low_quota_account(&candidate.0.id, &snapshots, threshold) {
+            low_quota.push(candidate);
         } else {
-            0u8
+            normal.push(candidate);
         }
-    });
+    }
+    normal.extend(low_quota);
+    *candidates = normal;
 }
 
 fn load_usage_snapshots(storage: &Storage) -> HashMap<String, UsageSnapshotRecord> {
@@ -124,7 +128,7 @@ fn is_low_quota_account(
     primary_low || secondary_low
 }
 
-fn low_quota_threshold_percent() -> f64 {
+pub(crate) fn low_quota_threshold_percent() -> f64 {
     std::env::var(LOW_QUOTA_THRESHOLD_ENV)
         .ok()
         .and_then(|raw| raw.trim().parse::<f64>().ok())

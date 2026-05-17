@@ -110,6 +110,9 @@ fn insert_request_log_with_token_stat_is_visible_via_join() {
         method: "POST".to_string(),
         request_type: Some("http".to_string()),
         model: Some("gpt-5".to_string()),
+        upstream_model: Some("gpt-provider-5".to_string()),
+        actual_source_kind: Some("openai_account".to_string()),
+        actual_source_id: Some("acc_1".to_string()),
         reasoning_effort: Some("medium".to_string()),
         service_tier: Some("fast".to_string()),
         effective_service_tier: Some("priority".to_string()),
@@ -165,6 +168,10 @@ fn insert_request_log_with_token_stat_is_visible_via_join() {
     assert_eq!(row.original_path.as_deref(), Some("/v1/chat/completions"));
     assert_eq!(row.adapted_path.as_deref(), Some("/v1/responses"));
     assert_eq!(row.request_type.as_deref(), Some("http"));
+    assert_eq!(row.model.as_deref(), Some("gpt-5"));
+    assert_eq!(row.upstream_model.as_deref(), Some("gpt-provider-5"));
+    assert_eq!(row.actual_source_kind.as_deref(), Some("openai_account"));
+    assert_eq!(row.actual_source_id.as_deref(), Some("acc_1"));
     assert_eq!(row.service_tier.as_deref(), Some("fast"));
     assert_eq!(row.effective_service_tier.as_deref(), Some("priority"));
     assert_eq!(row.first_response_ms, Some(456));

@@ -45,6 +45,12 @@ struct ImportTokenPayload {
     chatgpt_account_id_hint: Option<String>,
 }
 
+#[derive(Debug)]
+struct ImportedAccount {
+    account_id: String,
+    created: bool,
+}
+
 #[derive(Debug, Default)]
 struct ImportAccountMeta {
     label: Option<String>,
@@ -420,14 +426,17 @@ fn import_items_in_batches(
         for item in batch {
             result.total += 1;
             let current_index = result.total;
-            match import_single_item(storage, index, item, current_index) {
-                Ok(created) => {
-                    if created {
+            match import_single_item_with_account_id(storage, index, item, current_index) {
+                Ok(imported) => {
+                    if imported.created {
                         result.created += 1;
                     } else {
                         result.updated += 1;
                     }
-                    progress.on_item_success(created);
+                    progress.on_item_success(imported.created);
+                    let _ = crate::usage_refresh::enqueue_usage_refresh_after_account_add(
+                        &imported.account_id,
+                    );
                 }
                 Err(err) => {
                     result.failed += 1;
@@ -689,12 +698,23 @@ fn parse_items_from_content(content: &str) -> Result<Vec<Value>, String> {
 ///
 /// # 返回
 /// 返回函数执行结果
+#[cfg(test)]
 fn import_single_item(
     storage: &Storage,
     index: &mut ExistingAccountIndex,
     item: &Value,
     sequence: usize,
 ) -> Result<bool, String> {
+    import_single_item_with_account_id(storage, index, item, sequence)
+        .map(|imported| imported.created)
+}
+
+fn import_single_item_with_account_id(
+    storage: &Storage,
+    index: &mut ExistingAccountIndex,
+    item: &Value,
+    sequence: usize,
+) -> Result<ImportedAccount, String> {
     let payload = extract_token_payload(&item)?;
     let meta = extract_account_meta(item);
     let claims = parse_id_token_claims(&payload.id_token).ok();
@@ -868,7 +888,10 @@ fn import_single_item(
     storage.insert_token(&token).map_err(|e| e.to_string())?;
     index.upsert_index(&account);
     index.index_token_subject(&account, &token);
-    Ok(created)
+    Ok(ImportedAccount {
+        account_id,
+        created,
+    })
 }
 
 /// 函数 `extract_import_subject_account_id`

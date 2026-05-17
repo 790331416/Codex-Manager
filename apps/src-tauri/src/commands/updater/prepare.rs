@@ -749,8 +749,7 @@ pub(super) fn prepare_update_impl(app: &tauri::AppHandle) -> Result<UpdatePrepar
                 fs::remove_dir_all(&staging_dir)
                     .map_err(|err| format!("清理暂存目录失败：{err}"))?;
             }
-            fs::create_dir_all(&staging_dir)
-                .map_err(|err| format!("创建暂存目录失败：{err}"))?;
+            fs::create_dir_all(&staging_dir).map_err(|err| format!("创建暂存目录失败：{err}"))?;
             stage_macos_dmg_payload(&payload_path, &staging_dir, &prepare_log_path)?;
             pending.staging_dir = Some(staging_dir.display().to_string());
         }

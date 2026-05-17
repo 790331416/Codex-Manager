@@ -1,6 +1,7 @@
 use codexmanager_core::storage::{
-    now_ts, Account, ApiKey, Event, RequestLog, RequestTokenStat, Storage, Token,
-    UsageSnapshotRecord,
+    now_ts, Account, AggregateApi, ApiKey, ApiKeyOwner, AppUser, AppWalletLedgerEntry, Event,
+    ModelGroup, ModelSourceMapping, ModelSourceModel, RequestLog, RequestTokenStat, Storage, Token,
+    UsageSnapshotRecord, UserModelGroup,
 };
 
 /// 函数 `storage_can_insert_account_and_token`
@@ -110,6 +111,75 @@ fn storage_can_find_token_and_account_by_account_id() {
     assert!(storage
         .find_token_by_account_id("missing-account")
         .expect("find missing token")
+        .is_none());
+}
+
+#[test]
+fn storage_can_upsert_and_resolve_model_source_mappings() {
+    let storage = Storage::open_in_memory().expect("open in memory");
+    storage.init().expect("init schema");
+    let now = now_ts();
+
+    storage
+        .upsert_model_source_model(&ModelSourceModel {
+            source_kind: "openai_account".to_string(),
+            source_id: "acc-routing-1".to_string(),
+            upstream_model: "gpt-upstream".to_string(),
+            display_name: Some("GPT Upstream".to_string()),
+            status: "available".to_string(),
+            discovery_kind: "manual".to_string(),
+            last_synced_at: Some(now),
+            extra_json: "{}".to_string(),
+            created_at: now,
+            updated_at: now,
+        })
+        .expect("upsert source model");
+    storage
+        .upsert_model_source_mapping(&ModelSourceMapping {
+            id: "map-routing-1".to_string(),
+            platform_model_slug: "gpt-platform".to_string(),
+            source_kind: "openai_account".to_string(),
+            source_id: "acc-routing-1".to_string(),
+            upstream_model: "gpt-upstream".to_string(),
+            enabled: true,
+            priority: 2,
+            weight: 3,
+            billing_model_slug: Some("gpt-billing".to_string()),
+            created_at: now,
+            updated_at: now,
+        })
+        .expect("upsert mapping");
+
+    let source_models = storage
+        .list_model_source_models(Some("openai_account"), Some("acc-routing-1"))
+        .expect("list source models");
+    assert_eq!(source_models.len(), 1);
+    assert_eq!(source_models[0].upstream_model, "gpt-upstream");
+    assert_eq!(source_models[0].discovery_kind, "manual");
+
+    let enabled = storage
+        .list_enabled_model_source_mappings_for_platform("gpt-platform")
+        .expect("list enabled mappings");
+    assert_eq!(enabled.len(), 1);
+    assert_eq!(enabled[0].priority, 2);
+    assert_eq!(enabled[0].weight, 3);
+    assert_eq!(
+        enabled[0].billing_model_slug.as_deref(),
+        Some("gpt-billing")
+    );
+
+    let account_mapping = storage
+        .find_enabled_model_source_mapping("gpt-platform", "openai_account", "acc-routing-1")
+        .expect("find enabled mapping")
+        .expect("mapping exists");
+    assert_eq!(account_mapping.upstream_model, "gpt-upstream");
+
+    storage
+        .delete_model_source_mapping("map-routing-1")
+        .expect("delete mapping");
+    assert!(storage
+        .find_enabled_model_source_mapping("gpt-platform", "openai_account", "acc-routing-1")
+        .expect("find deleted mapping")
         .is_none());
 }
 
@@ -1213,6 +1283,382 @@ fn insert_request_log_with_token_stat_writes_both_tables_in_one_call() {
     assert_eq!(logs[0].reasoning_output_tokens, Some(1));
 }
 
+#[test]
+fn request_token_stats_rollups_use_owner_and_actual_source_precedence() {
+    let storage = Storage::open_in_memory().expect("open in memory");
+    storage.init().expect("init schema");
+    let base = 1_700_000_000;
+
+    for (id, username) in [("ledger-user", "ledger"), ("current-user", "current")] {
+        storage
+            .insert_app_user(&AppUser {
+                id: id.to_string(),
+                username: username.to_string(),
+                display_name: None,
+                password_hash: "hash".to_string(),
+                role: "member".to_string(),
+                status: "active".to_string(),
+                created_at: base,
+                updated_at: base,
+                last_login_at: None,
+            })
+            .expect("insert app user");
+    }
+
+    let ledger_wallet = storage
+        .ensure_wallet_for_owner("wallet-ledger-user", "user", "ledger-user")
+        .expect("ensure ledger wallet");
+
+    for key_id in ["key-shared", "key-unowned"] {
+        storage
+            .insert_api_key(&ApiKey {
+                id: key_id.to_string(),
+                name: Some(key_id.to_string()),
+                model_slug: Some("gpt-5-mini".to_string()),
+                reasoning_effort: None,
+                service_tier: None,
+                rotation_strategy: "account_rotation".to_string(),
+                aggregate_api_id: None,
+                account_plan_filter: None,
+                aggregate_api_url: None,
+                client_type: "codex".to_string(),
+                protocol_type: "openai_compat".to_string(),
+                auth_scheme: "authorization_bearer".to_string(),
+                upstream_base_url: None,
+                static_headers_json: None,
+                key_hash: format!("hash-{key_id}"),
+                status: "active".to_string(),
+                created_at: base,
+                last_used_at: None,
+            })
+            .expect("insert api key");
+    }
+
+    storage
+        .upsert_api_key_owner(&ApiKeyOwner {
+            key_id: "key-shared".to_string(),
+            owner_kind: "user".to_string(),
+            owner_user_id: Some("current-user".to_string()),
+            project_id: None,
+            updated_at: base,
+        })
+        .expect("upsert key owner");
+
+    for account_id in ["acc-actual", "acc-legacy"] {
+        storage
+            .insert_account(&Account {
+                id: account_id.to_string(),
+                label: account_id.to_string(),
+                issuer: "https://auth.openai.com".to_string(),
+                chatgpt_account_id: None,
+                workspace_id: None,
+                group_name: None,
+                sort: 0,
+                status: "active".to_string(),
+                created_at: base,
+                updated_at: base,
+            })
+            .expect("insert account");
+    }
+
+    for aggregate_id in ["agg-actual", "agg-legacy"] {
+        storage
+            .insert_aggregate_api(&AggregateApi {
+                id: aggregate_id.to_string(),
+                provider_type: "openai-compatible".to_string(),
+                supplier_name: Some(aggregate_id.to_string()),
+                sort: 0,
+                url: format!("https://{aggregate_id}.example/v1"),
+                auth_type: "bearer".to_string(),
+                auth_params_json: None,
+                action: None,
+                model_override: None,
+                status: "active".to_string(),
+                created_at: base,
+                updated_at: base,
+                last_test_at: None,
+                last_test_status: None,
+                last_test_error: None,
+                balance_query_enabled: false,
+                balance_query_template: None,
+                balance_query_base_url: None,
+                balance_query_user_id: None,
+                balance_query_config_json: None,
+                last_balance_at: None,
+                last_balance_status: None,
+                last_balance_error: None,
+                last_balance_json: None,
+            })
+            .expect("insert aggregate api");
+    }
+
+    let insert_usage_log = |trace_id: &str,
+                            key_id: &str,
+                            created_at: i64,
+                            status_code: i64,
+                            account_id: Option<&str>,
+                            initial_aggregate_api_id: Option<&str>,
+                            actual_source_kind: Option<&str>,
+                            actual_source_id: Option<&str>,
+                            input_tokens: i64,
+                            cached_input_tokens: i64,
+                            output_tokens: i64,
+                            total_tokens: Option<i64>,
+                            estimated_cost_usd: f64| {
+        let (request_log_id, token_stat_error) = storage
+            .insert_request_log_with_token_stat(
+                &RequestLog {
+                    trace_id: Some(trace_id.to_string()),
+                    key_id: Some(key_id.to_string()),
+                    account_id: account_id.map(str::to_string),
+                    initial_aggregate_api_id: initial_aggregate_api_id.map(str::to_string),
+                    request_path: "/v1/chat/completions".to_string(),
+                    method: "POST".to_string(),
+                    model: Some("gpt-5-mini".to_string()),
+                    actual_source_kind: actual_source_kind.map(str::to_string),
+                    actual_source_id: actual_source_id.map(str::to_string),
+                    status_code: Some(status_code),
+                    created_at,
+                    ..RequestLog::default()
+                },
+                &RequestTokenStat {
+                    key_id: Some(key_id.to_string()),
+                    account_id: account_id.map(str::to_string),
+                    model: Some("gpt-5-mini".to_string()),
+                    input_tokens: Some(input_tokens),
+                    cached_input_tokens: Some(cached_input_tokens),
+                    output_tokens: Some(output_tokens),
+                    total_tokens,
+                    estimated_cost_usd: Some(estimated_cost_usd),
+                    created_at,
+                    ..RequestTokenStat::default()
+                },
+            )
+            .expect("insert usage log");
+        assert!(
+            token_stat_error.is_none(),
+            "token stat insert failed: {:?}",
+            token_stat_error
+        );
+        request_log_id
+    };
+
+    let ledger_log_id = insert_usage_log(
+        "trace-ledger-owner",
+        "key-shared",
+        base + 60,
+        200,
+        Some("acc-legacy"),
+        None,
+        Some("openai_account"),
+        Some("acc-actual"),
+        100,
+        20,
+        50,
+        Some(100),
+        0.10,
+    );
+    storage
+        .adjust_wallet_balance(&AppWalletLedgerEntry {
+            id: "ledger-charge-one".to_string(),
+            wallet_id: ledger_wallet.id.clone(),
+            entry_kind: "request_charge".to_string(),
+            amount_credit_micros: -10_000,
+            balance_after_credit_micros: 0,
+            request_log_id: Some(ledger_log_id),
+            api_key_id: None,
+            pricing_rule_id: None,
+            raw_usage_json: None,
+            note: None,
+            created_by_user_id: None,
+            created_at: base + 61,
+        })
+        .expect("insert request charge ledger");
+
+    insert_usage_log(
+        "trace-current-owner",
+        "key-shared",
+        base + 120,
+        500,
+        Some("acc-legacy"),
+        None,
+        None,
+        None,
+        80,
+        30,
+        20,
+        None,
+        0.20,
+    );
+    insert_usage_log(
+        "trace-aggregate-actual",
+        "key-unowned",
+        base + 86_400 + 30,
+        200,
+        Some("acc-legacy"),
+        Some("agg-legacy"),
+        Some("aggregate_api"),
+        Some("agg-actual"),
+        40,
+        0,
+        10,
+        Some(30),
+        0.30,
+    );
+    insert_usage_log(
+        "trace-aggregate-legacy",
+        "key-unowned",
+        base + 86_400 + 60,
+        200,
+        None,
+        Some("agg-legacy"),
+        None,
+        None,
+        25,
+        5,
+        20,
+        None,
+        0.40,
+    );
+
+    let daily = storage
+        .summarize_request_token_stats_daily(base, base + 2 * 86_400, 86_400)
+        .expect("daily rollup");
+    assert_eq!(daily.len(), 2);
+    assert_eq!(daily[0].usage.total_tokens, 170);
+    assert_eq!(daily[0].usage.input_tokens, 180);
+    assert_eq!(daily[0].usage.cached_input_tokens, 50);
+    assert_eq!(daily[0].usage.output_tokens, 70);
+    assert_eq!(daily[0].usage.request_count, 2);
+    assert_eq!(daily[0].usage.success_count, 1);
+    assert_eq!(daily[0].usage.error_count, 1);
+    assert_eq!(daily[1].usage.total_tokens, 70);
+
+    let by_user = storage
+        .summarize_request_token_stats_by_user_between(base, base + 86_400)
+        .expect("user rollup");
+    let ledger_user = by_user
+        .iter()
+        .find(|item| item.user_id == "ledger-user")
+        .expect("ledger owner rollup");
+    let current_user = by_user
+        .iter()
+        .find(|item| item.user_id == "current-user")
+        .expect("current owner fallback rollup");
+    assert_eq!(ledger_user.usage.total_tokens, 100);
+    assert_eq!(current_user.usage.total_tokens, 70);
+
+    let ledger_direct = storage
+        .summarize_request_token_stats_for_user_between("ledger-user", base, base + 86_400)
+        .expect("direct user rollup");
+    assert_eq!(ledger_direct.total_tokens, 100);
+
+    let openai_sources = storage
+        .summarize_request_token_stats_by_source_between("openai_account", base, base + 2 * 86_400)
+        .expect("openai source rollup");
+    assert_eq!(
+        openai_sources
+            .iter()
+            .find(|item| item.source_id == "acc-actual")
+            .expect("actual account")
+            .usage
+            .total_tokens,
+        100
+    );
+    assert_eq!(
+        openai_sources
+            .iter()
+            .find(|item| item.source_id == "acc-legacy")
+            .expect("legacy account")
+            .usage
+            .total_tokens,
+        70
+    );
+
+    let aggregate_sources = storage
+        .summarize_request_token_stats_by_source_between("aggregate_api", base, base + 2 * 86_400)
+        .expect("aggregate source rollup");
+    assert_eq!(
+        aggregate_sources
+            .iter()
+            .find(|item| item.source_id == "agg-actual")
+            .expect("actual aggregate")
+            .usage
+            .total_tokens,
+        30
+    );
+    assert_eq!(
+        aggregate_sources
+            .iter()
+            .find(|item| item.source_id == "agg-legacy")
+            .expect("legacy aggregate")
+            .usage
+            .total_tokens,
+        40
+    );
+}
+
+#[test]
+fn delete_app_user_removes_model_group_assignments() {
+    let storage = Storage::open_in_memory().expect("open in memory");
+    storage.init().expect("init schema");
+    let now = now_ts();
+
+    storage
+        .insert_app_user(&AppUser {
+            id: "delete-user".to_string(),
+            username: "delete-user".to_string(),
+            display_name: None,
+            password_hash: "hash".to_string(),
+            role: "member".to_string(),
+            status: "active".to_string(),
+            created_at: now,
+            updated_at: now,
+            last_login_at: None,
+        })
+        .expect("insert user");
+    storage
+        .upsert_model_group(&ModelGroup {
+            id: "delete-group".to_string(),
+            name: "Delete Group".to_string(),
+            description: None,
+            status: "active".to_string(),
+            sort: 0,
+            is_default: false,
+            rate_multiplier_millis: 1000,
+            created_at: now,
+            updated_at: now,
+        })
+        .expect("insert model group");
+    storage
+        .replace_user_model_groups_for_group(
+            "delete-group",
+            &[UserModelGroup {
+                user_id: "delete-user".to_string(),
+                group_id: "delete-group".to_string(),
+                status: "active".to_string(),
+                expires_at: None,
+                created_at: now,
+                updated_at: now,
+            }],
+        )
+        .expect("assign model group");
+
+    let deleted = storage
+        .delete_app_user("delete-user")
+        .expect("delete app user");
+
+    assert_eq!(deleted, 1);
+    assert!(storage
+        .find_app_user_by_id("delete-user")
+        .expect("find deleted user")
+        .is_none());
+    assert!(storage
+        .list_user_model_groups_for_user("delete-user")
+        .expect("list deleted user model groups")
+        .is_empty());
+}
+
 /// 函数 `clear_request_logs_keeps_token_stats_for_usage_summary`
 ///
 /// 作者: gaohongshun
@@ -1225,7 +1671,7 @@ fn insert_request_log_with_token_stat_writes_both_tables_in_one_call() {
 /// # 返回
 /// 无
 #[test]
-fn clear_request_logs_keeps_token_stats_for_usage_summary() {
+fn clear_request_logs_rolls_token_stats_into_long_term_totals() {
     let storage = Storage::open_in_memory().expect("open in memory");
     storage.init().expect("init schema");
     let created_at = now_ts();
@@ -1284,11 +1730,19 @@ fn clear_request_logs_keeps_token_stats_for_usage_summary() {
     let summary = storage
         .summarize_request_logs_between(created_at - 1, created_at + 1)
         .expect("summarize");
-    assert_eq!(summary.input_tokens, 100);
-    assert_eq!(summary.cached_input_tokens, 30);
-    assert_eq!(summary.output_tokens, 20);
-    assert_eq!(summary.reasoning_output_tokens, 5);
-    assert!(summary.estimated_cost_usd > 0.11);
+    assert_eq!(summary.input_tokens, 0);
+    assert_eq!(summary.cached_input_tokens, 0);
+    assert_eq!(summary.output_tokens, 0);
+    assert_eq!(summary.reasoning_output_tokens, 0);
+    assert_eq!(summary.estimated_cost_usd, 0.0);
+
+    let usage_by_key = storage
+        .summarize_request_token_stats_by_key()
+        .expect("summarize by key");
+    assert_eq!(usage_by_key.len(), 1);
+    assert_eq!(usage_by_key[0].key_id, "key-clear");
+    assert_eq!(usage_by_key[0].total_tokens, 120);
+    assert!(usage_by_key[0].estimated_cost_usd > 0.11);
 }
 
 /// 函数 `request_token_stats_can_summarize_total_tokens_by_key`
@@ -1548,4 +2002,92 @@ fn storage_can_roundtrip_api_key_secret() {
         .find_api_key_secret_by_id("key-secret-1")
         .expect("load removed secret");
     assert!(removed.is_none());
+}
+
+#[test]
+fn storage_can_roundtrip_api_key_quota_limit_and_usage() {
+    let storage = Storage::open_in_memory().expect("open in memory");
+    storage.init().expect("init schema");
+
+    storage
+        .insert_api_key(&ApiKey {
+            id: "key-quota-1".to_string(),
+            name: Some("quota".to_string()),
+            model_slug: None,
+            reasoning_effort: None,
+            service_tier: None,
+            rotation_strategy: "account_rotation".to_string(),
+            aggregate_api_id: None,
+            account_plan_filter: None,
+            aggregate_api_url: None,
+            client_type: "codex".to_string(),
+            protocol_type: "openai_compat".to_string(),
+            auth_scheme: "authorization_bearer".to_string(),
+            upstream_base_url: None,
+            static_headers_json: None,
+            key_hash: "hash-quota-1".to_string(),
+            status: "active".to_string(),
+            created_at: now_ts(),
+            last_used_at: None,
+        })
+        .expect("insert key");
+
+    storage
+        .upsert_api_key_quota_limit("key-quota-1", Some(1000))
+        .expect("upsert quota");
+    assert_eq!(
+        storage
+            .find_api_key_quota_limit("key-quota-1")
+            .expect("read quota"),
+        Some(1000)
+    );
+
+    storage
+        .insert_request_token_stat(&RequestTokenStat {
+            request_log_id: 1,
+            key_id: Some("key-quota-1".to_string()),
+            input_tokens: Some(700),
+            cached_input_tokens: Some(100),
+            output_tokens: Some(300),
+            total_tokens: None,
+            created_at: now_ts(),
+            ..RequestTokenStat::default()
+        })
+        .expect("insert stat");
+    storage
+        .insert_request_token_stat(&RequestTokenStat {
+            request_log_id: 2,
+            key_id: Some("key-quota-1".to_string()),
+            total_tokens: Some(250),
+            created_at: now_ts(),
+            ..RequestTokenStat::default()
+        })
+        .expect("insert total stat");
+
+    assert_eq!(
+        storage
+            .api_key_total_token_usage("key-quota-1")
+            .expect("read usage"),
+        1150
+    );
+
+    storage
+        .rollup_all_request_token_stats()
+        .expect("roll up request stats");
+    assert_eq!(
+        storage
+            .api_key_total_token_usage("key-quota-1")
+            .expect("read rolled usage"),
+        1150
+    );
+
+    storage
+        .upsert_api_key_quota_limit("key-quota-1", None)
+        .expect("clear quota");
+    assert_eq!(
+        storage
+            .find_api_key_quota_limit("key-quota-1")
+            .expect("read cleared quota"),
+        None
+    );
 }

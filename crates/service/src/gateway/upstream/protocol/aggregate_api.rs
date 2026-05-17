@@ -12,6 +12,7 @@ use crate::aggregate_api::{
     AGGREGATE_API_PROVIDER_CODEX, AGGREGATE_API_PROVIDER_GEMINI,
 };
 use crate::gateway::request_log::RequestLogUsage;
+use serde_json::Value;
 
 const AGGREGATE_API_RETRY_ATTEMPTS_PER_CHANNEL: usize = 3;
 
@@ -107,6 +108,42 @@ fn build_upstream_url(base_url: &str, effective_path: &str) -> Result<reqwest::U
     url.set_path(combined_path.as_str());
     url.set_query(query_part.filter(|query| !query.trim().is_empty()));
     Ok(url)
+}
+
+fn rewrite_body_model_override(body: &Bytes, model_override: Option<&str>) -> Bytes {
+    let Some(model_override) = model_override
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return body.clone();
+    };
+    let Ok(mut value) = serde_json::from_slice::<Value>(body.as_ref()) else {
+        return body.clone();
+    };
+    let Some(object) = value.as_object_mut() else {
+        return body.clone();
+    };
+    if object
+        .get("model")
+        .and_then(Value::as_str)
+        .is_some_and(|current| current == model_override)
+    {
+        return body.clone();
+    }
+    object.insert(
+        "model".to_string(),
+        Value::String(model_override.to_string()),
+    );
+    serde_json::to_vec(&value)
+        .map(Bytes::from)
+        .unwrap_or_else(|_| body.clone())
+}
+
+fn aggregate_upstream_model_for_log<'a>(
+    candidate: &'a AggregateApi,
+    platform_model: Option<&'a str>,
+) -> Option<&'a str> {
+    candidate.model_override.as_deref().or(platform_model)
 }
 
 fn replace_query_param(mut url: reqwest::Url, name: &str, value: &str) -> reqwest::Url {
@@ -748,6 +785,8 @@ pub(in super::super) fn proxy_aggregate_request(
     let mut request = Some(request);
     let mut attempted_aggregate_api_ids = Vec::new();
     let mut last_attempt_url: Option<String> = None;
+    let mut last_attempt_id: Option<String> = None;
+    let mut last_attempt_upstream_model: Option<String> = None;
     let mut last_attempt_supplier_name: Option<String> = None;
     let mut last_attempt_error: Option<String> = None;
     let mut last_failure_status = 502u16;
@@ -755,8 +794,13 @@ pub(in super::super) fn proxy_aggregate_request(
     let total_candidates = aggregate_api_candidates.len();
     for (candidate_idx, candidate) in aggregate_api_candidates.into_iter().enumerate() {
         attempted_aggregate_api_ids.push(candidate.id.clone());
+        let candidate_id = candidate.id.clone();
+        let candidate_upstream_model =
+            aggregate_upstream_model_for_log(&candidate, model_for_log).map(str::to_string);
         let candidate_supplier_name = candidate.supplier_name.clone();
         let candidate_url = candidate.url.clone();
+        last_attempt_id = Some(candidate_id.clone());
+        last_attempt_upstream_model = candidate_upstream_model.clone();
         let Some(secret) = storage
             .find_aggregate_api_secret_by_id(candidate.id.as_str())
             .map_err(|err| err.to_string())?
@@ -811,6 +855,9 @@ pub(in super::super) fn proxy_aggregate_request(
                         aggregate_api_supplier_name: candidate_supplier_name.as_deref(),
                         aggregate_api_url: Some(candidate_url.as_str()),
                         attempted_aggregate_api_ids: Some(attempted_aggregate_api_ids.as_slice()),
+                        upstream_model: candidate_upstream_model.as_deref(),
+                        actual_source_kind: Some("aggregate_api"),
+                        actual_source_id: Some(candidate_id.as_str()),
                         ..Default::default()
                     },
                     Some(key_id),
@@ -864,7 +911,7 @@ pub(in super::super) fn proxy_aggregate_request(
                 request.as_ref().expect("request should still be available"),
                 method,
                 url.clone(),
-                body,
+                &rewrite_body_model_override(body, candidate.model_override.as_deref()),
                 secret.as_str(),
                 &auth_config,
                 &injected_headers,
@@ -1025,6 +1072,9 @@ pub(in super::super) fn proxy_aggregate_request(
                     aggregate_api_supplier_name: candidate_supplier_name.as_deref(),
                     aggregate_api_url: Some(candidate_url.as_str()),
                     attempted_aggregate_api_ids: Some(attempted_aggregate_api_ids.as_slice()),
+                    upstream_model: candidate_upstream_model.as_deref(),
+                    actual_source_kind: Some("aggregate_api"),
+                    actual_source_id: Some(candidate_id.as_str()),
                     ..Default::default()
                 },
                 Some(key_id),
@@ -1085,6 +1135,9 @@ pub(in super::super) fn proxy_aggregate_request(
             aggregate_api_supplier_name: last_attempt_supplier_name.as_deref(),
             aggregate_api_url: last_attempt_url.as_deref(),
             attempted_aggregate_api_ids: Some(attempted_aggregate_api_ids.as_slice()),
+            upstream_model: last_attempt_upstream_model.as_deref(),
+            actual_source_kind: last_attempt_id.as_deref().map(|_| "aggregate_api"),
+            actual_source_id: last_attempt_id.as_deref(),
             ..Default::default()
         },
         Some(key_id),
@@ -1129,12 +1182,22 @@ mod bridge_tests {
             auth_type: AGGREGATE_API_AUTH_APIKEY.to_string(),
             auth_params_json: None,
             action: None,
+            model_override: None,
             status: "active".to_string(),
             created_at: sort,
             updated_at: sort,
             last_test_at: None,
             last_test_status: None,
             last_test_error: None,
+            balance_query_enabled: false,
+            balance_query_template: None,
+            balance_query_base_url: None,
+            balance_query_user_id: None,
+            balance_query_config_json: None,
+            last_balance_at: None,
+            last_balance_status: None,
+            last_balance_error: None,
+            last_balance_json: None,
         }
     }
 
@@ -1280,13 +1343,14 @@ mod tests {
 
     use super::{
         build_upstream_url, effective_action_path, resolve_aggregate_api_rotation_candidates,
-        resolve_passthrough_sse_protocol,
+        resolve_passthrough_sse_protocol, rewrite_body_model_override,
     };
     use crate::aggregate_api::{
         AGGREGATE_API_AUTH_APIKEY, AGGREGATE_API_PROVIDER_CLAUDE, AGGREGATE_API_PROVIDER_CODEX,
         AGGREGATE_API_PROVIDER_GEMINI,
     };
     use crate::gateway::{PassthroughSseProtocol, ResponseAdapter};
+    use bytes::Bytes;
 
     fn aggregate_api_with_action(action: Option<&str>) -> AggregateApi {
         AggregateApi {
@@ -1298,12 +1362,22 @@ mod tests {
             auth_type: "apikey".to_string(),
             auth_params_json: None,
             action: action.map(str::to_string),
+            model_override: None,
             status: "active".to_string(),
             created_at: 0,
             updated_at: 0,
             last_test_at: None,
             last_test_status: None,
             last_test_error: None,
+            balance_query_enabled: false,
+            balance_query_template: None,
+            balance_query_base_url: None,
+            balance_query_user_id: None,
+            balance_query_config_json: None,
+            last_balance_at: None,
+            last_balance_status: None,
+            last_balance_error: None,
+            last_balance_json: None,
         }
     }
 
@@ -1349,6 +1423,18 @@ mod tests {
     }
 
     #[test]
+    fn rewrite_body_model_override_replaces_json_model() {
+        let body = Bytes::from_static(br#"{"model":"claude-sonnet","messages":[]}"#);
+
+        let rewritten = rewrite_body_model_override(&body, Some("qwen3.5-plus"));
+
+        let value: serde_json::Value =
+            serde_json::from_slice(rewritten.as_ref()).expect("parse rewritten body");
+        assert_eq!(value["model"], "qwen3.5-plus");
+        assert_eq!(value["messages"].as_array().map(Vec::len), Some(0));
+    }
+
+    #[test]
     fn gemini_native_candidates_resolve_to_gemini_provider_only() {
         let storage = Storage::open_in_memory().expect("open storage");
         storage.init().expect("init storage");
@@ -1368,12 +1454,22 @@ mod tests {
                     auth_type: AGGREGATE_API_AUTH_APIKEY.to_string(),
                     auth_params_json: None,
                     action: None,
+                    model_override: None,
                     status: "active".to_string(),
                     created_at: now,
                     updated_at: now,
                     last_test_at: None,
                     last_test_status: None,
                     last_test_error: None,
+                    balance_query_enabled: false,
+                    balance_query_template: None,
+                    balance_query_base_url: None,
+                    balance_query_user_id: None,
+                    balance_query_config_json: None,
+                    last_balance_at: None,
+                    last_balance_status: None,
+                    last_balance_error: None,
+                    last_balance_json: None,
                 })
                 .expect("insert aggregate api");
         }

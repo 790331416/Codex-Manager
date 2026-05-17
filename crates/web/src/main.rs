@@ -363,9 +363,11 @@ fn escape_html(text: &str) -> String {
 /// # 返回
 /// 返回函数执行结果
 async fn runtime_info() -> impl IntoResponse {
+    let author_content_url = read_env_trim("CODEXMANAGER_AUTHOR_CONTENT_URL").unwrap_or_default();
     Json(serde_json::json!({
         "mode": "web-gateway",
         "rpcBaseUrl": "/api/rpc",
+        "authorContentUrl": author_content_url,
         "canManageService": false,
         "canSelfUpdate": false,
         "canCloseToTray": false,
@@ -504,6 +506,10 @@ async fn async_main() {
 
     let mut protected_app = Router::new()
         .route("/api/rpc", post(service_gateway::rpc_proxy))
+        .route(
+            "/api/events/usage-refresh",
+            get(service_gateway::usage_refresh_events),
+        )
         .route("/__quit", get(service_gateway::quit));
 
     let disk_ok = ensure_index_file(&index);
@@ -513,7 +519,9 @@ async fn async_main() {
             let static_service = ServeDir::new(&web_root)
                 .append_index_html_on_directories(true)
                 .not_found_service(ServeFile::new(index));
-            protected_app = protected_app.fallback_service(static_service);
+            protected_app = protected_app
+                .nest_service("/_next", ServeDir::new(web_root.join("_next")))
+                .fallback_service(static_service);
         } else {
             protected_app = protected_app
                 .route("/", get(ui_assets::serve_missing_ui))
@@ -558,6 +566,7 @@ async fn async_main() {
             any(service_gateway::gateway_proxy),
         )
         .route("/api/runtime", get(runtime_info))
+        .route("/api/author-content", get(service_gateway::author_content))
         .route("/__auth_status", get(auth::auth_status))
         .route("/__login", get(auth::login_page).post(auth::login_submit))
         .route("/__logout", get(auth::logout).post(auth::logout))
@@ -739,6 +748,7 @@ mod tests {
 
         assert_eq!(payload["mode"], "web-gateway");
         assert_eq!(payload["rpcBaseUrl"], "/api/rpc");
+        assert_eq!(payload["authorContentUrl"], "");
         assert_eq!(payload["canManageService"], false);
         assert_eq!(payload["canSelfUpdate"], false);
         assert_eq!(payload["canCloseToTray"], false);

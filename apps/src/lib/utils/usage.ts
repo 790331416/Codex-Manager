@@ -640,7 +640,7 @@ export function getExtraUsageDisplayRows(
  */
 export function calcAvailability(
   usage?: Partial<AccountUsage> | null,
-  account?: { status?: string; statusReason?: string } | null
+  account?: { status?: string; statusReason?: string; hasToken?: boolean } | null
 ): { text: string; level: AvailabilityLevel } {
   const primaryExhausted = (usage?.usedPercent ?? 0) >= 100;
   const secondaryExhausted = (usage?.secondaryUsedPercent ?? 0) >= 100;
@@ -659,6 +659,9 @@ export function calcAvailability(
   }
   if (isUnavailableAccount(account)) {
     return { text: "不可用", level: "bad" };
+  }
+  if (account?.hasToken === false) {
+    return { text: "缺少授权 Token", level: "bad" };
   }
   if (!usage) {
     return { text: "未知", level: "unknown" };

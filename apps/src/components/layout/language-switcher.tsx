@@ -4,6 +4,7 @@ import { Globe } from "lucide-react";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -49,11 +50,13 @@ export function LanguageSwitcher({
           </div>
         </SelectTrigger>
         <SelectContent>
+                    <SelectGroup>
           {localeOptions.map((item) => (
             <SelectItem key={item} value={item}>
               {getLocaleLabel(item)}
             </SelectItem>
           ))}
+          </SelectGroup>
         </SelectContent>
       </Select>
     </div>

@@ -236,8 +236,7 @@ pub fn app_update_open_logs_dir(
         .unwrap_or(updater_root_logs_dir(&app)?);
 
     if !target_dir.exists() {
-        fs::create_dir_all(&target_dir)
-            .map_err(|err| format!("创建更新日志目录失败：{err}"))?;
+        fs::create_dir_all(&target_dir).map_err(|err| format!("创建更新日志目录失败：{err}"))?;
     }
     open_in_file_manager_blocking(&target_dir.display().to_string())
 }

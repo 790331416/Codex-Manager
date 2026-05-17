@@ -1,5 +1,5 @@
 use codexmanager_core::rpc::types::ApiKeyCreateResult;
-use codexmanager_core::storage::{now_ts, ApiKey};
+use codexmanager_core::storage::{now_ts, ApiKey, Storage};
 
 use crate::apikey::service_tier::normalize_service_tier_owned;
 use crate::apikey_profile::{
@@ -10,6 +10,60 @@ use crate::reasoning_effort::normalize_reasoning_effort_owned;
 use crate::storage_helpers::{
     generate_key_id, generate_platform_key, hash_platform_key, open_storage,
 };
+
+fn normalize_custom_key(custom_key: Option<String>) -> Result<Option<String>, String> {
+    let Some(value) = custom_key else {
+        return Ok(None);
+    };
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    if value
+        .chars()
+        .any(|ch| ch.is_control() || ch.is_whitespace())
+    {
+        return Err(
+            "自定义 API Key 不能包含空白字符(custom api key must not contain whitespace)"
+                .to_string(),
+        );
+    }
+    if value.len() > 512 {
+        return Err("自定义 API Key 过长(custom api key is too long)".to_string());
+    }
+    Ok(Some(value.to_string()))
+}
+
+fn platform_key_exists(storage: &Storage, key: &str) -> Result<bool, String> {
+    let key_hash = hash_platform_key(key);
+    let existing = storage
+        .find_api_key_by_hash(&key_hash)
+        .map_err(|err| format!("check api key uniqueness failed: {err}"))?;
+    Ok(existing.is_some())
+}
+
+fn ensure_platform_key_not_exists(storage: &Storage, key: &str) -> Result<(), String> {
+    if platform_key_exists(storage, key)? {
+        return Err("自定义 API Key 已存在(custom api key already exists)".to_string());
+    }
+    Ok(())
+}
+
+fn resolve_platform_key(storage: &Storage, custom_key: Option<String>) -> Result<String, String> {
+    if let Some(key) = normalize_custom_key(custom_key)? {
+        ensure_platform_key_not_exists(storage, &key)?;
+        return Ok(key);
+    }
+
+    for _ in 0..4 {
+        let key = generate_platform_key();
+        if !platform_key_exists(storage, &key)? {
+            return Ok(key);
+        }
+    }
+
+    Err("生成平台密钥失败(failed to generate unique api key)".to_string())
+}
 
 /// 函数 `create_api_key`
 ///
@@ -33,10 +87,12 @@ pub(crate) fn create_api_key(
     rotation_strategy: Option<String>,
     aggregate_api_id: Option<String>,
     account_plan_filter: Option<String>,
+    quota_limit_tokens: Option<i64>,
+    custom_key: Option<String>,
 ) -> Result<ApiKeyCreateResult, String> {
     // 创建平台 Key 并写入存储
     let storage = open_storage().ok_or_else(|| "storage unavailable".to_string())?;
-    let key = generate_platform_key();
+    let key = resolve_platform_key(&storage, custom_key)?;
     let key_hash = hash_platform_key(&key);
     let key_id = generate_key_id();
     let protocol_type = normalize_protocol_type(protocol_type)?;
@@ -81,6 +137,10 @@ pub(crate) fn create_api_key(
         last_used_at: None,
     };
     storage.insert_api_key(&record).map_err(|e| e.to_string())?;
+    if let Err(err) = storage.upsert_api_key_quota_limit(&key_id, quota_limit_tokens) {
+        let _ = storage.delete_api_key(&key_id);
+        return Err(format!("persist api key quota limit failed: {err}"));
+    }
     if let Err(err) = storage.upsert_api_key_secret(&key_id, &key) {
         let _ = storage.delete_api_key(&key_id);
         return Err(format!("persist api key secret failed: {err}"));

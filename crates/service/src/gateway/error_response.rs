@@ -48,6 +48,7 @@ pub(super) fn terminal_text_response(
     let error_type = match status_code {
         400 => "invalid_request_error",
         401 => "authentication_error",
+        402 => "insufficient_quota",
         403 => "permission_error",
         404 => "invalid_request_error",
         429 => "rate_limit_error",

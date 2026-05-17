@@ -115,6 +115,9 @@ export interface AccountEditorState {
   currentTags: string;
   currentNote: string;
   currentSort: number;
+  currentModelSlugs: string;
+  currentQuotaPrimaryWindowTokens: number | null;
+  currentQuotaSecondaryWindowTokens: number | null;
 }
 
 export type DeleteDialogState =
@@ -251,7 +254,7 @@ export function QuotaOverviewCell({ items }: { items: QuotaSummaryItem[] }) {
         side="right"
         align="center"
         sideOffset={10}
-        className="max-w-[340px] rounded-2xl bg-background p-3 text-foreground shadow-2xl"
+        className="max-w-[340px] rounded-lg bg-popover p-3 text-popover-foreground shadow-md"
       >
         <div className="space-y-3">
           <div className="space-y-1">
@@ -304,6 +307,129 @@ export function getAccountStatusAction(
     return { action: null, label: t("封禁账号"), icon: PowerOff };
   }
   return { action: "disable", label: t("禁用账号"), icon: PowerOff };
+}
+
+export function getAccountStatusReasonCode(account: Account): string {
+  const reason = String(account.statusReason || "").trim();
+  return reason.toLowerCase() === "usage_ok" ? "" : reason;
+}
+
+export function formatAccountStatusReasonLabel(
+  account: Account,
+  t: TranslateFn,
+): string | null {
+  const reasonCode = getAccountStatusReasonCode(account);
+  if (!reasonCode) {
+    return null;
+  }
+
+  const reason = reasonCode.toLowerCase();
+  if (reason.startsWith("refresh_token_invalid:")) {
+    const detail = reason.slice("refresh_token_invalid:".length);
+    switch (detail) {
+      case "refresh_token_reused":
+        return t("Refresh Token 已被重复使用，需要重新登录");
+      case "refresh_token_invalidated":
+        return t("Refresh Token 已被撤销，需要重新登录");
+      case "refresh_token_expired":
+        return t("Refresh Token 已过期，需要重新登录");
+      case "invalid_grant":
+        return t("Refresh Token 授权无效，需要重新登录");
+      case "refresh_token_unknown_401":
+        return t("刷新登录凭证返回 401，需要重新登录");
+      default:
+        return t("Refresh Token 失效，需要重新登录");
+    }
+  }
+
+  const usageHttpStatus = reason.match(/^usage_http_(\d{3})$/);
+  if (usageHttpStatus) {
+    const statusCode = usageHttpStatus[1];
+    if (statusCode === "401") {
+      return t("用量接口返回 401，账号授权失效");
+    }
+    if (statusCode === "403") {
+      return t("用量接口返回 403，账号权限不足或被限制");
+    }
+    return t("用量接口返回 HTTP {status}", { status: statusCode });
+  }
+
+  switch (reason) {
+    case "account_deactivated":
+      return t("账号已停用");
+    case "workspace_deactivated":
+    case "deactivated_workspace":
+      return t("工作区已停用");
+    case "usage_limit_exhausted":
+      return t("额度已耗尽");
+    default:
+      return reasonCode;
+  }
+}
+
+export function AccountStatusCell({ account }: { account: Account }) {
+  const { t } = useI18n();
+  const statusReasonCode = getAccountStatusReasonCode(account);
+  const statusReasonLabel = formatAccountStatusReasonLabel(account, t);
+  const statusText = t(account.availabilityText || "未知");
+
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<div />} className="inline-flex cursor-help">
+        <div className="flex min-w-0 flex-col gap-1">
+          <div className="flex items-center gap-1.5">
+            <div
+              className={cn(
+                "h-1.5 w-1.5 shrink-0 rounded-full",
+                account.isAvailable ? "bg-green-500" : "bg-red-500",
+              )}
+            />
+            <span
+              className={cn(
+                "text-[11px] font-medium",
+                account.isAvailable
+                  ? "text-green-600 dark:text-green-400"
+                  : "text-red-600 dark:text-red-400",
+              )}
+            >
+              {statusText}
+            </span>
+          </div>
+          {statusReasonLabel ? (
+            <span className="max-w-[180px] truncate text-[10px] text-muted-foreground">
+              {statusReasonLabel}
+            </span>
+          ) : null}
+        </div>
+      </TooltipTrigger>
+      <TooltipContent
+        side="left"
+        align="center"
+        className="max-w-[320px] bg-popover p-3 text-popover-foreground shadow-md"
+      >
+        <div className="space-y-2 text-left">
+          <div className="space-y-0.5">
+            <div className="text-[10px] text-muted-foreground">{t("当前状态")}</div>
+            <div className="font-medium">{statusText}</div>
+          </div>
+          {statusReasonLabel ? (
+            <div className="space-y-0.5">
+              <div className="text-[10px] text-muted-foreground">{t("状态原因")}</div>
+              <div className="font-medium">{statusReasonLabel}</div>
+            </div>
+          ) : null}
+          {statusReasonCode ? (
+            <div className="space-y-0.5">
+              <div className="text-[10px] text-muted-foreground">{t("原因码")}</div>
+              <div className="break-all rounded-md bg-muted px-2 py-1 font-mono text-[10px]">
+                {statusReasonCode}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 export function formatAccountPlanLabel(
@@ -501,6 +627,8 @@ export function AccountInfoCell({
       : account.hasSubscription === false
         ? t("未订阅")
         : t("未知");
+  const statusReasonCode = getAccountStatusReasonCode(account);
+  const statusReasonLabel = formatAccountStatusReasonLabel(account, t);
   const tagsText = formatAccountTags(account.tags);
   const noteText = String(account.note || "").trim();
 
@@ -561,6 +689,19 @@ export function AccountInfoCell({
                 {t(account.availabilityText || "未知")}
               </div>
             </div>
+            {statusReasonLabel ? (
+              <div className="space-y-0.5 sm:col-span-2">
+                <div className="text-[10px] text-background/70">
+                  {t("状态原因")}
+                </div>
+                <div className="font-medium">{statusReasonLabel}</div>
+                {statusReasonCode ? (
+                  <div className="break-all font-mono text-[10px] text-background/70">
+                    {statusReasonCode}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <div className="space-y-0.5">
               <div className="text-[10px] text-background/70">
                 {t("订阅状态")}

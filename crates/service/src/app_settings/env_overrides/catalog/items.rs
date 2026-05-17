@@ -110,6 +110,13 @@ pub(crate) const ENV_OVERRIDE_CATALOG: &[EnvOverrideCatalogItem] = &[
         "0",
     ),
     EnvOverrideCatalogItem::new(
+        "CODEXMANAGER_GATEWAY_BLOCKED_PATHS",
+        "网关本地屏蔽路径",
+        ENV_OVERRIDE_SCOPE_SERVICE,
+        ENV_OVERRIDE_APPLY_MODE_RUNTIME,
+        "/v1/props",
+    ),
+    EnvOverrideCatalogItem::new(
         "CODEXMANAGER_GATEWAY_KEEPALIVE_FAILURE_BACKOFF_MAX_SECS",
         "保活失败退避上限（秒）",
         ENV_OVERRIDE_SCOPE_SERVICE,
@@ -362,6 +369,27 @@ pub(crate) const ENV_OVERRIDE_CATALOG: &[EnvOverrideCatalogItem] = &[
         "0",
     ),
     EnvOverrideCatalogItem::new(
+        "CODEXMANAGER_OBSERVABILITY_MAINTENANCE_INTERVAL_SECS",
+        "观测数据清理检查间隔（秒）",
+        ENV_OVERRIDE_SCOPE_SERVICE,
+        ENV_OVERRIDE_APPLY_MODE_RUNTIME,
+        "900",
+    ),
+    EnvOverrideCatalogItem::new(
+        "CODEXMANAGER_REQUEST_LOG_RETENTION_DAYS",
+        "请求日志明细保留天数",
+        ENV_OVERRIDE_SCOPE_SERVICE,
+        ENV_OVERRIDE_APPLY_MODE_RUNTIME,
+        "14",
+    ),
+    EnvOverrideCatalogItem::new(
+        "CODEXMANAGER_REQUEST_TOKEN_STATS_RETENTION_DAYS",
+        "请求 token 明细保留天数",
+        ENV_OVERRIDE_SCOPE_SERVICE,
+        ENV_OVERRIDE_APPLY_MODE_RUNTIME,
+        "14",
+    ),
+    EnvOverrideCatalogItem::new(
         "CODEXMANAGER_USAGE_BASE_URL",
         "用量接口基础地址",
         ENV_OVERRIDE_SCOPE_SERVICE,
@@ -394,7 +422,7 @@ pub(crate) const ENV_OVERRIDE_CATALOG: &[EnvOverrideCatalogItem] = &[
         "每账号保留用量快照数",
         ENV_OVERRIDE_SCOPE_SERVICE,
         ENV_OVERRIDE_APPLY_MODE_RUNTIME,
-        "0",
+        "1",
     ),
     EnvOverrideCatalogItem::new(
         "CODEXMANAGER_WEB_ADDR",

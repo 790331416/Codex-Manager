@@ -79,6 +79,21 @@ function buildRpcHttpErrorMessage(
   return message;
 }
 
+function isWebAuthRequiredPayload(payload: unknown): boolean {
+  const record = asRecord(payload);
+  return record?.error === "web_auth_required";
+}
+
+function redirectToWebLoginIfBrowser(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const currentPath =
+    `${window.location.pathname || "/"}${window.location.search || ""}` || "/";
+  const loginUrl = `/__login?next=${encodeURIComponent(currentPath)}`;
+  window.location.replace(loginUrl);
+}
+
 export async function postJsonRpc<T>(
   fetcher: JsonRpcFetcher,
   url: string,
@@ -98,6 +113,9 @@ export async function postJsonRpc<T>(
 
   if (!response.ok) {
     const payload = await readRpcHttpErrorPayload(response);
+    if (response.status === 401 && isWebAuthRequiredPayload(payload)) {
+      redirectToWebLoginIfBrowser();
+    }
     throw new Error(
       buildRpcHttpErrorMessage(response.status, payload, response.headers)
     );

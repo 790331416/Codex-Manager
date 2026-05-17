@@ -7,7 +7,9 @@ const WEB_AUTH_TAB_SESSION_STORAGE_KEY: &str = "codexmanager_web_auth_tab";
 
 #[derive(Debug, Deserialize)]
 pub(super) struct LoginForm {
-    password: String,
+    username: Option<String>,
+    password: Option<String>,
+    display_name: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -174,6 +176,25 @@ fn login_force_requested(query: &LoginQuery) -> bool {
         .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "yes" | "on"))
 }
 
+fn is_public_static_asset_path(path: &str) -> bool {
+    path.starts_with("/_next/")
+        || path.starts_with("/static/")
+        || path == "/favicon.ico"
+        || path == "/robots.txt"
+        || path == "/manifest.json"
+        || path.ends_with(".js")
+        || path.ends_with(".css")
+        || path.ends_with(".map")
+        || path.ends_with(".png")
+        || path.ends_with(".jpg")
+        || path.ends_with(".jpeg")
+        || path.ends_with(".webp")
+        || path.ends_with(".svg")
+        || path.ends_with(".ico")
+        || path.ends_with(".woff")
+        || path.ends_with(".woff2")
+}
+
 /// 函数 `request_is_authenticated`
 ///
 /// 作者: gaohongshun
@@ -187,18 +208,37 @@ fn login_force_requested(query: &LoginQuery) -> bool {
 /// # 返回
 /// 返回函数执行结果
 fn request_is_authenticated(headers: &HeaderMap, state: &AppState) -> bool {
-    let Some(password_hash) = current_web_access_password_hash() else {
-        return true;
-    };
-    let Some(cookie_value) = parse_cookie_value(headers, WEB_AUTH_COOKIE_NAME) else {
-        return false;
-    };
-    let expected = build_web_auth_cookie_value(
-        &password_hash,
-        &state.rpc_token,
-        &state.web_auth_session_key,
-    );
-    cookie_value == expected
+    match codexmanager_service::current_web_auth_mode().as_str() {
+        "none" => true,
+        "accounts" => current_app_session_from_headers(headers).is_some(),
+        _ => {
+            let Some(password_hash) = current_web_access_password_hash() else {
+                return true;
+            };
+            let Some(cookie_value) = parse_cookie_value(headers, WEB_AUTH_COOKIE_NAME) else {
+                return false;
+            };
+            let expected = build_web_auth_cookie_value(
+                &password_hash,
+                &state.rpc_token,
+                &state.web_auth_session_key,
+            );
+            cookie_value == expected
+        }
+    }
+}
+
+pub(super) fn current_app_session_from_headers(
+    headers: &HeaderMap,
+) -> Option<codexmanager_service::AppSessionUserResult> {
+    if codexmanager_service::current_web_auth_mode() != "accounts" {
+        return None;
+    }
+    parse_cookie_value(headers, WEB_AUTH_COOKIE_NAME).and_then(|token| {
+        codexmanager_service::resolve_app_user_session(&token)
+            .ok()
+            .flatten()
+    })
 }
 
 /// 函数 `builtin_login_html`
@@ -332,6 +372,145 @@ fn builtin_login_html(error: Option<&str>) -> String {
     )
 }
 
+fn account_login_html(error: Option<&str>, bootstrap: bool) -> String {
+    let error_html = error
+        .map(|text| format!(r#"<div class="error">{}</div>"#, escape_html(text)))
+        .unwrap_or_default();
+    let title = if bootstrap {
+        "初始化管理员"
+    } else {
+        "账号登录"
+    };
+    let desc = if bootstrap {
+        "首次启用账号系统，请创建管理员账号。后续成员、额度和 Key 归属都由管理员维护。"
+    } else {
+        "当前 CodexManager Web 已启用账号系统，请使用管理员或成员账号进入。"
+    };
+    let display_name_field = if bootstrap {
+        r#"<label for="display_name">显示名称</label>
+      <input id="display_name" name="display_name" type="text" autocomplete="name" />"#
+    } else {
+        ""
+    };
+    format!(
+        r#"<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>CodexManager Web 登录</title>
+    <style>
+      :root {{
+        color-scheme: light;
+        --bg: #eef3f8;
+        --panel: rgba(255,255,255,.92);
+        --text: #142033;
+        --muted: #627389;
+        --accent: #0f6fff;
+        --accent-strong: #0a57ca;
+        --border: rgba(20,32,51,.12);
+        --error-bg: rgba(193, 45, 45, .1);
+        --error-fg: #b42318;
+      }}
+      * {{ box-sizing: border-box; }}
+      body {{
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        background:
+          radial-gradient(circle at top left, rgba(15,111,255,.18), transparent 32%),
+          radial-gradient(circle at bottom right, rgba(45,164,78,.14), transparent 26%),
+          linear-gradient(160deg, #f6f9fc 0%, #e8eef6 100%);
+        color: var(--text);
+      }}
+      .card {{
+        width: min(100%, 440px);
+        padding: 28px;
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        background: var(--panel);
+        box-shadow: 0 24px 60px rgba(15, 23, 42, .12);
+        backdrop-filter: blur(14px);
+      }}
+      .mark {{
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        border-radius: 14px;
+        background: linear-gradient(135deg, #0f6fff, #2bb673);
+        color: #fff;
+        font-weight: 700;
+      }}
+      h1 {{ margin: 16px 0 6px; font-size: 22px; }}
+      p {{ margin: 0 0 18px; color: var(--muted); line-height: 1.6; }}
+      label {{ display: block; margin: 14px 0 10px; font-size: 14px; color: var(--muted); }}
+      input {{
+        width: 100%;
+        border: 1px solid rgba(20,32,51,.16);
+        border-radius: 14px;
+        padding: 13px 14px;
+        font-size: 15px;
+        outline: none;
+        background: rgba(255,255,255,.92);
+      }}
+      input:focus {{
+        border-color: rgba(15,111,255,.58);
+        box-shadow: 0 0 0 4px rgba(15,111,255,.12);
+      }}
+      button {{
+        width: 100%;
+        margin-top: 18px;
+        border: 0;
+        border-radius: 14px;
+        padding: 13px 16px;
+        font-size: 15px;
+        font-weight: 600;
+        color: #fff;
+        background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+        cursor: pointer;
+      }}
+      button:hover {{ filter: brightness(.98); }}
+      .error {{
+        margin-bottom: 14px;
+        padding: 12px 14px;
+        border-radius: 12px;
+        background: var(--error-bg);
+        color: var(--error-fg);
+        font-size: 14px;
+      }}
+      .foot {{
+        margin-top: 14px;
+        font-size: 12px;
+        color: var(--muted);
+        text-align: center;
+      }}
+    </style>
+  </head>
+  <body>
+    <form class="card" method="post" action="/__login">
+      <div class="mark">CM</div>
+      <h1>{title}</h1>
+      <p>{desc}</p>
+      {error_html}
+      <label for="username">用户名</label>
+      <input id="username" name="username" type="text" autocomplete="username" autofocus />
+      {display_name_field}
+      <label for="password">密码</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" />
+      <button type="submit">{title}</button>
+      <div class="foot">账号模式用于团队额度分发；可在设置中切换回个人模式或访问密码模式。</div>
+    </form>
+  </body>
+</html>
+"#
+    )
+}
+
 /// 函数 `login_success_html`
 ///
 /// 作者: gaohongshun
@@ -415,7 +594,7 @@ pub(super) async fn web_auth_middleware(
     next: Next,
 ) -> Response {
     let path = request.uri().path().to_string();
-    if path == "/__login" || path == "/__logout" {
+    if path == "/__login" || path == "/__logout" || is_public_static_asset_path(&path) {
         return next.run(request).await;
     }
     if request_is_authenticated(request.headers(), state.as_ref()) {
@@ -447,13 +626,28 @@ pub(super) async fn login_page(
     Query(query): Query<LoginQuery>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    if current_web_access_password_hash().is_none() {
+    let mode = codexmanager_service::current_web_auth_mode();
+    if mode == "none" {
         return Redirect::to("/").into_response();
     }
     if request_is_authenticated(&headers, state.as_ref()) && !login_force_requested(&query) {
         return Redirect::to("/").into_response();
     }
-    let mut response = Html(builtin_login_html(None)).into_response();
+    let html = if mode == "accounts" {
+        let bootstrap = codexmanager_service::app_auth_status_value()
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("appUsersConfigured")
+                    .and_then(|configured| configured.as_bool())
+                    .map(|configured| !configured)
+            })
+            .unwrap_or(true);
+        account_login_html(None, bootstrap)
+    } else {
+        builtin_login_html(None)
+    };
+    let mut response = Html(html).into_response();
     append_no_store_headers(&mut response);
     response
 }
@@ -473,10 +667,58 @@ pub(super) async fn login_submit(
     State(state): State<Arc<AppState>>,
     axum::Form(form): axum::Form<LoginForm>,
 ) -> impl IntoResponse {
+    let mode = codexmanager_service::current_web_auth_mode();
+    if mode == "none" {
+        return Redirect::to("/").into_response();
+    }
+    if mode == "accounts" {
+        let bootstrap = codexmanager_service::app_auth_status_value()
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("appUsersConfigured")
+                    .and_then(|configured| configured.as_bool())
+                    .map(|configured| !configured)
+            })
+            .unwrap_or(true);
+        let username = form.username.as_deref().unwrap_or("");
+        let password = form.password.as_deref().unwrap_or("");
+        let result = if bootstrap {
+            codexmanager_service::bootstrap_app_admin(
+                username,
+                password,
+                form.display_name.as_deref(),
+            )
+        } else {
+            codexmanager_service::login_app_user(username, password)
+        };
+        match result {
+            Ok(login) => {
+                let mut response = Html(login_success_html()).into_response();
+                if let Some(header_value) = set_cookie_header_value(&login.token) {
+                    response
+                        .headers_mut()
+                        .append(header::SET_COOKIE, header_value);
+                }
+                append_no_store_headers(&mut response);
+                return response;
+            }
+            Err(err) => {
+                let mut response = (
+                    StatusCode::UNAUTHORIZED,
+                    Html(account_login_html(Some(&err), bootstrap)),
+                )
+                    .into_response();
+                append_no_store_headers(&mut response);
+                return response;
+            }
+        }
+    }
     let Some(password_hash) = current_web_access_password_hash() else {
         return Redirect::to("/").into_response();
     };
-    if !codexmanager_service::verify_web_access_password(&form.password) {
+    let password = form.password.as_deref().unwrap_or("");
+    if !codexmanager_service::verify_web_access_password(password) {
         let mut response = (
             StatusCode::UNAUTHORIZED,
             Html(builtin_login_html(Some("密码错误，请重试。"))),
@@ -511,7 +753,10 @@ pub(super) async fn login_submit(
 ///
 /// # 返回
 /// 返回函数执行结果
-pub(super) async fn logout() -> impl IntoResponse {
+pub(super) async fn logout(headers: HeaderMap) -> impl IntoResponse {
+    if let Some(token) = parse_cookie_value(&headers, WEB_AUTH_COOKIE_NAME) {
+        let _ = codexmanager_service::logout_app_user_session(&token);
+    }
     let mut response = Html(logout_success_html()).into_response();
     if let Some(header_value) = clear_cookie_header_value() {
         response
@@ -533,11 +778,49 @@ pub(super) async fn logout() -> impl IntoResponse {
 ///
 /// # 返回
 /// 返回函数执行结果
-pub(super) async fn auth_status() -> impl IntoResponse {
-    let mut response = axum::Json(serde_json::json!({
-        "passwordConfigured": current_web_access_password_hash().is_some(),
-    }))
-    .into_response();
+pub(super) async fn auth_status(headers: HeaderMap) -> impl IntoResponse {
+    let mut status = codexmanager_service::app_auth_status_value().unwrap_or_else(|_| {
+        serde_json::json!({
+            "mode": codexmanager_service::current_web_auth_mode(),
+            "passwordConfigured": current_web_access_password_hash().is_some(),
+            "appUsersConfigured": false,
+            "distributionEnabled": false,
+            "billingModeLock": {
+                "accountModeLocked": false,
+                "distributionLocked": false,
+                "reasons": []
+            },
+        })
+    });
+    let actor = current_app_session_from_headers(&headers)
+        .as_ref()
+        .map(|session| {
+            codexmanager_service::RpcActor::from_parts(
+                Some(session.user.role.as_str()),
+                Some(session.user.id.as_str()),
+            )
+        })
+        .unwrap_or_else(codexmanager_service::RpcActor::system_admin);
+    if let Some(object) = status.as_object_mut() {
+        if let Some(session) = current_app_session_from_headers(&headers) {
+            object.insert(
+                "currentUser".to_string(),
+                serde_json::to_value(session.user).unwrap_or(serde_json::Value::Null),
+            );
+        } else {
+            object.insert("currentUser".to_string(), serde_json::Value::Null);
+        }
+        object.insert("role".to_string(), serde_json::json!(actor.role));
+        object.insert(
+            "permissions".to_string(),
+            serde_json::json!(actor
+                .permissions()
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>()),
+        );
+    }
+    let mut response = axum::Json(status).into_response();
     append_no_store_headers(&mut response);
     response
 }
@@ -591,5 +874,20 @@ mod tests {
         assert!(html.contains("sessionStorage.setItem"));
         assert!(html.contains(WEB_AUTH_TAB_SESSION_STORAGE_KEY));
         assert!(html.contains("location.replace(\"/\")"));
+    }
+
+    #[test]
+    fn web_auth_allows_static_assets_without_session() {
+        for path in [
+            "/_next/static/chunks/app/page.js",
+            "/_next/static/css/app.css",
+            "/favicon.ico",
+            "/author-alipay.jpg",
+            "/manifest.json",
+        ] {
+            assert!(is_public_static_asset_path(path), "path={path}");
+        }
+        assert!(!is_public_static_asset_path("/settings"));
+        assert!(!is_public_static_asset_path("/api/rpc"));
     }
 }

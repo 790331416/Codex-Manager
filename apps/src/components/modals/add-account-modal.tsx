@@ -15,6 +15,8 @@ import {
   TabsTrigger 
 } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -541,7 +543,7 @@ export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
 
   return (
     <Dialog open={open} onOpenChange={handleDialogOpenChange}>
-      <DialogContent className="glass-card max-h-[85vh] overflow-hidden border-none p-0 sm:max-w-[640px]">
+      <DialogContent className="glass-card max-h-[85vh] overflow-hidden p-0 sm:max-w-[640px]">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="shrink-0 bg-muted/20 px-6 pt-6">
             <DialogHeader className="mb-4">
@@ -566,11 +568,14 @@ export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
           <div className="max-h-[calc(85vh-154px)] overflow-y-auto p-6">
             <TabsContent value="login" className="mt-0 space-y-4">
               {!isServiceReady ? (
-                <div className="rounded-lg border border-border/60 bg-muted/30 p-3 text-sm text-muted-foreground">
-                  {canAccessManagementRpc
-                    ? t("服务未连接，账号授权与回调解析暂不可用；连接恢复后可继续操作。")
-                    : unavailableMessage}
-                </div>
+                <Alert>
+                  <Info />
+                  <AlertDescription>
+                    {canAccessManagementRpc
+                      ? t("服务未连接，账号授权与回调解析暂不可用；连接恢复后可继续操作。")
+                      : unavailableMessage}
+                  </AlertDescription>
+                </Alert>
               ) : null}
               <div className="space-y-2">
                 <Label>{t("标签（逗号分隔）")}</Label>
@@ -601,7 +606,7 @@ export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
                 </Button>
                 {loginUrl && (
                   <div className="mt-3 p-2 rounded-lg bg-primary/5 border border-primary/10 flex items-center gap-2 animate-in fade-in zoom-in duration-300">
-                    <Input value={loginUrl} readOnly className="font-mono text-[10px] h-8 border-none bg-transparent" />
+                    <Input value={loginUrl} readOnly className="font-mono text-[10px] h-8 bg-transparent" />
                     <Button
                       variant="ghost"
                       size="sm"
@@ -618,7 +623,8 @@ export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
                 ) : null}
               </div>
 
-              <div className="space-y-3 pt-4 border-t">
+              <Separator />
+              <div className="space-y-3">
                 <div className="space-y-2">
                   <Label className="text-xs flex items-center gap-1.5 text-muted-foreground">
                     <Hash className="h-3 w-3" /> {t("手动解析回调（当本地 48760 端口占用时）")}
@@ -646,9 +652,10 @@ export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
 
             <TabsContent value="bulk" className="mt-0 space-y-4">
               {!isServiceReady ? (
-                <div className="rounded-lg border border-border/60 bg-muted/30 p-3 text-sm text-muted-foreground">
-                  {unavailableMessage}
-                </div>
+                <Alert>
+                  <Info />
+                  <AlertDescription>{unavailableMessage}</AlertDescription>
+                </Alert>
               ) : null}
               <div className="space-y-2">
                 <Label>{t("账号数据（Token 可每行一个，JSON 可整段粘贴）")}</Label>
@@ -660,10 +667,12 @@ export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
                   onChange={(e) => setBulkContent(e.target.value)}
                 />
               </div>
-              <div className="rounded-lg bg-blue-500/5 border border-blue-500/20 p-3 text-[10px] text-blue-600 dark:text-blue-400 leading-relaxed">
-                <Info className="h-3.5 w-3.5 inline-block mr-1.5 -mt-0.5" />
-                {t("支持格式：ChatGPT 账号（Refresh Token）、Claude Session 等。系统将自动识别格式并导入。")}
-              </div>
+              <Alert>
+                <Info />
+                <AlertDescription className="text-xs leading-relaxed">
+                  {t("支持格式：ChatGPT 账号（Refresh Token）、Claude Session 等。系统将自动识别格式并导入。")}
+                </AlertDescription>
+              </Alert>
               <Button
                 onClick={handleBulkImport}
                 disabled={!isServiceReady || isLoading}

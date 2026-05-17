@@ -170,6 +170,10 @@ fn resolve_embedded_asset(path: &str) -> Option<(String, &'static [u8])> {
         }
     }
 
+    if looks_like_asset_path(raw) {
+        return None;
+    }
+
     embedded_ui::read_asset_bytes("index.html").map(|bytes| ("index.html".to_string(), bytes))
 }
 
@@ -220,5 +224,11 @@ mod tests {
 
         let (served_path, _) = resolve_embedded_asset("accounts").expect("accounts asset");
         assert_eq!(served_path, "accounts/index.html");
+    }
+
+    #[test]
+    fn missing_embedded_asset_does_not_fallback_to_index_html() {
+        assert!(resolve_embedded_asset("_next/static/chunks/missing-test.js").is_none());
+        assert!(resolve_embedded_asset("missing-image.png").is_none());
     }
 }

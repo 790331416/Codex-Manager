@@ -179,3 +179,15 @@ export function formatServiceError(error: unknown): string {
   if (lower.includes("invalid service address")) return "地址不合法";
   return normalized.length > 120 ? `${normalized.slice(0, 120)}...` : normalized;
 }
+
+export function isServicePortConflictError(error: string | null | undefined): boolean {
+  const normalized = String(error || "").toLowerCase();
+  return (
+    normalized.includes("端口已被占用") ||
+    normalized.includes("port is in use") ||
+    normalized.includes("unexpected service responded") ||
+    normalized.includes("疑似非 codexmanager 服务") ||
+    normalized.includes("响应来源不是 codexmanager 服务") ||
+    normalized.includes("服务返回空响应")
+  );
+}

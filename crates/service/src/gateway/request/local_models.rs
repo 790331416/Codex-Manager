@@ -19,8 +19,7 @@ struct ApiModelInfo<'a> {
     description: Option<&'a str>,
 }
 
-fn serialize_models_response(models: &ModelsResponse) -> String {
-    let models = crate::apikey_models::ensure_codex_image_tool_model_listed(models);
+fn serialize_models_response_body(models: &ModelsResponse) -> String {
     let data = models
         .models
         .iter()
@@ -40,6 +39,32 @@ fn serialize_models_response(models: &ModelsResponse) -> String {
         models: &models.models,
     })
     .unwrap_or_else(|_| "{\"object\":\"list\",\"data\":[],\"models\":[]}".to_string())
+}
+
+fn serialize_models_response(models: &ModelsResponse) -> String {
+    let models = crate::apikey_models::ensure_codex_image_tool_model_listed(models);
+    serialize_models_response_body(&models)
+}
+
+fn filter_models_for_key(
+    storage: &codexmanager_core::storage::Storage,
+    key_id: &str,
+    models: ModelsResponse,
+) -> Result<(ModelsResponse, bool), String> {
+    let Some(allowed_slugs) = crate::allowed_model_slugs_for_api_key(storage, key_id)? else {
+        return Ok((models, true));
+    };
+    Ok((
+        ModelsResponse {
+            models: models
+                .models
+                .into_iter()
+                .filter(|model| allowed_slugs.contains(model.slug.as_str()))
+                .collect(),
+            extra: models.extra,
+        },
+        false,
+    ))
 }
 
 fn models_etag_header(models: &ModelsResponse) -> Result<Option<tiny_http::Header>, String> {
@@ -161,8 +186,17 @@ pub(super) fn maybe_respond_local_models(
         }
     };
 
-    let output_models = crate::apikey_models::ensure_codex_image_tool_model_listed(&models);
-    let output = serialize_models_response(&output_models);
+    let (output_models, include_implicit_models) = filter_models_for_key(storage, key_id, models)?;
+    let output = if include_implicit_models {
+        serialize_models_response(&output_models)
+    } else {
+        serialize_models_response_body(&output_models)
+    };
+    let output_models = if include_implicit_models {
+        crate::apikey_models::ensure_codex_image_tool_model_listed(&output_models)
+    } else {
+        output_models
+    };
     let extra_headers = models_etag_header(&output_models)?.into_iter().collect();
     super::local_response::respond_local_json_with_headers(
         request,

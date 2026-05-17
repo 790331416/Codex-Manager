@@ -33,6 +33,11 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Empty,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDesktopPageActive } from "@/hooks/useDesktopPageActive";
@@ -331,7 +336,7 @@ function PluginCard({
   t: TranslateFn;
 }) {
   return (
-    <Card className="glass-card border-none shadow-sm">
+    <Card className="glass-card shadow-sm">
       <CardHeader className="space-y-2 pb-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -422,7 +427,7 @@ function InstalledPluginCard({
   t: TranslateFn;
 }) {
   return (
-    <Card className="glass-card border-none shadow-sm">
+    <Card className="glass-card shadow-sm">
       <CardHeader className="space-y-2 pb-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -751,7 +756,7 @@ export default function PluginsPage() {
     <div className="p-6 space-y-6">
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
             <Rocket className="h-5 w-5" />
           </div>
           <div>
@@ -763,7 +768,7 @@ export default function PluginsPage() {
         </div>
       </div>
 
-      <Card className="glass-card border-none shadow-sm">
+      <Card className="glass-card shadow-sm">
         <CardHeader>
           <CardTitle>{t("市场层")}</CardTitle>
           <CardDescription>
@@ -773,14 +778,15 @@ export default function PluginsPage() {
         <CardContent className="space-y-4">
           <div className="grid gap-3 md:grid-cols-2">
             {MARKET_MODE_OPTIONS.map((option) => (
-              <button
+              <Button
                 key={option.value}
                 type="button"
+                variant="outline"
                 onClick={() =>
                   setMarketModeDraft(normalizeMarketMode(option.value))
                 }
                 className={cn(
-                  "rounded-2xl border p-4 text-left transition-all",
+                  "h-auto justify-start rounded-xl p-4 text-left transition-all",
                   marketMode === option.value
                     ? "border-primary/40 bg-primary/10 shadow-sm"
                     : "border-border/60 bg-background/40 hover:bg-background/70",
@@ -793,7 +799,7 @@ export default function PluginsPage() {
                 <div className="mt-1 text-xs leading-5 text-muted-foreground">
                   {t(option.description)}
                 </div>
-              </button>
+              </Button>
             ))}
           </div>
           {marketMode === "custom" ? (
@@ -825,7 +831,7 @@ export default function PluginsPage() {
                   </Button>
                 </div>
               </div>
-              <div className="rounded-2xl border border-dashed border-border/60 bg-muted/20 p-4 text-xs text-muted-foreground">
+              <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 p-4 text-xs text-muted-foreground">
                 {catalogQuery.data?.sourceUrl
                   ? t("当前使用自定义源：{sourceUrl}", {
                       sourceUrl: catalogQuery.data.sourceUrl,
@@ -834,14 +840,14 @@ export default function PluginsPage() {
               </div>
             </>
           ) : (
-            <div className="rounded-2xl border border-dashed border-border/60 bg-muted/20 p-4 text-xs text-muted-foreground">
+            <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 p-4 text-xs text-muted-foreground">
               {t("当前使用内置精选市场，默认只显示官方内置脚本插件。")}
             </div>
           )}
         </CardContent>
       </Card>
 
-      <Card className="glass-card border-none shadow-sm">
+      <Card className="glass-card shadow-sm">
         <CardHeader className="space-y-4">
           <div>
             <CardTitle>{t("插件列表")}</CardTitle>
@@ -858,12 +864,13 @@ export default function PluginsPage() {
                     ? updatableInstalledItems.length
                     : notInstalledCatalogItems.length;
               return (
-                <button
+                <Button
                   key={option.value}
                   type="button"
+                  variant="outline"
                   onClick={() => setPluginViewFilter(option.value)}
                   className={cn(
-                    "flex items-center gap-2 rounded-full border px-4 py-2 text-sm transition-all",
+                    "flex h-auto items-center gap-2 rounded-full px-4 py-2 text-sm transition-all",
                     pluginViewFilter === option.value
                       ? "border-primary/40 bg-primary/10 text-primary shadow-sm"
                       : "border-border/60 bg-background/40 text-muted-foreground hover:bg-background/70",
@@ -871,7 +878,7 @@ export default function PluginsPage() {
                 >
                   <span>{t(option.label)}</span>
                   <Badge variant="secondary">{count}</Badge>
-                </button>
+                </Button>
               );
             })}
           </div>
@@ -880,7 +887,7 @@ export default function PluginsPage() {
           {catalogQuery.isLoading || installedQuery.isLoading ? (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {Array.from({ length: 2 }).map((_, index) => (
-                <Skeleton key={index} className="h-72 rounded-2xl" />
+                <Skeleton key={index} className="h-72 rounded-xl" />
               ))}
             </div>
           ) : pluginViewFilter === "installed" ? (
@@ -917,9 +924,11 @@ export default function PluginsPage() {
                 ))}
               </div>
             ) : (
-              <div className="rounded-2xl border border-dashed border-border/60 p-10 text-center text-sm text-muted-foreground">
-                {t("还没有安装任何插件")}
-              </div>
+              <Empty className="min-h-40 border bg-muted/20">
+                <EmptyHeader>
+                  <EmptyTitle>{t("还没有安装任何插件")}</EmptyTitle>
+                </EmptyHeader>
+              </Empty>
             )
           ) : pluginViewFilter === "update" ? (
             updatableInstalledItems.length > 0 ? (
@@ -955,9 +964,11 @@ export default function PluginsPage() {
                 ))}
               </div>
             ) : (
-              <div className="rounded-2xl border border-dashed border-border/60 p-10 text-center text-sm text-muted-foreground">
-                {t("当前市场没有可更新插件")}
-              </div>
+              <Empty className="min-h-40 border bg-muted/20">
+                <EmptyHeader>
+                  <EmptyTitle>{t("当前市场没有可更新插件")}</EmptyTitle>
+                </EmptyHeader>
+              </Empty>
             )
           ) : notInstalledCatalogItems.length > 0 ? (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -974,11 +985,15 @@ export default function PluginsPage() {
               ))}
             </div>
           ) : (
-            <div className="rounded-2xl border border-dashed border-border/60 p-10 text-center text-sm text-muted-foreground">
-              {marketMode === "custom" && !catalogQuery.data?.sourceUrl
-                ? t("当前还没有配置自定义源，所以这里不会显示未安装插件。")
-                : t("暂无未安装插件")}
-            </div>
+            <Empty className="min-h-40 border bg-muted/20">
+              <EmptyHeader>
+                <EmptyTitle>
+                  {marketMode === "custom" && !catalogQuery.data?.sourceUrl
+                    ? t("当前还没有配置自定义源，所以这里不会显示未安装插件。")
+                    : t("暂无未安装插件")}
+                </EmptyTitle>
+              </EmptyHeader>
+            </Empty>
           )}
         </CardContent>
       </Card>
@@ -989,7 +1004,7 @@ export default function PluginsPage() {
       >
         <DialogContent
           showCloseButton={false}
-          className="glass-card max-h-[85vh] overflow-hidden border-none p-0 sm:max-w-[860px] lg:max-w-[920px]"
+          className="glass-card max-h-[85vh] overflow-hidden p-0 sm:max-w-[860px] lg:max-w-[920px]"
         >
           {selectedDetail ? (
             <div className="flex max-h-[85vh] flex-col">
@@ -1074,7 +1089,7 @@ export default function PluginsPage() {
 
               <div className="max-h-[calc(85vh-154px)] overflow-y-auto px-6 py-6">
                 <div className="grid gap-4">
-                  <div className="rounded-2xl border border-border/60 bg-background/60 p-4">
+                  <div className="rounded-xl border border-border/60 bg-background/60 p-4">
                     <div className="mb-2 text-sm font-medium">{t("权限")}</div>
                     <div>
                       {selectedDetail.permissions.length > 0 ? (
@@ -1093,7 +1108,7 @@ export default function PluginsPage() {
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-border/60 bg-background/60 p-4">
+                  <div className="rounded-xl border border-border/60 bg-background/60 p-4">
                     <div className="mb-2 text-sm font-medium">{t("任务")}</div>
                     <div className="space-y-2">
                       {selectedTasks.length > 0 ? (
@@ -1219,7 +1234,7 @@ export default function PluginsPage() {
                   </div>
 
                   {selectedPlugin?.kind === "installed" ? (
-                    <div className="rounded-2xl border border-border/60 bg-background/60 p-4">
+                    <div className="rounded-xl border border-border/60 bg-background/60 p-4">
                       <div className="mb-2 text-sm font-medium">{t("最近运行")}</div>
                       <div className="space-y-2">
                         {selectedLogs.length > 0 ? (

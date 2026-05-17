@@ -279,6 +279,7 @@ fn codex_compact_header_profile_matches_remote_compact_shape() {
         incoming_originator: None,
         preserve_client_identity: false,
         incoming_session_id: Some("session-compact"),
+        thread_id: Some("thread-compact"),
         incoming_window_id: Some("session-compact:7"),
         incoming_subagent: Some("compact"),
         incoming_parent_thread_id: Some("thread-parent-compact"),
@@ -312,6 +313,10 @@ fn codex_compact_header_profile_matches_remote_compact_shape() {
     assert_eq!(
         find_header(&headers, "session_id").as_deref(),
         Some("session-compact")
+    );
+    assert_eq!(
+        find_header(&headers, "thread_id").as_deref(),
+        Some("thread-compact")
     );
     assert!(find_header(&headers, "Cookie").is_none());
     assert!(find_header(&headers, "Openai-Beta").is_none());
@@ -361,6 +366,7 @@ fn codex_compact_header_profile_omits_subagent_without_explicit_source() {
         incoming_originator: None,
         preserve_client_identity: false,
         incoming_session_id: Some("session-compact-default"),
+        thread_id: None,
         incoming_window_id: None,
         incoming_subagent: None,
         incoming_parent_thread_id: None,
@@ -396,6 +402,7 @@ fn codex_compact_header_profile_omits_session_without_thread_anchor() {
         incoming_originator: None,
         preserve_client_identity: false,
         incoming_session_id: None,
+        thread_id: None,
         incoming_window_id: None,
         incoming_subagent: None,
         incoming_parent_thread_id: None,

@@ -11,6 +11,11 @@ export interface CcSwitchProviderImportOptions {
   enabled?: boolean;
 }
 
+export interface CcSwitchGatewayEndpointOptions {
+  publicOrigin?: string | null;
+  preferPublicOrigin?: boolean;
+}
+
 function normalizeText(value: string | null | undefined): string {
   return String(value || "").trim();
 }
@@ -29,7 +34,38 @@ function appendV1Path(url: URL): string {
   return url.toString().replace(/\/$/, "");
 }
 
-export function normalizeCodexManagerGatewayEndpoint(serviceAddr?: string | null): string {
+export function normalizeCodexManagerGatewayPublicEndpoint(
+  publicOrigin?: string | null,
+): string | null {
+  const raw = normalizeText(publicOrigin);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return null;
+    }
+    return appendV1Path(url);
+  } catch {
+    return null;
+  }
+}
+
+export function normalizeCodexManagerGatewayEndpoint(
+  serviceAddr?: string | null,
+  options: CcSwitchGatewayEndpointOptions = {},
+): string {
+  if (options.preferPublicOrigin) {
+    const publicEndpoint = normalizeCodexManagerGatewayPublicEndpoint(
+      options.publicOrigin,
+    );
+    if (publicEndpoint) {
+      return publicEndpoint;
+    }
+  }
+
   const raw = normalizeText(serviceAddr) || "localhost:48760";
   const value = raw.replace(/^https?:\/\//i, "");
   const target = value.split("/")[0] || "localhost:48760";

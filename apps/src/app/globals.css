@@ -204,6 +204,23 @@
     color: #cbd5e1 !important;
     opacity: 1 !important;
   }
+
+  html.tray-preview-mode,
+  html.tray-preview-mode body,
+  body.tray-preview-mode {
+    background: transparent !important;
+    background-color: transparent !important;
+    background-image: none !important;
+  }
+
+  html.tray-preview-mode body::before,
+  body.tray-preview-mode::before {
+    content: none !important;
+    display: none !important;
+    background: transparent !important;
+    background-color: transparent !important;
+    background-image: none !important;
+  }
 }
 
 [data-appearance='classic'] {
@@ -284,62 +301,53 @@
   pointer-events: none;
 }
 
-/* Glassmorphism Standard CSS */
+/* shadcn-aligned surfaces */
 .glass-card {
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  background:
-    linear-gradient(160deg, rgb(var(--surface-rgb) / 0.88), rgb(var(--primary-rgb) / 0.1)),
-    rgb(var(--surface-contrast-rgb) / 0.74);
-  border: 1.5px solid var(--glass-border);
-  box-shadow:
-    0 20px 45px -32px rgb(var(--primary-rgb) / 0.35),
-    0 12px 24px -18px rgb(15 23 42 / 0.12),
-    inset 0 1px 0 rgb(255 255 255 / 0.35);
-  transition: transform 0.3s, box-shadow 0.3s, border-color 0.3s;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+  transition: background-color 0.2s, border-color 0.2s, box-shadow 0.2s;
 }
 
 .glass-sidebar {
-  backdrop-filter: blur(32px);
-  -webkit-backdrop-filter: blur(32px);
-  background:
-    linear-gradient(180deg, rgb(var(--surface-rgb) / 0.92), rgb(var(--primary-rgb) / 0.1)),
-    rgb(var(--surface-contrast-rgb) / 0.82);
-  border-right: 1.5px solid var(--border);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  background: color-mix(in srgb, var(--card) 96%, var(--background));
+  border-right: 1px solid var(--border);
 }
 
 .glass-header {
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  background:
-    linear-gradient(180deg, rgb(var(--surface-rgb) / 0.9), rgb(var(--primary-rgb) / 0.09)),
-    rgb(var(--surface-contrast-rgb) / 0.8);
-  border-bottom: 1.5px solid var(--border);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  background: color-mix(in srgb, var(--card) 94%, transparent);
+  border-bottom: 1px solid var(--border);
 }
 
 [data-appearance='classic'] .glass-card {
   background: var(--card);
-  border: 1.5px solid var(--border);
-  box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.05);
-  transition: transform 0.3s;
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+  transition: background-color 0.2s, border-color 0.2s;
 }
 
 [data-appearance='classic'] .glass-sidebar {
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--card);
 }
 
 [data-appearance='classic'][data-theme='dark'] .glass-sidebar,
 [data-appearance='classic'][data-theme='dark-one'] .glass-sidebar {
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--card);
 }
 
 [data-appearance='classic'] .glass-header {
-  background: rgba(255, 255, 255, 0.7);
+  background: color-mix(in srgb, var(--card) 92%, transparent);
 }
 
 [data-appearance='classic'][data-theme='dark'] .glass-header,
 [data-appearance='classic'][data-theme='dark-one'] .glass-header {
-  background: rgba(0, 0, 0, 0.5);
+  background: color-mix(in srgb, var(--card) 92%, transparent);
 }
 
 /* --- Table Enhancements --- */

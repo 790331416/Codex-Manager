@@ -35,6 +35,14 @@ fn resolves_auth_callback_route() {
     );
 }
 
+#[test]
+fn resolves_usage_refresh_events_route() {
+    assert_eq!(
+        resolve_backend_route("GET", "/events/usage-refresh"),
+        BackendRoute::UsageRefreshEvents
+    );
+}
+
 /// 函数 `resolves_metrics_route`
 ///
 /// 作者: gaohongshun

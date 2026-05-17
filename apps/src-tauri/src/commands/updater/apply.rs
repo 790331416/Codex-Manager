@@ -367,8 +367,7 @@ fn resolve_current_macos_app_bundle(exe_path: &Path) -> Result<PathBuf, String> 
 /// 返回函数执行结果
 #[cfg(target_os = "macos")]
 fn resolve_staged_macos_app_bundle(staging_dir: &Path) -> Result<PathBuf, String> {
-    let entries =
-        fs::read_dir(staging_dir).map_err(|err| format!("读取暂存目录失败：{err}"))?;
+    let entries = fs::read_dir(staging_dir).map_err(|err| format!("读取暂存目录失败：{err}"))?;
     for entry in entries {
         let entry = entry.map_err(|err| format!("读取暂存目录项失败：{err}"))?;
         let path = entry.path();
@@ -533,13 +532,7 @@ fn apply_macos_bundle_update(
     );
     let pid = std::process::id();
 
-    spawn_macos_bundle_replace_worker(
-        &script_dir,
-        &current_app,
-        &staged_app,
-        &pending_path,
-        pid,
-    )?;
+    spawn_macos_bundle_replace_worker(&script_dir, &current_app, &staged_app, &pending_path, pid)?;
 
     schedule_app_exit(app);
     Ok(UpdateActionResponse {
@@ -709,7 +702,10 @@ pub(super) fn launch_installer_impl(app: tauri::AppHandle) -> Result<UpdateActio
 
     #[cfg(target_os = "macos")]
     if pending.staging_dir.is_some() {
-        append_apply_log(&installer_log_path, "检测到 macOS app bundle 暂存目录，改走替换脚本");
+        append_apply_log(
+            &installer_log_path,
+            "检测到 macOS app bundle 暂存目录，改走替换脚本",
+        );
         return apply_macos_bundle_update(app, &pending);
     }
 

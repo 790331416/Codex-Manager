@@ -16,6 +16,20 @@ fn exhausted_usage_snapshot(account_id: &str) -> UsageSnapshotRecord {
     }
 }
 
+fn low_quota_usage_snapshot(account_id: &str) -> UsageSnapshotRecord {
+    UsageSnapshotRecord {
+        account_id: account_id.to_string(),
+        used_percent: Some(98.0),
+        window_minutes: Some(300),
+        resets_at: None,
+        secondary_used_percent: Some(20.0),
+        secondary_window_minutes: Some(10080),
+        secondary_resets_at: None,
+        credits_json: None,
+        captured_at: now_ts(),
+    }
+}
+
 /// 函数 `official_status_404_with_more_candidates_keeps_upstream_response`
 ///
 /// 作者: gaohongshun
@@ -228,6 +242,41 @@ fn official_status_500_with_more_candidates_keeps_upstream_response() {
         reqwest::StatusCode::INTERNAL_SERVER_ERROR,
         None,
         "https://chatgpt.com/backend-api/codex/responses",
+        true,
+        |_, _, _| {},
+    );
+    assert!(matches!(decision, UpstreamOutcomeDecision::RespondUpstream));
+}
+
+#[test]
+fn official_compact_502_with_low_quota_snapshot_triggers_failover() {
+    let storage = Storage::open_in_memory().expect("open");
+    storage.init().expect("init");
+    storage
+        .insert_usage_snapshot(&low_quota_usage_snapshot("acc-compact-low"))
+        .expect("insert usage");
+    let decision = decide_upstream_outcome(
+        &storage,
+        "acc-compact-low",
+        reqwest::StatusCode::BAD_GATEWAY,
+        None,
+        "https://chatgpt.com/backend-api/codex/responses/compact",
+        true,
+        |_, _, _| {},
+    );
+    assert!(matches!(decision, UpstreamOutcomeDecision::Failover));
+}
+
+#[test]
+fn official_compact_502_without_low_quota_snapshot_keeps_upstream_response() {
+    let storage = Storage::open_in_memory().expect("open");
+    storage.init().expect("init");
+    let decision = decide_upstream_outcome(
+        &storage,
+        "acc-compact-healthy",
+        reqwest::StatusCode::BAD_GATEWAY,
+        None,
+        "https://chatgpt.com/backend-api/codex/responses/compact",
         true,
         |_, _, _| {},
     );

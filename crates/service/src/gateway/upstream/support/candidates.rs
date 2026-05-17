@@ -1,4 +1,5 @@
 use codexmanager_core::storage::{Account, Storage, Token};
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in super::super) enum CandidateSkipReason {
@@ -19,7 +20,7 @@ pub(in super::super) enum CandidateSkipReason {
 /// 返回函数执行结果
 pub(crate) fn prepare_gateway_candidates(
     storage: &Storage,
-    _request_model: Option<&str>,
+    request_model: Option<&str>,
     account_plan_filter: Option<&str>,
 ) -> Result<Vec<(Account, Token)>, String> {
     // 中文注释：保持账号原始顺序（按账户排序字段）作为候选顺序，失败时再依次切下一个。
@@ -37,7 +38,36 @@ pub(crate) fn prepare_gateway_candidates(
             )
         });
     }
+    let normalized_model = request_model
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if let Some(model) = normalized_model {
+        let _ = crate::apikey_models::bootstrap_account_pool_model_routes(storage, false);
+        let account_source_ids = storage
+            .list_enabled_model_source_mappings_for_platform(model)
+            .map_err(|err| format!("list model source mappings failed: {err}"))?
+            .into_iter()
+            .filter(|mapping| mapping.source_kind == "openai_account")
+            .map(|mapping| mapping.source_id)
+            .collect::<HashSet<_>>();
+        candidates.retain(|(account, _)| account_source_ids.contains(&account.id));
+    }
     Ok(candidates)
+}
+
+pub(in super::super) fn account_model_override(
+    storage: &Storage,
+    platform_model: Option<&str>,
+    account: &Account,
+) -> Option<String> {
+    let model = platform_model
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    storage
+        .find_enabled_model_source_mapping(model, "openai_account", account.id.as_str())
+        .ok()
+        .flatten()
+        .map(|mapping| mapping.upstream_model)
 }
 
 /// 函数 `free_account_model_override`

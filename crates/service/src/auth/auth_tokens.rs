@@ -1238,6 +1238,7 @@ pub(crate) fn complete_login_with_redirect(
         .map_err(|e| e.to_string())?;
     crate::auth_account::set_current_auth_account_id(Some(&account_key))?;
     crate::auth_account::set_current_auth_mode(Some("chatgpt"))?;
+    let _ = crate::usage_refresh::enqueue_usage_refresh_after_account_add(&account_key);
     Ok(())
 }
 

@@ -4,6 +4,7 @@ use tiny_http::Request;
 pub(crate) enum BackendRoute {
     Rpc,
     AuthCallback,
+    UsageRefreshEvents,
     Metrics,
     Gateway,
 }
@@ -25,6 +26,9 @@ pub(crate) fn resolve_backend_route(method: &str, path: &str) -> BackendRoute {
     }
     if method == "GET" && path.starts_with("/auth/callback") {
         return BackendRoute::AuthCallback;
+    }
+    if method == "GET" && path == "/events/usage-refresh" {
+        return BackendRoute::UsageRefreshEvents;
     }
     if method == "GET" && path == "/metrics" {
         return BackendRoute::Metrics;
@@ -48,6 +52,9 @@ pub(crate) fn handle_backend_request(request: Request) {
     match route {
         BackendRoute::Rpc => crate::http::rpc_endpoint::handle_rpc(request),
         BackendRoute::AuthCallback => crate::http::callback_endpoint::handle_callback(request),
+        BackendRoute::UsageRefreshEvents => {
+            crate::http::usage_events::handle_usage_refresh_events(request)
+        }
         BackendRoute::Metrics => crate::http::gateway_endpoint::handle_metrics(request),
         BackendRoute::Gateway => crate::http::gateway_endpoint::handle_gateway(request),
     }

@@ -68,6 +68,23 @@ fn is_json_content_type(request: &Request) -> bool {
         .unwrap_or(false)
 }
 
+fn rpc_actor_from_request_headers(request: &Request) -> crate::RpcActor {
+    crate::RpcActor::from_parts(
+        get_header_value(request, "X-CodexManager-Rpc-Actor-Role"),
+        get_header_value(request, "X-CodexManager-Rpc-Actor-User-Id"),
+    )
+}
+
+fn rpc_actor_from_axum_headers(headers: &HeaderMap) -> crate::RpcActor {
+    let role = headers
+        .get("X-CodexManager-Rpc-Actor-Role")
+        .and_then(|value| value.to_str().ok());
+    let user_id = headers
+        .get("X-CodexManager-Rpc-Actor-User-Id")
+        .and_then(|value| value.to_str().ok());
+    crate::RpcActor::from_parts(role, user_id)
+}
+
 /// 函数 `is_loopback_origin`
 ///
 /// 作者: gaohongshun
@@ -190,7 +207,7 @@ where
 ///
 /// # 返回
 /// 返回函数执行结果
-fn handle_rpc_body(body: &str) -> (u16, String, bool) {
+fn handle_rpc_body(body: &str, actor: crate::RpcActor) -> (u16, String, bool) {
     if body.trim().is_empty() {
         return (400, "{}".to_string(), false);
     }
@@ -200,7 +217,9 @@ fn handle_rpc_body(body: &str) -> (u16, String, bool) {
         Err(_) => return (400, "{}".to_string(), false),
     };
     let (json, success) = match msg {
-        JsonRpcMessage::Request(req) => handle_parsed_rpc_request(req, crate::handle_request),
+        JsonRpcMessage::Request(req) => {
+            handle_parsed_rpc_request(req, |req| crate::handle_request_with_actor(req, actor))
+        }
         JsonRpcMessage::Notification(_) => (String::new(), true),
         JsonRpcMessage::Response(_) | JsonRpcMessage::Error(_) => {
             return (400, "{}".to_string(), false)
@@ -297,9 +316,10 @@ pub(crate) async fn handle_rpc_http(headers: HeaderMap, body: String) -> AxumRes
     if let Some(response) = validate_axum_headers(&headers) {
         return response;
     }
+    let actor = rpc_actor_from_axum_headers(&headers);
     let body_for_task = body;
     let (status, response_body, success) =
-        match tokio::task::spawn_blocking(move || handle_rpc_body(&body_for_task)).await {
+        match tokio::task::spawn_blocking(move || handle_rpc_body(&body_for_task, actor)).await {
             Ok(result) => result,
             Err(err) => {
                 log::error!("rpc http blocking task failed: {}", err);
@@ -371,6 +391,7 @@ pub fn handle_rpc(mut request: Request) {
         }
     }
 
+    let actor = rpc_actor_from_request_headers(&request);
     let mut body = String::new();
     if request.as_reader().read_to_string(&mut body).is_err() {
         let _ = request.respond(Response::from_string("{}").with_status_code(400));
@@ -381,7 +402,7 @@ pub fn handle_rpc(mut request: Request) {
         return;
     }
 
-    let (status, response_body, success) = handle_rpc_body(&body);
+    let (status, response_body, success) = handle_rpc_body(&body, actor);
     if success {
         rpc_metrics_guard.mark_success();
     }

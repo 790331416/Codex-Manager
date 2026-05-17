@@ -427,6 +427,10 @@ impl Storage {
     /// # 返回
     /// 返回函数执行结果
     pub fn delete_api_key(&self, key_id: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM api_key_quota_limits WHERE key_id = ?1",
+            [key_id],
+        )?;
         self.conn
             .execute("DELETE FROM api_key_secrets WHERE key_id = ?1", [key_id])?;
         self.conn

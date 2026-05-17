@@ -96,6 +96,9 @@ export default function AccountsPage() {
   const [tagsDraft, setTagsDraft] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
   const [sortDraft, setSortDraft] = useState("");
+  const [modelWhitelistDraft, setModelWhitelistDraft] = useState("");
+  const [quotaPrimaryDraft, setQuotaPrimaryDraft] = useState("");
+  const [quotaSecondaryDraft, setQuotaSecondaryDraft] = useState("");
   const [accountEditorState, setAccountEditorState] =
     useState<AccountEditorState | null>(null);
   const [deleteDialogState, setDeleteDialogState] =
@@ -423,11 +426,25 @@ const toggleCleanupStatus = (rawStatus: string) => {
       currentTags: account.tags.join(", "),
       currentNote: account.note || "",
       currentSort: account.priority,
+      currentModelSlugs: account.modelSlugs.join(", "),
+      currentQuotaPrimaryWindowTokens: account.quotaCapacityPrimaryWindowTokens,
+      currentQuotaSecondaryWindowTokens: account.quotaCapacitySecondaryWindowTokens,
     });
     setLabelDraft(account.label);
     setTagsDraft(account.tags.join(", "));
     setNoteDraft(account.note || "");
     setSortDraft(String(account.priority));
+    setModelWhitelistDraft(account.modelSlugs.join(", "));
+    setQuotaPrimaryDraft(
+      account.quotaCapacityPrimaryWindowTokens == null
+        ? ""
+        : String(account.quotaCapacityPrimaryWindowTokens),
+    );
+    setQuotaSecondaryDraft(
+      account.quotaCapacitySecondaryWindowTokens == null
+        ? ""
+        : String(account.quotaCapacitySecondaryWindowTokens),
+    );
   };
 
   const handleMoveAccount = async (
@@ -510,6 +527,19 @@ const toggleCleanupStatus = (rawStatus: string) => {
     const nextTags = normalizeTagsDraft(tagsDraft);
     const nextTagsText = nextTags.join(", ");
     const nextNote = noteDraft.trim();
+    const nextModelSlugs = normalizeTagsDraft(modelWhitelistDraft);
+    const nextModelSlugsText = nextModelSlugs.join(", ");
+    const parseOptionalTokenCapacity = (value: string) => {
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      const parsed = Number(trimmed);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        return Number.NaN;
+      }
+      return Math.trunc(parsed);
+    };
+    const nextPrimaryCapacity = parseOptionalTokenCapacity(quotaPrimaryDraft);
+    const nextSecondaryCapacity = parseOptionalTokenCapacity(quotaSecondaryDraft);
 
     if (!nextLabel) {
       toast.error(t("请输入账号名称"));
@@ -525,13 +555,20 @@ const toggleCleanupStatus = (rawStatus: string) => {
       toast.error(t("顺序必须是数字"));
       return;
     }
+    if (Number.isNaN(nextPrimaryCapacity) || Number.isNaN(nextSecondaryCapacity)) {
+      toast.error(t("额度容量必须是大于 0 的数字，留空表示未覆盖"));
+      return;
+    }
 
     const nextSort = Math.max(0, Math.trunc(parsed));
     if (
       nextLabel === accountEditorState.currentLabel &&
       nextTagsText === accountEditorState.currentTags &&
       nextNote === accountEditorState.currentNote &&
-      nextSort === accountEditorState.currentSort
+      nextSort === accountEditorState.currentSort &&
+      nextModelSlugsText === accountEditorState.currentModelSlugs &&
+      nextPrimaryCapacity === accountEditorState.currentQuotaPrimaryWindowTokens &&
+      nextSecondaryCapacity === accountEditorState.currentQuotaSecondaryWindowTokens
     ) {
       setAccountEditorState(null);
       return;
@@ -543,6 +580,9 @@ const toggleCleanupStatus = (rawStatus: string) => {
         note: nextNote || null,
         tags: nextTags,
         sort: nextSort,
+        modelSlugs: nextModelSlugs,
+        quotaCapacityPrimaryWindowTokens: nextPrimaryCapacity ?? 0,
+        quotaCapacitySecondaryWindowTokens: nextSecondaryCapacity ?? 0,
       });
       setAccountEditorState(null);
     } catch {
@@ -596,6 +636,9 @@ const toggleCleanupStatus = (rawStatus: string) => {
       tagsDraft={tagsDraft}
       noteDraft={noteDraft}
       sortDraft={sortDraft}
+      modelWhitelistDraft={modelWhitelistDraft}
+      quotaPrimaryDraft={quotaPrimaryDraft}
+      quotaSecondaryDraft={quotaSecondaryDraft}
       isRefreshingAllAccounts={isRefreshingAllAccounts}
       isRefreshingAccountId={isRefreshingAccountId}
       isRefreshingRtAccountId={isRefreshingRtAccountId}
@@ -623,6 +666,9 @@ const toggleCleanupStatus = (rawStatus: string) => {
       setTagsDraft={setTagsDraft}
       setNoteDraft={setNoteDraft}
       setSortDraft={setSortDraft}
+      setModelWhitelistDraft={setModelWhitelistDraft}
+      setQuotaPrimaryDraft={setQuotaPrimaryDraft}
+      setQuotaSecondaryDraft={setQuotaSecondaryDraft}
       setPage={setPage}
       handleSearchChange={handleSearchChange}
       handlePlanFilterChange={handlePlanFilterChange}

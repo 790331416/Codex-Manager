@@ -79,6 +79,83 @@ pub(crate) fn open_in_browser_blocking(url: &str) -> Result<(), String> {
     webbrowser::open(url).map(|_| ()).map_err(|e| e.to_string())
 }
 
+fn validate_external_url(url: &str) -> Result<&str, String> {
+    let normalized = url.trim();
+    if normalized.is_empty() {
+        return Err("缺少外部跳转地址".to_string());
+    }
+
+    let Some(separator_index) = normalized.find(':') else {
+        return Err("外部跳转地址缺少协议".to_string());
+    };
+    if separator_index == 0 {
+        return Err("外部跳转地址协议无效".to_string());
+    }
+
+    let scheme = &normalized[..separator_index];
+    if !scheme
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'.' | b'-'))
+    {
+        return Err("外部跳转地址协议无效".to_string());
+    }
+
+    Ok(normalized)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_external_url;
+
+    #[test]
+    fn validate_external_url_accepts_custom_protocols() {
+        assert_eq!(
+            validate_external_url(" ccswitch://v1/import?resource=provider ").unwrap(),
+            "ccswitch://v1/import?resource=provider"
+        );
+    }
+
+    #[test]
+    fn validate_external_url_rejects_missing_or_invalid_protocols() {
+        assert!(validate_external_url("").is_err());
+        assert!(validate_external_url("example.com").is_err());
+        assert!(validate_external_url("bad scheme://example.com").is_err());
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn open_external_url_blocking(url: &str) -> Result<(), String> {
+    open_url_with_shell(validate_external_url(url)?)
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn open_external_url_blocking(url: &str) -> Result<(), String> {
+    let normalized = validate_external_url(url)?;
+    let status = std::process::Command::new("open")
+        .arg(normalized)
+        .status()
+        .map_err(|err| format!("启动 open 失败：{err}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("open 退出状态异常：{status}"))
+    }
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+pub(crate) fn open_external_url_blocking(url: &str) -> Result<(), String> {
+    let normalized = validate_external_url(url)?;
+    let status = std::process::Command::new("xdg-open")
+        .arg(normalized)
+        .status()
+        .map_err(|err| format!("启动 xdg-open 失败：{err}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("xdg-open 退出状态异常：{status}"))
+    }
+}
+
 /// 函数 `spawn_background_command`
 ///
 /// 作者: gaohongshun

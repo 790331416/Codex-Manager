@@ -270,6 +270,7 @@ pub(super) fn try_openai_fallback(
             incoming_originator: incoming_headers.originator(),
             preserve_client_identity: false,
             incoming_session_id: request_affinity.incoming_session_id,
+            thread_id: request_affinity.fallback_session_id,
             incoming_window_id: incoming_headers.window_id(),
             incoming_subagent: incoming_headers.subagent(),
             incoming_parent_thread_id: incoming_headers.parent_thread_id(),

@@ -4,16 +4,75 @@ use crate::service_runtime::{
     spawn_service_with_addr, stop_service, validate_initialize_response, wait_for_service_ready,
 };
 use std::fs;
+use std::io;
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::Duration;
 
 const SERVICE_READY_RETRIES: usize = 40;
 const SERVICE_READY_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
+const BIND_PROBE_RETRIES: usize = 10;
+const BIND_PROBE_DELAY: Duration = Duration::from_millis(120);
 const MODEL_CACHE_FILE: &str = "models_cache.json";
 const ENV_CODEX_HOME: &str = "CODEX_HOME";
 const ENV_HOME: &str = "HOME";
 const ENV_USERPROFILE: &str = "USERPROFILE";
 const ENV_HOMEDRIVE: &str = "HOMEDRIVE";
 const ENV_HOMEPATH: &str = "HOMEPATH";
+
+fn is_addr_in_use(err: &io::Error) -> bool {
+    err.kind() == io::ErrorKind::AddrInUse
+}
+
+fn probe_bind_target_available(bind_addr: &str, connect_addr: &str) -> Result<(), String> {
+    let trimmed = bind_addr.trim();
+    if trimmed.len() > "localhost:".len()
+        && trimmed[..("localhost:".len())].eq_ignore_ascii_case("localhost:")
+    {
+        let port = &trimmed["localhost:".len()..];
+        let v4 = TcpListener::bind(format!("127.0.0.1:{port}"));
+        let v6 = TcpListener::bind(format!("[::1]:{port}"));
+        if v4.as_ref().is_err_and(is_addr_in_use) || v6.as_ref().is_err_and(is_addr_in_use) {
+            return Err(format!("端口已被占用: {connect_addr}"));
+        }
+        v4.map_err(|err| format!("检查服务端口失败 ({connect_addr}): {err}"))?;
+        if let Err(err) = v6 {
+            log::debug!("IPv6 loopback bind probe skipped for {}: {}", connect_addr, err);
+        }
+        return Ok(());
+    }
+
+    TcpListener::bind(trimmed)
+        .map(|_| ())
+        .map_err(|err| {
+            if is_addr_in_use(&err) {
+                format!("端口已被占用: {connect_addr}")
+            } else {
+                format!("检查服务端口失败 ({connect_addr}): {err}")
+            }
+        })
+}
+
+pub(crate) fn ensure_bind_target_available(
+    bind_addr: &str,
+    connect_addr: &str,
+) -> Result<(), String> {
+    let mut last_err = None;
+    for attempt in 0..=BIND_PROBE_RETRIES {
+        match probe_bind_target_available(bind_addr, connect_addr) {
+            Ok(()) => return Ok(()),
+            Err(err) => {
+                last_err = Some(err);
+                if attempt < BIND_PROBE_RETRIES {
+                    thread::sleep(BIND_PROBE_DELAY);
+                }
+            }
+        }
+    }
+
+    Err(last_err.unwrap_or_else(|| format!("检查服务端口失败 ({connect_addr})")))
+}
 
 fn parse_codex_cli_version(user_agent: &str) -> Option<String> {
     let marker = "codex_cli_rs/";
@@ -104,12 +163,8 @@ fn write_models_cache_file(
     let parent = cache_path
         .parent()
         .ok_or_else(|| format!("无法定位模型缓存目录: {}", cache_path.display()))?;
-    fs::create_dir_all(parent).map_err(|err| {
-        format!(
-            "创建 Codex 模型缓存目录失败 ({}): {err}",
-            parent.display()
-        )
-    })?;
+    fs::create_dir_all(parent)
+        .map_err(|err| format!("创建 Codex 模型缓存目录失败 ({}): {err}", parent.display()))?;
 
     let payload = serde_json::json!({
         "fetched_at": fetched_at,
@@ -173,19 +228,23 @@ pub async fn service_start(app: tauri::AppHandle, addr: String) -> Result<(), St
             bind_addr
         );
         stop_service();
+        ensure_bind_target_available(&bind_addr, &connect_addr)?;
         spawn_service_with_addr(&app, &bind_addr, &connect_addr)?;
-        wait_for_service_ready(&connect_addr, SERVICE_READY_RETRIES, SERVICE_READY_RETRY_DELAY).map_err(
-            |err| {
-                log::error!(
-                    "service health check failed at {} (bind {}): {}",
-                    connect_addr,
-                    bind_addr,
-                    err
-                );
-                stop_service();
-                format!("service not ready at {connect_addr}: {err}")
-            },
+        wait_for_service_ready(
+            &connect_addr,
+            SERVICE_READY_RETRIES,
+            SERVICE_READY_RETRY_DELAY,
         )
+        .map_err(|err| {
+            log::error!(
+                "service health check failed at {} (bind {}): {}",
+                connect_addr,
+                bind_addr,
+                err
+            );
+            stop_service();
+            format!("service not ready at {connect_addr}: {err}")
+        })
     })
     .await
     .map_err(|err| format!("service_start task failed: {err}"))?
@@ -359,13 +418,14 @@ mod tests {
         )
         .expect("write cache");
 
-        let payload: serde_json::Value = serde_json::from_slice(
-            &fs::read(&cache_path).expect("read cache file"),
-        )
-        .expect("parse cache file");
+        let payload: serde_json::Value =
+            serde_json::from_slice(&fs::read(&cache_path).expect("read cache file"))
+                .expect("parse cache file");
 
         assert_eq!(
-            payload.get("client_version").and_then(|value| value.as_str()),
+            payload
+                .get("client_version")
+                .and_then(|value| value.as_str()),
             Some("0.120.0")
         );
         assert_eq!(

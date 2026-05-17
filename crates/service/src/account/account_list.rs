@@ -1,6 +1,9 @@
 use codexmanager_core::{
     rpc::types::{AccountListParams, AccountListResult, AccountSummary},
-    storage::{Account, AccountMetadata, AccountSubscription, Token, UsageSnapshotRecord},
+    storage::{
+        Account, AccountMetadata, AccountQuotaCapacityOverride, AccountSubscription, Token,
+        UsageSnapshotRecord,
+    },
 };
 use std::collections::HashMap;
 
@@ -300,6 +303,7 @@ fn to_account_summary_with_reason(
     acc: Account,
     preferred: bool,
     status_reason: Option<String>,
+    has_token: bool,
     plan_type: Option<String>,
     plan_type_raw: Option<String>,
     has_subscription: Option<bool>,
@@ -308,6 +312,9 @@ fn to_account_summary_with_reason(
     subscription_renews_at: Option<i64>,
     note: Option<String>,
     tags: Option<String>,
+    model_slugs: Vec<String>,
+    quota_capacity_primary_window_tokens: Option<i64>,
+    quota_capacity_secondary_window_tokens: Option<i64>,
 ) -> AccountSummary {
     AccountSummary {
         id: acc.id,
@@ -317,6 +324,7 @@ fn to_account_summary_with_reason(
         sort: acc.sort,
         status: acc.status,
         status_reason,
+        has_token,
         plan_type,
         plan_type_raw,
         has_subscription,
@@ -325,6 +333,9 @@ fn to_account_summary_with_reason(
         subscription_renews_at,
         note,
         tags,
+        model_slugs,
+        quota_capacity_primary_window_tokens,
+        quota_capacity_secondary_window_tokens,
     }
 }
 
@@ -378,6 +389,24 @@ fn to_account_summaries(
         .into_iter()
         .map(|item| (item.account_id.clone(), item))
         .collect::<HashMap<String, AccountSubscription>>();
+    let source_assignments = storage
+        .list_quota_source_model_assignments()
+        .map_err(|err| format!("load quota source assignments failed: {err}"))?;
+    let mut model_slugs_by_account: HashMap<String, Vec<String>> = HashMap::new();
+    for assignment in source_assignments {
+        if assignment.source_kind == "openai_account" {
+            model_slugs_by_account
+                .entry(assignment.source_id)
+                .or_default()
+                .push(assignment.model_slug);
+        }
+    }
+    let quota_overrides = storage
+        .list_account_quota_capacity_overrides()
+        .map_err(|err| format!("load account quota capacity overrides failed: {err}"))?
+        .into_iter()
+        .map(|item| (item.account_id.clone(), item))
+        .collect::<HashMap<String, AccountQuotaCapacityOverride>>();
     Ok(accounts
         .into_iter()
         .map(|account| {
@@ -389,6 +418,8 @@ fn to_account_summaries(
                 &usages,
                 &metadata,
                 &subscriptions,
+                &model_slugs_by_account,
+                &quota_overrides,
             )
         })
         .collect())
@@ -417,13 +448,21 @@ fn map_account_summary(
     usages: &HashMap<String, UsageSnapshotRecord>,
     metadata: &HashMap<String, AccountMetadata>,
     subscriptions: &HashMap<String, AccountSubscription>,
+    model_slugs_by_account: &HashMap<String, Vec<String>>,
+    quota_overrides: &HashMap<String, AccountQuotaCapacityOverride>,
 ) -> AccountSummary {
     let account_id = account.id.clone();
     let status_reason = status_reasons.get(&account_id).cloned();
     let preferred = preferred_account_id.is_some_and(|id| id == account_id);
     let plan = resolve_account_plan(tokens.get(&account_id), usages.get(&account_id));
+    let has_token = tokens.contains_key(&account_id);
     let account_metadata = metadata.get(&account_id);
     let subscription = subscriptions.get(&account_id);
+    let model_slugs = model_slugs_by_account
+        .get(&account_id)
+        .cloned()
+        .unwrap_or_default();
+    let quota_override = quota_overrides.get(&account_id);
     let (fallback_plan_type, plan_type_raw) = match plan {
         Some(value) => (Some(value.normalized), value.raw),
         None => (None, None),
@@ -435,6 +474,7 @@ fn map_account_summary(
         account,
         preferred,
         status_reason,
+        has_token,
         plan_type,
         plan_type_raw,
         subscription.map(|value| value.has_subscription),
@@ -443,6 +483,9 @@ fn map_account_summary(
         subscription.and_then(|value| value.renews_at),
         account_metadata.and_then(|value| value.note.clone()),
         account_metadata.and_then(|value| value.tags.clone()),
+        model_slugs,
+        quota_override.and_then(|value| value.primary_window_tokens),
+        quota_override.and_then(|value| value.secondary_window_tokens),
     )
 }
 

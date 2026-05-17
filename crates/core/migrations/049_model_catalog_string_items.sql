@@ -11,22 +11,6 @@ CREATE TABLE IF NOT EXISTS model_catalog_string_items (
 CREATE INDEX IF NOT EXISTS idx_model_catalog_string_items_scope_kind_sort
   ON model_catalog_string_items(scope, item_kind, slug, sort_index, value);
 
-INSERT OR REPLACE INTO model_catalog_string_items (scope, slug, item_kind, value, sort_index, updated_at)
-SELECT scope, slug, 'additional_speed_tiers', value, sort_index, updated_at
-FROM model_catalog_additional_speed_tiers;
-
-INSERT OR REPLACE INTO model_catalog_string_items (scope, slug, item_kind, value, sort_index, updated_at)
-SELECT scope, slug, 'experimental_supported_tools', value, sort_index, updated_at
-FROM model_catalog_experimental_supported_tools;
-
-INSERT OR REPLACE INTO model_catalog_string_items (scope, slug, item_kind, value, sort_index, updated_at)
-SELECT scope, slug, 'input_modalities', value, sort_index, updated_at
-FROM model_catalog_input_modalities;
-
-INSERT OR REPLACE INTO model_catalog_string_items (scope, slug, item_kind, value, sort_index, updated_at)
-SELECT scope, slug, 'available_in_plans', value, sort_index, updated_at
-FROM model_catalog_available_in_plans;
-
 DROP TABLE IF EXISTS model_catalog_additional_speed_tiers;
 DROP TABLE IF EXISTS model_catalog_experimental_supported_tools;
 DROP TABLE IF EXISTS model_catalog_input_modalities;

@@ -71,12 +71,12 @@ Thanks to the following sponsors for supporting CodexManager.
   </tr>
   <tr>
     <td align="center" valign="middle" width="180">
-      <a href="https://gzxsy.vip/">
+      <a href="https://gzxsy.vip/register?aff=eapz">
         <img src="../../assets/images/sponsors/xingsiyan.jpg" alt="Xing Si Yan Gateway" width="120" />
       </a>
     </td>
     <td valign="top">
-      <strong>Xing Si Yan Gateway</strong> provides stable relay and supporting services for Claude Code, Codex, and similar model-call scenarios. It is suitable for developers and teams that require highly available APIs, convenient onboarding, and continuous delivery support. Visit the <a href="https://gzxsy.vip/">official site</a> for the latest plans.
+      <strong>Xing Si Yan Gateway</strong> provides stable relay and supporting services for Claude Code, Codex, and similar model-call scenarios. It is suitable for developers and teams that require highly available APIs, convenient onboarding, and continuous delivery support. Visit the <a href="https://gzxsy.vip/register?aff=eapz">official site</a> for the latest plans.
     </td>
   </tr>
 </table>

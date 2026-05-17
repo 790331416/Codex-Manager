@@ -39,6 +39,7 @@ fn new_test_dir(prefix: &str) -> PathBuf {
 struct RpcTestContext {
     _env_lock: MutexGuard<'static, ()>,
     _db_path_guard: EnvGuard,
+    _auto_usage_refresh_guard: EnvGuard,
     dir: PathBuf,
 }
 
@@ -60,9 +61,12 @@ impl RpcTestContext {
         let db_path = dir.join("codexmanager.db");
         let db_path_guard =
             EnvGuard::set("CODEXMANAGER_DB_PATH", db_path.to_string_lossy().as_ref());
+        let auto_usage_refresh_guard =
+            EnvGuard::set("CODEXMANAGER_AUTO_USAGE_REFRESH_AFTER_ACCOUNT_ADD", "0");
         Self {
             _env_lock: env_lock,
             _db_path_guard: db_path_guard,
+            _auto_usage_refresh_guard: auto_usage_refresh_guard,
             dir,
         }
     }
@@ -1752,6 +1756,107 @@ fn rpc_chatgpt_auth_tokens_login_read_logout_roundtrip() {
     assert_eq!(account.status, "inactive");
 }
 
+#[test]
+fn rpc_chatgpt_auth_tokens_login_enqueues_usage_refresh() {
+    let ctx = RpcTestContext::new("rpc-chatgpt-auth-tokens-login-auto-usage-refresh");
+    let access_token = build_access_token(
+        "sub-usage-refresh",
+        "usage-refresh@example.com",
+        "org-usage-refresh",
+        "pro",
+    );
+    let subscription_response = serde_json::json!({
+        "id": "sub-record-usage-refresh",
+        "plan_type": "plus",
+        "active_until": "2026-05-06T03:31:29Z",
+        "next_credit_grant_update": "2026-04-20T03:31:29Z",
+        "will_renew": true
+    });
+    let usage_response = serde_json::json!({
+        "rate_limit": {
+            "primary_window": {
+                "used_percent": 25.0,
+                "limit_window_seconds": 18000,
+                "reset_at": 1776655889
+            },
+            "secondary_window": {
+                "used_percent": 10.0,
+                "limit_window_seconds": 604800,
+                "reset_at": 1778038289
+            }
+        }
+    });
+    let (usage_base_url, request_rx, request_join) = start_mock_usage_refresh_server(
+        serde_json::to_string(&subscription_response)
+            .expect("serialize auto usage refresh subscription response"),
+        serde_json::to_string(&usage_response).expect("serialize auto usage response"),
+    );
+    let _auto_refresh_guard =
+        EnvGuard::set("CODEXMANAGER_AUTO_USAGE_REFRESH_AFTER_ACCOUNT_ADD", "1");
+    let _usage_base_url_guard = EnvGuard::set("CODEXMANAGER_USAGE_BASE_URL", &usage_base_url);
+
+    let login_req = JsonRpcRequest {
+        id: 46.into(),
+        method: "account/login/start".to_string(),
+        params: Some(serde_json::json!({
+            "type": "chatgptAuthTokens",
+            "accessToken": access_token.clone(),
+            "chatgptAccountId": "org-usage-refresh"
+        })),
+        trace: None,
+    };
+    let login_json = serde_json::to_string(&login_req).expect("serialize login");
+    let login_server = codexmanager_service::start_one_shot_server().expect("start server");
+    let login_resp = post_rpc(&login_server.addr, &login_json);
+    let login_result = login_resp.get("result").expect("login result");
+    assert_eq!(
+        login_result.get("type").and_then(|value| value.as_str()),
+        Some("chatgptAuthTokens")
+    );
+
+    let first_request = request_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("receive auto subscription request");
+    let second_request = request_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("receive auto usage request");
+    request_join.join().expect("join auto usage refresh server");
+
+    assert_eq!(
+        first_request.path,
+        "/subscriptions?account_id=org-usage-refresh"
+    );
+    assert_eq!(
+        first_request.authorization.as_deref(),
+        Some(format!("Bearer {access_token}").as_str())
+    );
+    assert_eq!(first_request.chatgpt_account_id, None);
+    assert_eq!(second_request.path, "/api/codex/usage");
+    assert_eq!(
+        second_request.authorization.as_deref(),
+        Some(format!("Bearer {access_token}").as_str())
+    );
+    assert_eq!(
+        second_request.chatgpt_account_id.as_deref(),
+        Some("org-usage-refresh")
+    );
+
+    let storage = Storage::open(ctx.db_path()).expect("open db");
+    let account_id = storage
+        .list_accounts()
+        .expect("list accounts")
+        .into_iter()
+        .find(|account| account.chatgpt_account_id.as_deref() == Some("org-usage-refresh"))
+        .map(|account| account.id)
+        .expect("account id");
+    let snapshot = storage
+        .latest_usage_snapshot_for_account(&account_id)
+        .expect("find usage snapshot")
+        .expect("usage snapshot exists");
+    assert_eq!(snapshot.used_percent, Some(25.0));
+    assert_eq!(snapshot.secondary_used_percent, Some(10.0));
+}
+
 /// 函数 `rpc_chatgpt_auth_tokens_refresh_updates_access_token`
 ///
 /// 作者: gaohongshun
@@ -2443,6 +2548,72 @@ fn rpc_requestlog_list_and_summary_support_pagination() {
     );
 }
 
+#[test]
+fn rpc_apikey_create_accepts_custom_key_and_rejects_duplicate() {
+    let _ctx = RpcTestContext::new("rpc-apikey-create-custom-key");
+    let custom_key = "sk-codexmanager-custom-fixed";
+    let server = codexmanager_service::start_one_shot_server().expect("start server");
+    let create_req = JsonRpcRequest {
+        id: 80.into(),
+        method: "apikey/create".to_string(),
+        params: Some(serde_json::json!({
+            "name": "custom-key",
+            "modelSlug": "gpt-5.4",
+            "customKey": custom_key
+        })),
+        trace: None,
+    };
+    let create_json = serde_json::to_string(&create_req).expect("serialize apikey create");
+    let create_resp = post_rpc(&server.addr, &create_json);
+    let create_result = create_resp.get("result").expect("create result");
+    assert_eq!(
+        create_result.get("key").and_then(|value| value.as_str()),
+        Some(custom_key)
+    );
+    let key_id = create_result
+        .get("id")
+        .and_then(|value| value.as_str())
+        .expect("created key id")
+        .to_string();
+
+    let read_server = codexmanager_service::start_one_shot_server().expect("start server");
+    let read_req = JsonRpcRequest {
+        id: 81.into(),
+        method: "apikey/readSecret".to_string(),
+        params: Some(serde_json::json!({ "id": key_id })),
+        trace: None,
+    };
+    let read_json = serde_json::to_string(&read_req).expect("serialize apikey read secret");
+    let read_resp = post_rpc(&read_server.addr, &read_json);
+    assert_eq!(
+        read_resp
+            .get("result")
+            .and_then(|value| value.get("key"))
+            .and_then(|value| value.as_str()),
+        Some(custom_key)
+    );
+
+    let duplicate_server = codexmanager_service::start_one_shot_server().expect("start server");
+    let duplicate_req = JsonRpcRequest {
+        id: 82.into(),
+        method: "apikey/create".to_string(),
+        params: Some(serde_json::json!({
+            "name": "duplicate-custom-key",
+            "customKey": custom_key
+        })),
+        trace: None,
+    };
+    let duplicate_json =
+        serde_json::to_string(&duplicate_req).expect("serialize duplicate apikey create");
+    let duplicate_resp = post_rpc(&duplicate_server.addr, &duplicate_json);
+    let duplicate_result = duplicate_resp.get("result").expect("duplicate result");
+    let message = duplicate_result
+        .get("error")
+        .and_then(|value| value.as_str())
+        .expect("duplicate error message");
+    assert!(message.contains("custom api key already exists"));
+}
+
 /// 函数 `rpc_apikey_update_model_updates_name_with_chinese`
 ///
 /// 作者: gaohongshun
@@ -2633,4 +2804,222 @@ fn rpc_accepts_loopback_origin() {
         ],
     );
     assert_eq!(status, 200, "unexpected status {status}: {body}");
+}
+
+#[test]
+fn rpc_account_manager_assigns_key_and_bills_wallet() {
+    let ctx = RpcTestContext::new("rpc-account-manager-billing");
+
+    let call_rpc_response =
+        |id: i64, method: &str, params: Option<serde_json::Value>| -> serde_json::Value {
+            let server = codexmanager_service::start_one_shot_server().expect("start server");
+            let req = JsonRpcRequest {
+                id: id.into(),
+                method: method.to_string(),
+                params,
+                trace: None,
+            };
+            let json = serde_json::to_string(&req).expect("serialize");
+            post_rpc(&server.addr, &json)
+        };
+    let call_rpc =
+        |id: i64, method: &str, params: Option<serde_json::Value>| -> serde_json::Value {
+            call_rpc_response(id, method, params)
+                .get("result")
+                .cloned()
+                .expect("result")
+        };
+
+    let settings = call_rpc(
+        200,
+        "appSettings/set",
+        Some(serde_json::json!({
+            "webAuthMode": "accounts",
+            "distributionEnabled": true
+        })),
+    );
+    assert_eq!(settings["webAuthMode"], "accounts");
+    assert_eq!(settings["distributionEnabled"], true);
+
+    let user = call_rpc(
+        201,
+        "accountManager/users/create",
+        Some(serde_json::json!({
+            "username": "member-one",
+            "password": "password123",
+            "displayName": "Member One",
+            "role": "member"
+        })),
+    );
+    let user_id = user["id"].as_str().expect("user id").to_string();
+    assert_eq!(user["wallet"]["availableCreditMicros"], 0);
+
+    let admin = call_rpc(
+        206,
+        "accountManager/users/create",
+        Some(serde_json::json!({
+            "username": "admin-one",
+            "password": "password123",
+            "displayName": "Admin One",
+            "role": "admin"
+        })),
+    );
+    let admin_id = admin["id"].as_str().expect("admin id").to_string();
+    assert!(admin["wallet"].is_null());
+
+    let api_key = call_rpc(
+        202,
+        "apikey/create",
+        Some(serde_json::json!({
+            "name": "Member key",
+            "modelSlug": "gpt-5",
+            "rotationStrategy": "account_rotation"
+        })),
+    );
+    let key_id = api_key["id"].as_str().expect("key id").to_string();
+
+    let storage = Storage::open(ctx.db_path()).expect("open storage");
+    storage.init().expect("init storage");
+    codexmanager_service::wallet_precheck_for_api_key(&storage, &key_id)
+        .expect("unassigned api key should bypass wallet precheck");
+    let missing_owner_charge = codexmanager_service::wallet_charge_for_request(
+        &storage,
+        Some(&key_id),
+        41,
+        0.25,
+        None,
+        Some("default"),
+        None,
+    )
+    .expect("unassigned api key should bypass wallet charge");
+    assert!(missing_owner_charge.is_none());
+
+    let admin_owner_error = call_rpc(
+        207,
+        "accountManager/apiKeyOwners/set",
+        Some(serde_json::json!({
+            "keyId": key_id,
+            "ownerKind": "user",
+            "ownerUserId": admin_id.as_str()
+        })),
+    );
+    assert!(admin_owner_error["error"]
+        .as_str()
+        .expect("admin owner error")
+        .contains("管理员账号不参与额度分发"));
+
+    let admin_wallet_error = call_rpc(
+        208,
+        "accountManager/wallet/topUp",
+        Some(serde_json::json!({
+            "ownerKind": "user",
+            "ownerId": admin_id.as_str(),
+            "amountCreditMicros": 1_000_000
+        })),
+    );
+    assert!(admin_wallet_error["error"]
+        .as_str()
+        .expect("admin wallet error")
+        .contains("管理员账号不参与额度分发"));
+
+    let owner = call_rpc(
+        203,
+        "accountManager/apiKeyOwners/set",
+        Some(serde_json::json!({
+            "keyId": key_id,
+            "ownerKind": "user",
+            "ownerUserId": user_id
+        })),
+    );
+    assert_eq!(owner["ownerKind"], "user");
+    assert_eq!(owner["ownerUserId"], user_id);
+
+    let zero_balance_error = codexmanager_service::wallet_precheck_for_api_key(&storage, &key_id)
+        .expect_err("zero wallet should fail");
+    assert!(zero_balance_error.contains("余额不足"));
+
+    let wallet = call_rpc(
+        204,
+        "accountManager/wallet/topUp",
+        Some(serde_json::json!({
+            "ownerKind": "User",
+            "ownerId": user_id,
+            "amountCreditMicros": 1_000_000,
+            "note": "test top up"
+        })),
+    );
+    assert_eq!(wallet["ownerKind"], "user");
+    assert_eq!(wallet["availableCreditMicros"], 1_000_000);
+    codexmanager_service::wallet_precheck_for_api_key(&storage, &key_id)
+        .expect("funded wallet should pass");
+
+    let rules = call_rpc(
+        209,
+        "quota/billingRule/upsert",
+        Some(serde_json::json!({
+            "name": "Member markup",
+            "multiplierMillis": 1500,
+            "apiKeyId": key_id.as_str(),
+            "priority": 10
+        })),
+    );
+    let rule_id = rules["items"]
+        .as_array()
+        .expect("billing rules")
+        .iter()
+        .find(|item| item["name"].as_str() == Some("Member markup"))
+        .and_then(|item| item["id"].as_str())
+        .expect("rule id")
+        .to_string();
+
+    let charge_entry = codexmanager_service::wallet_charge_for_request(
+        &storage,
+        Some(&key_id),
+        42,
+        0.25,
+        None,
+        Some("default"),
+        Some(r#"{"test":true}"#.to_string()),
+    )
+    .expect("charge wallet")
+    .expect("charge entry");
+    assert_eq!(
+        charge_entry.pricing_rule_id.as_deref(),
+        Some(rule_id.as_str())
+    );
+    let charged_wallet = storage
+        .find_wallet_by_owner("user", &user_id)
+        .expect("read wallet")
+        .expect("wallet");
+    assert_eq!(charged_wallet.balance_credit_micros, 625_000);
+
+    let owners = call_rpc(205, "accountManager/apiKeyOwners/list", None);
+    let owners = owners.as_array().expect("owners array");
+    assert!(owners
+        .iter()
+        .any(|item| item["keyId"].as_str() == Some(key_id.as_str())));
+
+    let distribution_error = call_rpc(
+        210,
+        "accountManager/distribution/set",
+        Some(serde_json::json!({
+            "enabled": false
+        })),
+    );
+    assert!(distribution_error["error"]
+        .as_str()
+        .expect("distribution error")
+        .contains("distribution_mode_locked"));
+
+    let auth_mode_error = call_rpc(
+        211,
+        "accountManager/webAuthMode/set",
+        Some(serde_json::json!({
+            "mode": "none"
+        })),
+    );
+    assert!(auth_mode_error["error"]
+        .as_str()
+        .expect("auth mode error")
+        .contains("account_billing_mode_locked"));
 }
