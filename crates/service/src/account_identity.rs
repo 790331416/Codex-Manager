@@ -74,6 +74,76 @@ fn same_normalized(lhs: Option<&str>, rhs: Option<&str>) -> bool {
     normalize_non_empty(lhs) == normalize_non_empty(rhs)
 }
 
+fn account_matches_subject_key(account_id: &str, subject_key: &str) -> bool {
+    let normalized_subject = subject_key.trim();
+    if normalized_subject.is_empty() {
+        return false;
+    }
+    account_id == normalized_subject
+        || account_id
+            .strip_prefix(normalized_subject)
+            .map(|suffix| suffix.starts_with("::"))
+            .unwrap_or(false)
+}
+
+fn find_subject_scope_match<'a>(
+    accounts: &[&'a Account],
+    subject_key: &str,
+    chatgpt_account_id: Option<&String>,
+    workspace_id: Option<&String>,
+) -> Option<String> {
+    let subject_matches = accounts
+        .iter()
+        .copied()
+        .filter(|acc| account_matches_subject_key(&acc.id, subject_key))
+        .collect::<Vec<_>>();
+    if subject_matches.is_empty() {
+        return None;
+    }
+    let has_workspace_scoped_account = subject_matches
+        .iter()
+        .any(|acc| normalize_non_empty(acc.workspace_id.as_deref()).is_some());
+
+    if let Some(workspace) = workspace_id {
+        let workspace_matches = subject_matches
+            .iter()
+            .copied()
+            .filter(|acc| same_normalized(acc.workspace_id.as_deref(), Some(workspace.as_str())))
+            .collect::<Vec<_>>();
+        if workspace_matches.len() == 1 {
+            return Some(workspace_matches[0].id.clone());
+        }
+        if !workspace_matches.is_empty() {
+            return None;
+        }
+        if has_workspace_scoped_account {
+            return None;
+        }
+    }
+
+    if let Some(chatgpt_id) = chatgpt_account_id {
+        let chatgpt_matches = subject_matches
+            .iter()
+            .copied()
+            .filter(|acc| {
+                same_normalized(acc.chatgpt_account_id.as_deref(), Some(chatgpt_id.as_str()))
+            })
+            .collect::<Vec<_>>();
+        if chatgpt_matches.len() == 1 {
+            return Some(chatgpt_matches[0].id.clone());
+        }
+        if !chatgpt_matches.is_empty() {
+            return None;
+        }
+    }
+
+    if subject_matches.len() == 1 {
+        return Some(subject_matches[0].id.clone());
+    }
+
+    None
+}
+
 /// 函数 `build_scope_identity_hint`
 ///
 /// 作者: gaohongshun
@@ -184,6 +254,14 @@ where
         }) {
             return Some(found.id.clone());
         }
+        if let Some(subject_key) = normalize_non_empty(fallback_subject_key) {
+            return find_subject_scope_match(
+                &accounts,
+                subject_key,
+                preferred_chatgpt.as_ref(),
+                preferred_workspace.as_ref(),
+            );
+        }
         return None;
     }
 
@@ -202,6 +280,16 @@ where
         }) {
             return Some(found.id.clone());
         }
+        if let Some(subject_key) = normalize_non_empty(fallback_subject_key) {
+            if let Some(found) = find_subject_scope_match(
+                &accounts,
+                subject_key,
+                preferred_chatgpt.as_ref(),
+                preferred_workspace.as_ref(),
+            ) {
+                return Some(found);
+            }
+        }
     }
 
     if let Some(workspace) = preferred_workspace.as_ref() {
@@ -210,6 +298,16 @@ where
             .find(|acc| same_normalized(acc.workspace_id.as_deref(), Some(workspace.as_str())))
         {
             return Some(found.id.clone());
+        }
+        if let Some(subject_key) = normalize_non_empty(fallback_subject_key) {
+            if let Some(found) = find_subject_scope_match(
+                &accounts,
+                subject_key,
+                preferred_chatgpt.as_ref(),
+                preferred_workspace.as_ref(),
+            ) {
+                return Some(found);
+            }
         }
     }
 

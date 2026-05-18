@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const TEST_ID_TOKEN_WS_A: &str = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzdWItMSIsImVtYWlsIjoidGVzdEBleGFtcGxlLmNvbSIsIndvcmtzcGFjZV9pZCI6IndzLWEiLCJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiY2dwdC0xIn19.sig";
+const TEST_ID_TOKEN_WS_A_DRIFTED_CGPT: &str = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzdWItMSIsImVtYWlsIjoidGVzdEBleGFtcGxlLmNvbSIsIndvcmtzcGFjZV9pZCI6IndzLWEiLCJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiY2dwdC0yIn19.sig";
 const TEST_ID_TOKEN_META: &str = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzdWItMSIsImVtYWlsIjoibWV0YUBleGFtcGxlLmNvbSIsIndvcmtzcGFjZV9pZCI6IndzLW1ldGEiLCJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiY2dwdC1tZXRhIn19.sig";
 const TEST_ACCESS_TOKEN_TEAM_USER_A: &str = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzdWJqZWN0LWEiLCJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoidGVhbS0xIiwiY2hhdGdwdF91c2VyX2lkIjoidXNlci1hIn19.sig";
 const TEST_ACCESS_TOKEN_TEAM_USER_B: &str = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzdWJqZWN0LWIiLCJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoidGVhbS0xIiwiY2hhdGdwdF91c2VyX2lkIjoidXNlci1iIn19.sig";
@@ -341,6 +342,47 @@ fn import_single_item_reuses_existing_login_account_by_scope_identity() {
 ///
 /// # 返回
 /// 无
+#[test]
+fn import_single_item_reuses_existing_subject_account_when_chatgpt_id_drifts() {
+    let storage = Storage::open_in_memory().expect("open in memory");
+    storage.init().expect("init");
+    let now = now_ts();
+    let existing_id = build_account_storage_id("sub-1", Some("cgpt-1"), Some("ws-a"), None);
+    storage
+        .insert_account(&Account {
+            id: existing_id.clone(),
+            label: "existing".to_string(),
+            issuer: "https://auth.openai.com".to_string(),
+            chatgpt_account_id: Some("cgpt-1".to_string()),
+            workspace_id: Some("ws-a".to_string()),
+            group_name: Some("LOGIN".to_string()),
+            sort: 0,
+            status: "active".to_string(),
+            created_at: now,
+            updated_at: now,
+        })
+        .expect("insert existing account");
+
+    let mut idx = ExistingAccountIndex::build(&storage).expect("build index");
+    let item = json!({
+        "tokens": {
+            "access_token": "access.import",
+            "id_token": TEST_ID_TOKEN_WS_A_DRIFTED_CGPT,
+            "refresh_token": "refresh.import",
+            "account_id": "legacy-import-id"
+        }
+    });
+
+    let created = import_single_item(&storage, &mut idx, &item, 1).expect("import item");
+    assert!(!created);
+
+    let accounts = storage.list_accounts().expect("list accounts");
+    assert_eq!(accounts.len(), 1);
+    assert_eq!(accounts[0].id, existing_id);
+    assert_eq!(accounts[0].chatgpt_account_id.as_deref(), Some("cgpt-2"));
+    assert_eq!(accounts[0].workspace_id.as_deref(), Some("ws-a"));
+}
+
 #[test]
 fn import_single_item_distinguishes_team_members_sharing_account_hint() {
     let storage = Storage::open_in_memory().expect("open in memory");

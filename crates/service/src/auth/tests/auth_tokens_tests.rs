@@ -118,6 +118,70 @@ fn pick_existing_account_matches_exact_workspace_scope() {
 /// # 返回
 /// 无
 #[test]
+fn pick_existing_account_matches_subject_scoped_workspace_when_chatgpt_id_drifts() {
+    let storage = Storage::open_in_memory().expect("open in memory");
+    storage.init().expect("init");
+    let scoped_id = build_account_storage_id("sub-1", Some("cgpt-old"), Some("ws-a"), None);
+    storage
+        .insert_account(&build_account(&scoped_id, Some("cgpt-old"), Some("ws-a")))
+        .expect("insert scoped account");
+
+    let found = pick_existing_account_id_by_identity(
+        storage.list_accounts().expect("list accounts").iter(),
+        Some("cgpt-new"),
+        Some("ws-a"),
+        Some("sub-1"),
+        None,
+    );
+
+    assert_eq!(found.as_deref(), Some(scoped_id.as_str()));
+}
+
+#[test]
+fn pick_existing_account_does_not_reuse_subject_scope_when_workspace_changes() {
+    let storage = Storage::open_in_memory().expect("open in memory");
+    storage.init().expect("init");
+    let scoped_id = build_account_storage_id("sub-1", Some("cgpt-1"), Some("ws-a"), None);
+    storage
+        .insert_account(&build_account(&scoped_id, Some("cgpt-1"), Some("ws-a")))
+        .expect("insert scoped account");
+
+    let found = pick_existing_account_id_by_identity(
+        storage.list_accounts().expect("list accounts").iter(),
+        Some("cgpt-1"),
+        Some("ws-b"),
+        Some("sub-1"),
+        None,
+    );
+
+    assert_eq!(found, None);
+}
+
+#[test]
+fn pick_existing_account_keeps_subject_scoped_accounts_ambiguous_without_scope_hint() {
+    let storage = Storage::open_in_memory().expect("open in memory");
+    storage.init().expect("init");
+    let scoped_a = build_account_storage_id("sub-1", Some("cgpt-1"), Some("ws-a"), None);
+    let scoped_b = build_account_storage_id("sub-1", Some("cgpt-2"), Some("ws-b"), None);
+    storage
+        .insert_account(&build_account(&scoped_a, Some("cgpt-1"), Some("ws-a")))
+        .expect("insert scoped a");
+    storage
+        .insert_account(&build_account(&scoped_b, Some("cgpt-2"), Some("ws-b")))
+        .expect("insert scoped b");
+
+    let found = pick_existing_account_id_by_identity(
+        storage.list_accounts().expect("list accounts").iter(),
+        Some("cgpt-3"),
+        None,
+        Some("sub-1"),
+        None,
+    );
+
+    assert_eq!(found, None);
+}
+
+#[test]
 fn build_account_storage_id_keeps_login_scope_shape() {
     let account_id = build_account_storage_id("sub-1", Some("cgpt-1"), Some("ws-a"), None);
     assert_eq!(account_id, "sub-1::cgpt=cgpt-1|ws=ws-a");
