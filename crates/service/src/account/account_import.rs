@@ -173,6 +173,18 @@ impl ExistingAccountIndex {
         if let Some(account_id) = self.by_subject_storage_id.get(&scoped_id) {
             return Some(account_id.clone());
         }
+        let subject_candidates = self.subject_identity_candidates(subject_key);
+        if !subject_candidates.is_empty() {
+            if let Some(found) = pick_existing_account_id_by_identity(
+                subject_candidates.into_iter(),
+                chatgpt_account_id,
+                workspace_id,
+                Some(subject_key),
+                None,
+            ) {
+                return Some(found);
+            }
+        }
         if chatgpt_account_id.is_some() || workspace_id.is_some() {
             return None;
         }
@@ -214,6 +226,42 @@ impl ExistingAccountIndex {
     ///
     /// # 返回
     /// 无
+    fn subject_identity_candidates<'a>(&'a self, subject_key: &str) -> Vec<&'a Account> {
+        let mut seen_account_ids = HashSet::new();
+        let mut candidates = Vec::new();
+
+        for (account_id, account) in &self.by_id {
+            if account_id == subject_key
+                || account_id
+                    .strip_prefix(subject_key)
+                    .map(|suffix| suffix.starts_with("::"))
+                    .unwrap_or(false)
+            {
+                if seen_account_ids.insert(account_id.clone()) {
+                    candidates.push(account);
+                }
+            }
+        }
+
+        for (scoped_id, account_id) in &self.by_subject_storage_id {
+            if scoped_id == subject_key
+                || scoped_id
+                    .strip_prefix(subject_key)
+                    .map(|suffix| suffix.starts_with("::"))
+                    .unwrap_or(false)
+            {
+                if !seen_account_ids.insert(account_id.clone()) {
+                    continue;
+                }
+                if let Some(account) = self.by_id.get(account_id) {
+                    candidates.push(account);
+                }
+            }
+        }
+
+        candidates
+    }
+
     fn index_token_subject(&mut self, account: &Account, token: &Token) {
         let Some(subject_account_id) = extract_import_subject_account_id(
             None,
@@ -753,27 +801,33 @@ fn import_single_item_with_account_id(
         Some(subject) if subject.starts_with(IMPORT_TOKEN_SUBJECT_PREFIX) => None,
         _ => Some(token_fingerprint.as_str()),
     };
-    let account_id = index
-        .find_existing_account_id(
-            chatgpt_account_id.as_deref(),
-            workspace_id.as_deref(),
-            fallback_subject_key.as_deref(),
-            payload.account_id_hint.as_deref(),
-        )
-        .unwrap_or(resolve_logical_account_id(
+    let matched_existing_account_id = index.find_existing_account_id(
+        chatgpt_account_id.as_deref(),
+        workspace_id.as_deref(),
+        fallback_subject_key.as_deref(),
+        payload.account_id_hint.as_deref(),
+    );
+    let account_id = match matched_existing_account_id.clone() {
+        Some(account_id) => account_id,
+        None => resolve_logical_account_id(
             &payload,
             subject_account_id.as_deref(),
             chatgpt_account_id.as_deref(),
             workspace_id.as_deref(),
             token_fingerprint_for_id,
-        )?);
-    let account_id = resolve_scoped_account_id_collision(
-        &index.by_id,
-        account_id,
-        chatgpt_account_id.as_deref(),
-        workspace_id.as_deref(),
-        &payload,
-    );
+        )?,
+    };
+    let account_id = if matched_existing_account_id.is_some() {
+        account_id
+    } else {
+        resolve_scoped_account_id_collision(
+            &index.by_id,
+            account_id,
+            chatgpt_account_id.as_deref(),
+            workspace_id.as_deref(),
+            &payload,
+        )
+    };
 
     let label = meta
         .label
